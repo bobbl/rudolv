@@ -50,3 +50,6 @@ Another small test program for the UART is at `sw/uart/`
 
 
 
+License
+-------
+Licensed under the ISC licence (similar to the MIT/Expat license).
