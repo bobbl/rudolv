@@ -29,22 +29,23 @@ Run Dhrystone benchmark from picorv32 repository wirh Icarus Verilog
 
 Dhrystone results
 
-|                      | DMIPS/MHz | Dhrystones/s/MHz | CPI   |
-| -------------------- | --------- | ---------------- | ----- |
-| `riscv-dhrystone`    | 0.75      | 1362             | 1,66  |
-| `picorv32-dhrystone` | 0.968     | 1702             | 1,497 |
+|                      | DMIPS/MHz | Dhrystones/s/MHz | CPI   | cycles per Dhrystone |
+| -------------------- | --------- | ---------------- | ----- | -------------------- |
+| `riscv-dhrystone`    | 0.75      | 1362             | 1,66  | 734                  |
+| `picorv32-dhrystone` | 0.968     | 1702             | 1,497 | 587                  |
 
 Synthesize with icestorm and flash to a Lattice iCE40 UltraPlus MDP board.
-The boards must be configured to flash and run FPGA U4.
-It runs at 24 MHz with 2544 LCs, 20 BRAMs (could be reduced to 5) and 2 SPRAMs.
+The board must be configured to flash and run FPGA U4.
+It runs at 24 MHz with 2558 LCs, 20 BRAMs (could be reduced to 6) and 2 SPRAMs:
 
-    make DEVICE=up5k ARACHNE_DEVICE="5k -P uwg30" clean arachne prog
+    make -C sw/bootloader/
+    make -C scripts/icestorm/ DEVICE=up5k ARACHNE_DEVICE="5k -P uwg30" clean arachne prog
 
 Now processor in the FPGA executes the bootloader and waits for data from the UART.
 To run the Dhrystone benchmark (riscv-tests version) on the FPGA use:
 
     make -C sw/uart-dhrystone/
-    sw/bootloader/send_image.sh /dev/ttyUSB1 sw/uart-dhrystone/dhrystone.hex
+    sw/bootloader/send_image.sh /dev/ttyUSB1 sw/uart-dhrystone/dhrystone.bin
 
 Another small test program for the UART is at `sw/uart/`
 

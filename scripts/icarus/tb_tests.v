@@ -1,4 +1,4 @@
-module tb_clock;
+module tb_tests;
 
 
     reg clk = 1;

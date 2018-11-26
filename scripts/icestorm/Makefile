@@ -20,7 +20,10 @@ all: arachne timing
 code.hex: $(CODE)
 	cp $(CODE) code.hex
 
-%.blif: %.v $(VERILOG_FILES) code.hex ../../sw/uart/bootloader.hex
+hx8k.blif: hx8k.v $(VERILOG_FILES) code.hex
+	$(YOSYS) -ql $(DEVICE).log -p 'synth_ice40 -top top -blif $@' $< $(VERILOG_FILES)
+
+up5k.blif: up5k.v $(VERILOG_FILES) ../../sw/bootloader/bootloader.hex
 	$(YOSYS) -ql $(DEVICE).log -p 'synth_ice40 -top top -blif $@' $< $(VERILOG_FILES)
 
 %.json: %.v $(VERILOG_FILES)

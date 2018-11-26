@@ -1,15 +1,8 @@
 //`define DISABLE_ADD
 
-
-`ifndef BARREL_SHIFTER
-`define BARREL_SHIFTER ShifterMux
-`endif
-
 `ifndef EQUAL_COMPERATOR
 `define EQUAL_COMPERATOR EqualParAdd
 `endif
-
-
 
 module RegisterSet(
     input clk, 
@@ -24,7 +17,7 @@ module RegisterSet(
     reg [31:0] regs [0:31];
 
     initial begin
-        regs[0] = 0;
+        regs[0] <= 0;
     end
 
     always @(posedge clk) begin
@@ -64,77 +57,6 @@ module ArithAdder(
     assign sum = a + b + {31'b0, carry};
 `endif
 endmodule
-
-
-
-
-
-
-
-// ---------------------------------------------------------------------
-// barrel shifter alternatives
-// ---------------------------------------------------------------------
-
-
-// do not shift anyway (only for debug purposes)
-module ShifterDisable(
-    input [62:0] a,
-    input [4:0] b,
-    input enable, // return 0 if not enabled
-    output [31:0] result
-);
-    assign result = enable ? a[31:0] : 0;
-endmodule
-
-
-// let the tool infere the best shifter (often not the best solution)
-module ShifterInfere(
-    input [62:0] a,
-    input [4:0] b,
-    input enable, // return 0 if not enabled
-    output [31:0] result
-);
-    assign result = enable ? (a >> b) : 0;
-endmodule
-
-
-// shift by 5 sequential muxes (fastest for HX8K)
-module ShifterMux(
-    input [62:0] a,
-    input [4:0] b,
-    input enable, // return 0 if not enabled
-    output [31:0] result
-);
-    wire [46:0] Shift1 = b[4] ? a[62:16] : a[46:0];
-    wire [38:0] Shift2 = b[3] ? Shift1[46:8]  : Shift1[38:0];
-    wire [34:0] Shift3 = b[2] ? Shift2[38:4]  : Shift2[34:0];
-    wire [32:0] Shift4 = b[1] ? Shift3[34:2]  : Shift3[32:0];
-    wire [31:0] Shift5 = b[0] ? Shift4[32:1]  : Shift4[31:0];
-    assign result = enable ? Shift5 : 0;
-endmodule
-
-
-// 4 logic levels by parallelising the last shift by 0, 1, 2 or 3
-module ShifterOr(
-    input [62:0] a,
-    input [4:0] b,
-    input enable, // return 0 if not enabled
-    output [31:0] result
-);
-    wire Sh0 = (b[1:0] == 2'b00);
-    wire Sh1 = (b[1:0] == 2'b01);
-    wire Sh2 = (b[1:0] == 2'b10);
-    wire Sh3 = (b[1:0] == 2'b11);
-
-    wire [46:0] Shift16   = b[4] ? a[62:16] : a[46:0];
-    wire [38:0] Shift8    = enable ? (b[3] ? Shift16[46:8] : Shift16[38:0]) : 0;
-    wire [31:0] Shift4_3  = Sh3 ? (b[2] ? Shift8[38:7] : Shift8[34:3]) : 0;
-    wire [31:0] Shift4_2  = Sh2 ? (b[2] ? Shift8[37:6] : Shift8[33:2]) : 0;
-    wire [31:0] Shift4_1  = Sh1 ? (b[2] ? Shift8[36:5] : Shift8[32:1]) : 0;
-    wire [31:0] Shift4_0  = Sh0 ? (b[2] ? Shift8[35:4] : Shift8[31:0]) : 0;
-    assign result = Shift4_0 | Shift4_1 | Shift4_2 | Shift4_3;
-endmodule
-
 
 
 
@@ -241,10 +163,8 @@ endmodule
 
 
 
-
-
 module Pipeline #(
-    parameter [31:0] START_PC = 32'h_0000_0000
+    parameter [31:0] START_PC = 0
 ) (
     input  clk,
     input  rstn,

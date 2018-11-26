@@ -4,7 +4,7 @@ module top (
     input uart_rx,
     output uart_tx
 );
-    localparam integer CLOCK_RATE = 12_000_000;
+    localparam integer CLOCK_RATE = 24_000_000;
     localparam integer BAUD_RATE = 115200;
 
 
