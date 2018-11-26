@@ -1,0 +1,7 @@
+code.hex
+*.asc
+*.bin
+*.blif
+*.json
+*.log
+*.rpt

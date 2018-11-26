@@ -1,0 +1,8 @@
+# upduino
+#set_io uart_rx 14
+#set_io uart_tx 15
+#set_io flash_ss 16
+
+# MDP board
+set_io uart_rx A2
+set_io uart_tx A1
