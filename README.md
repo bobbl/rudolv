@@ -28,7 +28,7 @@ Run Dhrystone benchmark from picorv32 repository wirh Icarus Verilog
 
 Dhrystone results
 
-|                      | DMIPS/MHz | Dhrystones/s/MHz | CPI   |                                                        |
+|                      | DMIPS/MHz | Dhrystones/s/MHz | CPI   |
 | -------------------- | --------- | ---------------- | ----- |
 | `riscv-dhrystone`    | 0.75      | 1362             | 1,66  |
 | `picorv32-dhrystone` | 0.968     | 1702             | 1,497 |
