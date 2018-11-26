@@ -1,7 +1,8 @@
 # Danzig
 
-A 32 bit RISC-V processor for the RISC-V SoftCPU Contest https://riscv.org/2018contest/ 
-Using only open source software.
+A 32 bit RISC-V processor with 5 pipeline stages for the 
+RISC-V SoftCPU Contest https://riscv.org/2018contest/. 
+Only open source software is used for testing and synthesis. 
 
 Edit `config.mk` if the tools are not in the search path.
 
@@ -34,7 +35,7 @@ Dhrystone results
 | `picorv32-dhrystone` | 0.968     | 1702             | 1,497 |
 
 Synthesize with icestorm and flash to a Lattice iCE40 UltraPlus MDP board.
-The boards must be configured to flash and run FPGA U4.
+The boards must be configured to flash and run FPGA U4. It works at 24 MHz.
 
     make DEVICE=up5k ARACHNE_DEVICE="5k -P uwg30" clean arachne prog
 

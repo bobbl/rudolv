@@ -1,4 +1,4 @@
-// wrapper for iCE40 UP5K upduino 2 board
+// wrapper for iCE40 UP5K MDP board
 
 module top (
     input uart_rx,
@@ -6,7 +6,6 @@ module top (
 );
     localparam integer CLOCK_RATE = 12_000_000;
     localparam integer BAUD_RATE = 115200;
-//    localparam integer BAUD_RATE = 9600;
 
 
     wire clk;
@@ -15,7 +14,7 @@ module top (
         .CLKHFEN(1'b1),
         .CLKHFPU(1'b1),
         .CLKHF(clk)   );
-    defparam OSCInst0.CLKHF_DIV = "0b10"; // 48 MHz / 4
+    defparam OSCInst0.CLKHF_DIV = "0b01"; // 48 MHz / 2
 
 
 
@@ -42,8 +41,6 @@ module top (
     wire [31:0] mem_rdata_boot;
     wire [31:0] MemRData = ff_SelMain ? mem_rdata_main : 
         (ff_SelBoot ? mem_rdata_boot : ff_MappedRData);
-//    wire [31:0] MemRData = ff_SelBoot ? mem_rdata_boot : 
-//        ff_MappedRData;
 
     always @(posedge clk) begin
         if (~rstn) begin
@@ -121,19 +118,6 @@ module SPRAMMemory (
     input [13:0] addr,
     output reg [31:0] rdata
 );
-/*
-    reg [31:0] mem [0:8*2048-1];
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (wren) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
-*/
 
 SB_SPRAM256KA spram_lo(
     .DATAIN     (wdata[15:0]),
@@ -176,7 +160,6 @@ module BRAMMemory (
 
     initial begin
         $readmemh("../../sw/bootloader/bootloader.hex", mem);
-//        $readmemh("code.hex", mem);
     end
 
     always @(posedge clk) begin
