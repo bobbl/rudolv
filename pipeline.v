@@ -1,8 +1,11 @@
+/* verilator lint_off INITIALDLY */
+
 //`define DISABLE_ADD
 
 `ifndef EQUAL_COMPERATOR
 `define EQUAL_COMPERATOR EqualParAdd
 `endif
+
 
 module RegisterSet(
     input clk, 
