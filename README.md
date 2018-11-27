@@ -1,8 +1,15 @@
 # Danzig
 
-A 32 bit RISC-V processor with 5 pipeline stages for the 
-RISC-V SoftCPU Contest https://riscv.org/2018contest/. 
-Only open source software is used for testing and synthesis. 
+A 32 bit RISC-V processor with 5 pipeline stages for the
+[RISC-V SoftCPU Contest](https://riscv.org/2018contest/).
+Only open source software is used for testing and synthesis.
+
+| chip resources  | used | unit      |                             |
+|:--------------- | ----:| ---------:|:--------------------------- |
+| LCs             | 2552 |      LUT4 | 40% for CSRs                |
+| BRAM            |    6 |   4 KiBit | registerset and boot loader |
+| SPRAM           |    2 | 256 KiBit | main memory                 |
+| clock frequency |   24 |       MHz |                             |
 
 Edit `config.mk` if the tools are not in the search path.
 
@@ -36,18 +43,25 @@ Dhrystone results
 
 Synthesize with icestorm and flash to a Lattice iCE40 UltraPlus MDP board.
 The board must be configured to flash and run FPGA U4.
-It runs at 24 MHz with 2558 LCs, 20 BRAMs (could be reduced to 6) and 2 SPRAMs:
 
     make -C sw/bootloader/
     make -C scripts/icestorm/ DEVICE=up5k ARACHNE_DEVICE="5k -P uwg30" clean arachne prog
 
-Now processor in the FPGA executes the bootloader and waits for data from the UART.
-To run the Dhrystone benchmark (riscv-tests version) on the FPGA use:
+Now the processor within the FPGA executes the bootloader and waits for data
+from the UART. To run the Dhrystone benchmark (riscv-tests version) on the FPGA
+use:
 
     make -C sw/uart-dhrystone/
     sw/bootloader/send_image.sh /dev/ttyUSB1 sw/uart-dhrystone/dhrystone.bin
 
-Another small test program for the UART is at `sw/uart/`
+Another small test program for the UART is at `sw/uart/uart.c`. To see the
+output of the programs use a terminal emulater like picocom at 115200 baud:
+
+    picocom -b 115200 --imap lfcrlf /dev/ttyUSB1
+
+The processor logic and the bootloader are written to the flash memory. Hence, the
+processor can be reset with switch SW2 of the MDP board. After switching it back and
+forth, `send_image.sh` can be used again to start a new program on the processor.
 
 
 

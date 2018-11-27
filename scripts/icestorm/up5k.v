@@ -97,7 +97,7 @@ module top (
         .wren   (mem_wren_boot),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
-        .addr   (mem_addr[12:2]),
+        .addr   (mem_addr[9:2]),
         .rdata  (mem_rdata_boot)
     );
 
@@ -153,10 +153,10 @@ module BRAMMemory (
     input wren,
     input [3:0] wmask,
     input [31:0] wdata,
-    input [10:0] addr,
+    input [7:0] addr,
     output reg [31:0] rdata
 );
-    reg [31:0] mem [0:2047];
+    reg [31:0] mem [0:255];
 
     initial begin
         $readmemh("../../sw/bootloader/bootloader.hex", mem);
