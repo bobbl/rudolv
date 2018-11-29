@@ -1,4 +1,4 @@
-include ../../config.mk
+include ../../config_default.mk
 
 FILES_S = $(wildcard src/*.S)
 FILES_HEX = $(FILES_S:src/%.S=build/%.hex)

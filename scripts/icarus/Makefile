@@ -1,4 +1,4 @@
-include ../../config.mk
+include ../../config_default.mk
 
 PATH_TESTS = ../../sw/tests
 PATH_COMPLIANCE = ../../sw/compliance

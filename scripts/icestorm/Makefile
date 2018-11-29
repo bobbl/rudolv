@@ -6,7 +6,7 @@
 # make DEVICE=up5k nextpnr prog
 #       Route with nextpnr for the up5k chip and program it via usb
 
-include ../../config.mk
+include ../../config_default.mk
 
 CODE = ../../sw/tests/build/simple.hex
 DEVICE = hx8k

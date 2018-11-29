@@ -1,4 +1,4 @@
-include ../../config.mk
+include ../../config_default.mk
 #RV32_PREFIX=/home/bobbl/git/rcmc/tools/rv64i/bin/riscv64-unknown-elf-
 
 SRC_FILES = crt.S syscalls.c dhrystone_main.c dhrystone.c

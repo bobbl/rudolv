@@ -1,4 +1,4 @@
-include ../../config.mk
+include ../../config_default.mk
 
 USE_MYSTDLIB = 1
 OBJS = dhry_1.o dhry_2.o stdlib.o
