@@ -12,4 +12,4 @@ ICEPACK = icepack
 ICETIME = icetime
 ICEPROG = iceprog
 
--include config.mk
+-include $(dir $(abspath $(lastword $(MAKEFILE_LIST))))config.mk
