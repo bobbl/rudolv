@@ -3,19 +3,23 @@
 # make DEVICE=hx8k arachne timing
 #       Route with arachne for the hx8k chip and print the clock rate estimate
 #
-# make DEVICE=up5k nextpnr prog
-#       Route with nextpnr for the up5k chip and program it via usb
+# make DEVICE=up5k PACKAGE=uwg30 nextpnr prog
+#       Route with nextpnr for the up5k chip (package uwg30) and program it via usb
 
 include ../../config_default.mk
 
 CODE = ../../sw/tests/build/simple.hex
 DEVICE = hx8k
 VERILOG_FILES = ../../pipeline.v
-ARACHNE_DEVICE = $(subst up,,$(subst hx,,$(subst lp,,$(DEVICE))))
+ARACHNE_DEVICE = 8k
 
+include device_$(DEVICE).mk
 
 
 all: arachne timing
+
+%.hex:
+	$(MAKE) -C `dirname $@`
 
 code.hex: $(CODE)
 	cp $(CODE) code.hex
@@ -43,11 +47,10 @@ prog: $(DEVICE).bin
 timing: $(DEVICE).rpt
 
 arachne $(DEVICE).asc: $(DEVICE).pcf $(DEVICE).blif
-#	$(ARACHNE) -d $(ARACHNE_DEVICE) -P uwg30 -o $(DEVICE).asc -p $(DEVICE).pcf $(DEVICE).blif
-	$(ARACHNE) -d $(ARACHNE_DEVICE) -o $(DEVICE).asc -p $(DEVICE).pcf $(DEVICE).blif
+	$(ARACHNE) -d $(ARACHNE_DEVICE) $(ARACHNE_PACKAGE) -o $(DEVICE).asc -p $(DEVICE).pcf $(DEVICE).blif
 
 nextpnr: $(DEVICE).json $(DEVICE).pcf
-	$(NEXTPNR_ICE40) --$(DEVICE) --package uwg30 --json $(DEVICE).json --pcf $(DEVICE).pcf --asc $(DEVICE).asc
+	$(NEXTPNR_ICE40) --$(DEVICE) $(NEXTPNR_PACKAGE) --json $(DEVICE).json --pcf $(DEVICE).pcf --asc $(DEVICE).asc
 
 
 clean:

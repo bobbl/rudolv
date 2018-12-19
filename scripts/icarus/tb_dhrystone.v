@@ -60,7 +60,7 @@ module tb_clock;
     end
 
     initial begin
-        #20000000 $display("***** TIMEOUT"); $stop;
+        #4000000 $display("***** TIMEOUT"); $stop;
     end
 
 

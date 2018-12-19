@@ -190,6 +190,7 @@ module Pipeline #(
 
     // fetch
     reg [WORD_WIDTH-1:0] f_PC;
+    reg f_ChangeInsn;
 
     // decode
     reg [31:0] d_Insn;
@@ -234,6 +235,7 @@ module Pipeline #(
     reg e_Carry;
     reg e_WrEn;
     reg [4:0] e_WrNo;
+    reg e_Kill;
 
     // mem stage
     reg m_Kill; // to decode and execute stage
@@ -396,12 +398,9 @@ module Pipeline #(
 
 
     // LUT4 at level 1
-    wire Kill = m_Kill | d_Bubble;
 
     wire BranchOpcode = (d_Insn[6:3]==4'b1100);
     wire BEQOpcode = ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
-//    wire BranchAndJAL = d_Insn[6] & d_Insn[5] & ~d_Insn[4];
-//    wire BranchOrJAL = ((d_Insn[3] & d_Insn[2]) | (~d_Insn[3] & ~d_Insn[2] & d_Insn[12]));
 
     wire JALorJALR = (d_Insn[6:4]==3'b110 && d_Insn[2]==1'b1); // JAL or JALR
     wire UpperOpcode = (~d_Insn[6] && d_Insn[4:2]==3'b101);
@@ -412,16 +411,16 @@ module Pipeline #(
     wire MemOpcode = (~d_Insn[6] && d_Insn[4:2]==0); // ST or LD
 
     // LUT4 at level 2
-    wire InsnJALR      = BranchOpcode & d_Insn[2]               & ~Kill;
-    wire InsnBEQ       = BranchOpcode & BEQOpcode               & ~Kill;
-    wire InsnBLTorBLTU = BranchOpcode & ~d_Insn[2] & d_Insn[14] & ~Kill;
-    wire InsnBLTU      = BranchOpcode & ~d_Insn[2] & d_Insn[13] & ~Kill;
-//    wire InvertBranch  = BranchAndJAL & BranchOrJAL             & ~Kill;
+    wire InsnJALR      = BranchOpcode & d_Insn[2]               & ~m_Kill;
+    wire InsnBEQ       = BranchOpcode & BEQOpcode               & ~m_Kill;
+    wire InsnBLTorBLTU = BranchOpcode & ~d_Insn[2] & d_Insn[14] & ~m_Kill;
+    wire InsnBLTU      = BranchOpcode & ~d_Insn[2] & d_Insn[13] & ~m_Kill;
+//    wire InvertBranch  = BranchAndJAL & BranchOrJAL             & ~m_Kill;
     wire InvertBranch  = 
         (   d_Insn[6:2]==5'b11011 // JAL
         ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
         || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)) // BNE or BGE or BGEU
-        & ~Kill; // TODO
+        & ~m_Kill; // TODO
 
     wire ReturnPC    = JALorJALR; // JAL or JALR
     wire ReturnImm   = UpperOpcode & d_Insn[5]; // LUI
@@ -436,8 +435,8 @@ module Pipeline #(
     wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) ? d_Insn[13:12] : 2'b01;
 
-    wire MemAccess       = MemOpcode & ~Kill;
-    wire MemWr           = MemOpcode & ~Kill & d_Insn[5];
+    wire MemAccess       = MemOpcode & ~m_Kill;
+    wire MemWr           = MemOpcode & ~m_Kill & d_Insn[5];
     wire [1:0] MemWidth  = MemOpcode ? d_Insn[13:12] : 2'b11;
     wire MemUnsignedLoad = d_Insn[14];
 
@@ -484,7 +483,7 @@ module Pipeline #(
     wire DestReg0 = (d_Insn[11:8] == 4'b0000);
     // level 2
     wire EnableWrite = ArithOrUpper | JumpOpcode | (MemOpcode & ~d_Insn[5]);
-    wire DisableWrite = (DestReg0 & ~d_Insn[7]) | Kill;
+    wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
     // level 3
     // OPTIMIZE
     wire WrEn = (EnableWrite | (CsrOp!=2'b00)) & ~DisableWrite ;
@@ -698,21 +697,22 @@ module Pipeline #(
 
     // wire Exception = e_Exception | e_InsnMRET | ExceptionJALR;
     // much faster:
+    wire ExecuteKill = m_Kill | e_Kill;
     wire AddrBit1 = e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]);
     wire Exception = e_Exception | e_InsnMRET | (e_InsnJALR & AddrBit1);
 
     wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
     wire Xor31 = (~e_InsnBEQ & (e_InvertBranch ^ Lower)) | (Exception);
     wire And31 = (e_InsnBLTorBLTU) & (e_A[31] ^ e_B[31]);
-    wire Jump31 = ~m_Kill & (Xor31 ^ (And31 & Sum[31]));
-    wire JumpBEQ = ~m_Kill & e_InsnBEQ & (e_InvertBranch ^ Equal);
+    wire Jump31 = ~ExecuteKill & (Xor31 ^ (And31 & Sum[31]));
+    wire JumpBEQ = ~ExecuteKill & e_InsnBEQ & (e_InvertBranch ^ Equal);
     wire Jump = Jump31 | JumpBEQ;
 
 
     // OPTIMIZE
     wire [WORD_WIDTH-1:0] JumpTarget = ExceptionJALR ? d_CsrMTVEC : e_Target;
 
-    wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~m_Kill)
+    wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~ExecuteKill/*m_Kill*/)
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
     wire [WORD_WIDTH-1:0] MemAddr   = Jump                 ? JumpTarget : NextOrSum;
     wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC       : NextOrSum;
@@ -742,12 +742,35 @@ module Pipeline #(
 
 
 
-    assign mem_wren = e_MemWr & ~m_Kill;
+    assign mem_wren = e_MemWr & ~ExecuteKill;
     assign mem_wmask = MemWriteMask;
     assign mem_wdata = MemWriteData;
     assign mem_addr = MemAddr;
-    wire [31:0] OtherInsn = Bubble ? 32'h4013 : d_DelayedInsn;
-    wire [31:0] Insn = ((d_Bubble | d_SaveFetch) & ~m_Kill) ? OtherInsn : mem_rdata;
+
+
+    wire [31:0] NextInsn = Bubble ? 32'h4013 : d_DelayedInsn;
+    wire [31:0] Insn = (Bubble | ((d_Bubble | d_SaveFetch) & ~m_Kill)) ? NextInsn : mem_rdata;
+
+/* TRY: 
+    To reduce logic in the fetch stage, some can be moved to the decode stage.
+    But then there is a dependency on the critical path via Jump.
+    An additional register f_ChangeInsn is required for ChangeInsn.
+
+    wire ChangeInsn = ((Bubble | SaveFetch) & 
+        ~(Jump | (e_InsnJALR & ~m_Kill)));
+        // The second part is necessary, because when there is a jump in the
+        // execute stage, ChangeInsn and MemAddr are set before the end of
+        // the cycle. During the next cycle, the instruction word of the branch
+        // target arrives and f_ChangeInsn must be false to forward it to the
+        // decode stage.
+    wire [31:0] Insn = (Bubble | f_ChangeInsn) ? NextInsn : mem_rdata;
+        // Here, m_Kill indicates that there is a branch and we have to take the
+        // instruction from the memory as it is the first instruction from the
+        // branch target. Therefore clearing in the case of m_Kill is wrong here.
+*/
+
+
+
 
     wire [4:0] RdNo1 = Insn[19:15];
     wire [4:0] RdNo2 = Insn[24:20];
@@ -793,19 +816,21 @@ module Pipeline #(
             e_InsnBLTorBLTU <= 0;
             e_InvertBranch <= 1;
             m_Kill <= 0;
+            e_Kill <= 0;
             e_PCImm <= 0;
             e_Target <= START_PC;
 
         end else begin
 
+//            f_ChangeInsn <= ChangeInsn;
 
-        // fetch
-        d_Insn <= Insn;
-        d_RdNo1 <= RdNo1;
-        d_RdNo2 <= RdNo2;
-        if (SaveFetch) d_DelayedInsn <= mem_rdata;
-        d_SaveFetch <= SaveFetch;
-        d_Bubble <= Bubble;
+            // fetch
+            d_Insn <= Insn;
+            d_RdNo1 <= RdNo1;
+            d_RdNo2 <= RdNo2;
+            if (SaveFetch) d_DelayedInsn <= mem_rdata;
+            d_SaveFetch <= SaveFetch;
+            d_Bubble <= Bubble;
 
         // decode
         d_PC <= DecodePC;
@@ -839,13 +864,14 @@ module Pipeline #(
 
         e_WrNo <= d_Insn[11:7];
         e_InvertBranch <= InvertBranch;
+        e_Kill <= m_Kill;
 
 
         // execute
-        m_WrEn <= e_WrEn & ~m_Kill;
+        m_WrEn <= e_WrEn & ~ExecuteKill;
         m_WrNo <= e_WrNo;
         m_WrData <= ALUResult;
-        m_Kill <= Jump | (e_InsnJALR & ~m_Kill);
+        m_Kill <= Jump | (e_InsnJALR & ~ExecuteKill/*m_Kill*/);
         m_MemSign <= MemSign;
         m_MemByte <= MemByte;
         f_PC <= FetchPC;
@@ -1020,8 +1046,12 @@ module Pipeline #(
             RegSet.regs[24], RegSet.regs[25], RegSet.regs[26], RegSet.regs[27], 
             RegSet.regs[28], RegSet.regs[29], RegSet.regs[30], RegSet.regs[31]);
 
+        $display("D Bubble=%b SaveFetch=%b ChangeInsn=%b",
+            d_Bubble, d_SaveFetch, f_ChangeInsn);
+
         $display("E a=%h b=%h -> %h",
             e_A, e_B, ALUResult);
+
 
         if (Jump || e_InsnJALR) $display("B jump %h", FetchPC);
 
