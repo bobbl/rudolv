@@ -261,7 +261,7 @@ module Pipeline #(
     reg [3:0] m_Cause;
     reg [WORD_WIDTH-1:0] m_PC;
     reg [WORD_WIDTH-1:0] m_NewMTVAL;
-    reg m_MemMisaligned;
+    reg m_ExceptionMisaligned;
     reg m_ExceptionJALR;
     reg m_Exception;
 
@@ -411,16 +411,14 @@ module Pipeline #(
     wire MemOpcode = (~d_Insn[6] && d_Insn[4:2]==0); // ST or LD
 
     // LUT4 at level 2
-    wire InsnJALR      = BranchOpcode & d_Insn[2]               & ~m_Kill;
-    wire InsnBEQ       = BranchOpcode & BEQOpcode               & ~m_Kill;
-    wire InsnBLTorBLTU = BranchOpcode & ~d_Insn[2] & d_Insn[14] & ~m_Kill;
-    wire InsnBLTU      = BranchOpcode & ~d_Insn[2] & d_Insn[13] & ~m_Kill;
-//    wire InvertBranch  = BranchAndJAL & BranchOrJAL             & ~m_Kill;
+    wire InsnJALR      = BranchOpcode & d_Insn[2];
+    wire InsnBEQ       = BranchOpcode & BEQOpcode;
+    wire InsnBLTorBLTU = BranchOpcode & ~d_Insn[2] & d_Insn[14];
+    wire InsnBLTU      = BranchOpcode & ~d_Insn[2] & d_Insn[13];
     wire InvertBranch  = 
         (   d_Insn[6:2]==5'b11011 // JAL
         ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
-        || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)) // BNE or BGE or BGEU
-        & ~m_Kill; // TODO
+        || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)); // BNE or BGE or BGEU
 
     wire ReturnPC    = JALorJALR; // JAL or JALR
     wire ReturnImm   = UpperOpcode & d_Insn[5]; // LUI
@@ -435,8 +433,8 @@ module Pipeline #(
     wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) ? d_Insn[13:12] : 2'b01;
 
-    wire MemAccess       = MemOpcode & ~m_Kill;
-    wire MemWr           = MemOpcode & ~m_Kill & d_Insn[5];
+    wire MemAccess       = MemOpcode;
+    wire MemWr           = MemOpcode & d_Insn[5];
     wire [1:0] MemWidth  = MemOpcode ? d_Insn[13:12] : 2'b11;
     wire MemUnsignedLoad = d_Insn[14];
 
@@ -445,7 +443,7 @@ module Pipeline #(
     wire CsrOpcode = (d_Insn[13] | d_Insn[12]) & d_Insn[5] & SysOpcode;
     wire PrivOpcode = d_Insn[5] & (d_Insn[14:12]==0);
 
-    wire MemOrCsr  = (MemOpcode | CsrOpcode) & ~m_Kill;
+    wire MemOrCsr  = (MemOpcode | CsrOpcode);
     wire SaveFetch =  (d_Bubble | (MemOrCsr & ~d_SaveFetch)) & ~m_Kill;
     wire Bubble    = (~d_Bubble & MemOrCsr) & ~m_Kill;
 
@@ -458,23 +456,26 @@ module Pipeline #(
     wire NegB = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
 
     // OPTIMIZE
-    wire [1:0] CsrOp = (~m_Kill && d_Insn[6:2]==5'b11100) ? d_Insn[13:12] : 2'b00;
+    wire [1:0] CsrOp = (d_Insn[6:2]==5'b11100) ? d_Insn[13:12] : 2'b00;
     wire ExceptionStaticJump =
         ((d_Insn[6:2]==5'b11011) & d_Insn[21]) |
             // JAL with unaligned offset
         ((d_Insn[6:2]==5'b11000) & d_Insn[8]);
             // branch with unaligned offset
 
+    wire ExceptionMisaligned = e_MemAccess & ~e_Kill & MemMisaligned;
 
     wire DecodeException = 
             (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
                 // from decode: EBREAK or ECALL
 //            (ExceptionStaticJump) |
                 // from decode: JAL or brnach with unaligned offset
-            (e_MemAccess & MemMisaligned);
+            ExceptionMisaligned;
                 // from execute: misaligned memory access 
                 // -> exception in execute stage of following instruction bubble
     wire InsnMRET  = SysOpcode & PrivOpcode & ~d_Insn[22] & d_Insn[21];
+
+
 
 
     // level 1
@@ -871,7 +872,7 @@ module Pipeline #(
         m_WrEn <= e_WrEn & ~ExecuteKill;
         m_WrNo <= e_WrNo;
         m_WrData <= ALUResult;
-        m_Kill <= Jump | (e_InsnJALR & ~ExecuteKill/*m_Kill*/);
+        m_Kill <= Jump | (e_InsnJALR & ~ExecuteKill);
         m_MemSign <= MemSign;
         m_MemByte <= MemByte;
         f_PC <= FetchPC;
@@ -911,14 +912,14 @@ module Pipeline #(
         m_PC <= e_PC;
         m_Cause <= e_Cause;
 
-        m_MemMisaligned <= e_MemAccess & MemMisaligned;
+        m_ExceptionMisaligned <= ExceptionMisaligned;
         m_ExceptionJALR <= ExceptionJALR; 
 
 
         // CSR decode
-        e_Nop <= d_Bubble | m_Kill;
+        e_Nop <= d_Bubble | ExecuteKill;
         e_CounterCycle <= e_CounterCycle + 1;
-        e_CounterRetired <= e_CounterRetired + {63'b0, (~e_Nop & ~m_Kill)};
+        e_CounterRetired <= e_CounterRetired + {63'b0, (~e_Nop & ~ExecuteKill)};
         e_CsrRdData <= 0;
         e_WrCsrMTVEC <= 0;
         e_WrCsrMSCRATCH <= 0;
@@ -992,21 +993,21 @@ module Pipeline #(
 
         // CSR execute
         m_CsrWrData <= 0;
-        case (e_CsrOp & {~m_Kill, ~m_Kill})
+        case (e_CsrOp & {~ExecuteKill, ~ExecuteKill})
             2'b01: m_CsrWrData <= CsrUpdate;
             2'b10: m_CsrWrData <= e_CsrRdData | CsrUpdate;
             2'b11: m_CsrWrData <= e_CsrRdData & ~CsrUpdate;
             default: m_CsrWrData <= CsrUpdate; // don't care
         endcase
-        m_WrCsrMTVEC    <= e_WrCsrMTVEC    & (e_CsrOp[0] | e_CsrOp[1]) & ~m_Kill;
-        m_WrCsrMSCRATCH <= e_WrCsrMSCRATCH & (e_CsrOp[0] | e_CsrOp[1]) & ~m_Kill;
-        m_WrCsrMEPC     <= e_WrCsrMEPC     & (e_CsrOp[0] | e_CsrOp[1]) & ~m_Kill;
-        m_WrCsrMCAUSE   <= e_WrCsrMCAUSE   & (e_CsrOp[0] | e_CsrOp[1]) & ~m_Kill;
-        m_WrCsrMTVAL    <= e_WrCsrMTVAL    & (e_CsrOp[0] | e_CsrOp[1]) & ~m_Kill;
+        m_WrCsrMTVEC    <= e_WrCsrMTVEC    & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
+        m_WrCsrMSCRATCH <= e_WrCsrMSCRATCH & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
+        m_WrCsrMEPC     <= e_WrCsrMEPC     & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
+        m_WrCsrMCAUSE   <= e_WrCsrMCAUSE   & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
+        m_WrCsrMTVAL    <= e_WrCsrMTVAL    & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
 
 
 
-        m_Exception <= ((e_Exception | ExceptionJALR | (e_ExceptionStaticJump & Jump)) & ~ m_Kill);
+        m_Exception <= ((e_Exception | ExceptionJALR | (e_ExceptionStaticJump & Jump)) & ~ExecuteKill);
 
         // CSR write (in memory stage)
         d_CsrMTVEC    <= m_WrCsrMTVEC    ? m_CsrWrData : d_CsrMTVEC;
@@ -1022,7 +1023,7 @@ module Pipeline #(
         m_NewMTVAL <= e_ExceptionStaticJump 
             ? e_PCImm
             : {AddrSum[WORD_WIDTH-1:1], AddrSum[0] & ~e_InsnJALR}; // TRY: AddrOfs[0]
-        if (m_MemMisaligned | m_ExceptionJALR | m_ExceptionStaticJump)
+        if (m_ExceptionMisaligned | m_ExceptionJALR | m_ExceptionStaticJump)
             d_CsrMTVAL <= m_NewMTVAL;
         else if (m_WrCsrMTVAL)
             d_CsrMTVAL <= m_CsrWrData;
