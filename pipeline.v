@@ -10,14 +10,14 @@
 module RegisterSet(
     input clk, 
     input we,
-    input [4:0] wa,
+    input [5:0] wa,
     input [31:0] wd,
-    input [4:0] ra1,
-    input [4:0] ra2,
+    input [5:0] ra1,
+    input [5:0] ra2,
     output reg [31:0] rd1,
     output reg [31:0] rd2
 );
-    reg [31:0] regs [0:31];
+    reg [31:0] regs [0:63];
 
     initial begin
         regs[0] <= 0;
@@ -179,6 +179,7 @@ module Pipeline #(
     input [31:0] mem_rdata
 );
     localparam integer WORD_WIDTH = 32;
+    localparam integer REG_CSR_MTVAL = 32;
 
 
 
@@ -194,8 +195,8 @@ module Pipeline #(
 
     // decode
     reg [31:0] d_Insn;
-    reg [4:0] d_RdNo1;
-    reg [4:0] d_RdNo2;
+    reg [5:0] d_RdNo1;
+    reg [5:0] d_RdNo2;
 
     reg [31:0] d_DelayedInsn;
     reg d_SaveFetch;
@@ -234,20 +235,20 @@ module Pipeline #(
 
     reg e_Carry;
     reg e_WrEn;
-    reg [4:0] e_WrNo;
+    reg [5:0] e_WrNo;
     reg e_Kill;
 
     // mem stage
     reg m_Kill; // to decode and execute stage
     reg m_WrEn;
-    reg [4:0] m_WrNo;
+    reg [5:0] m_WrNo;
     reg [WORD_WIDTH-1:0] m_WrData;
     reg [6:0] m_MemByte;
     reg [7:0] m_MemSign;
 
     // write back
     reg w_WrEn;
-    reg [4:0] w_WrNo;
+    reg [5:0] w_WrNo;
     reg [WORD_WIDTH-1:0] w_WrData;
 
 
@@ -469,7 +470,7 @@ module Pipeline #(
     wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
     // level 3
     // OPTIMIZE
-    wire WrEn = (EnableWrite | (CsrOp!=2'b00)) & ~DisableWrite ;
+    wire DecodeWrEn = (EnableWrite | (CsrOp!=2'b00)) & ~DisableWrite ;
 
 
     // forwarding
@@ -551,19 +552,19 @@ module Pipeline #(
         ((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
         ((e_MemWidth==1) &  AddrOfs[0]);
 
-    wire SignedLB = ~e_MemWidth[1] & ~e_MemWidth[0] & ~e_MemUnsignedLoad;
+    wire SignedLB = ~e_MemWidth[1] & ~e_MemWidth[0] & ~e_MemUnsignedLoad & ~MemMisaligned;
     wire [6:0] MemByte = {
-           e_MemWidth[1] & ~e_MemWidth[0],
-          ~e_MemWidth[1] &  e_MemWidth[0] &  AddrOfs[1],
-         (~e_MemWidth[1] &  e_MemWidth[0] & ~AddrOfs[1]) | (e_MemWidth[1] & ~e_MemWidth[0]),
-         (~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] &  AddrOfs[0]),
-         (~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] & ~AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] &  AddrOfs[1]),
-         (~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] &  AddrOfs[0]),
-         (~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] & ~AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] & ~AddrOfs[1]) | (e_MemWidth[1] & ~e_MemWidth[0])};
+         ~MemMisaligned & (  e_MemWidth[1] & ~e_MemWidth[0]),
+         ~MemMisaligned & ( ~e_MemWidth[1] &  e_MemWidth[0] &  AddrOfs[1]),
+         ~MemMisaligned & ((~e_MemWidth[1] &  e_MemWidth[0] & ~AddrOfs[1])               | (e_MemWidth[1] & ~e_MemWidth[0])),
+         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] &  AddrOfs[0])),
+         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] & ~AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] &  AddrOfs[1])),
+         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] &  AddrOfs[0])),
+         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] & ~AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] & ~AddrOfs[1]) | (e_MemWidth[1] & ~e_MemWidth[0]))};
     wire [7:0] MemSign = {
-        ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] &  AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] &  AddrOfs[1]))  & ~e_MemUnsignedLoad,
+         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] &  AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] &  AddrOfs[1])) & ~e_MemUnsignedLoad,
         SignedLB &  AddrOfs[1] & ~AddrOfs[0],
-        ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] &  AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] & ~AddrOfs[1]))  & ~e_MemUnsignedLoad,
+         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] &  AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] & ~AddrOfs[1])) & ~e_MemUnsignedLoad,
         SignedLB & ~AddrOfs[1] & ~AddrOfs[0],
         SignedLB &  AddrOfs[1] &  AddrOfs[0],
         SignedLB &  AddrOfs[1] & ~AddrOfs[0],
@@ -590,6 +591,11 @@ module Pipeline #(
 
 
     // memory stage
+    wire MemWrEn = m_WrEn | m_ThrowExceptionMTVAL;
+    wire [5:0] MemWrNo = m_ThrowExceptionMTVAL ? REG_CSR_MTVAL : m_WrNo;
+
+    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : m_WrData;
+//    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_WrData;
 
 
     //                                     6         54         3210
@@ -614,22 +620,23 @@ module Pipeline #(
     wire SignHH0 = (m_MemSign[6] ? mem_rdata[23] : 1'b0) |                      // 1 LE
                    (m_MemSign[4] ? mem_rdata[7]  : 1'b0);
     wire [15:0] VectorHH = m_MemByte[6] ? mem_rdata[31:16] : 0;
-    wire [15:0] HiHalf = (SignHH1|SignHH0) ? 16'hFFFF : VectorHH | m_WrData[31:16];
+    wire [15:0] HiHalf = (SignHH1|SignHH0) ? 16'hFFFF : VectorHH | ResultOrMTVAL[31:16];
 
 
     wire SignHB1 = (m_MemSign[3] ? mem_rdata[31] : 1'b0) |                      // 1 LE
                    (m_MemSign[1] ? mem_rdata[15] : 1'b0);
     wire [7:0] SelByteHB = (m_MemByte[5] ? mem_rdata[31:24] : 8'b0) |           // 8 LE
                            (m_MemByte[4] ? mem_rdata[15:8]  : 8'b0);
-    wire [7:0] HiByte = (SignHH0 | SignHB1) ? 8'hFF : (SelByteHB | m_WrData[15:8]);        // 8 LE
+    wire [7:0] HiByte = (SignHH0 | SignHB1) ? 8'hFF : (SelByteHB | ResultOrMTVAL[15:8]);        // 8 LE
     // m_MemSign[0] and m_MemSign[2] unused
 
     wire [7:0] SelByteLB1 = (m_MemByte[3] ? mem_rdata[31:24] : 8'b0) |          // 8 LE
                             (m_MemByte[2] ? mem_rdata[23:16] : 8'b0);
     wire [7:0] SelByteLB0 = (m_MemByte[1] ? mem_rdata[15:8]  : 8'b0) |          // 8 LE
                             (m_MemByte[0] ? mem_rdata[ 7:0]  : 8'b0);
-    wire [7:0] LoByte = SelByteLB1 | SelByteLB0 | m_WrData[7:0];
+    wire [7:0] LoByte = SelByteLB1 | SelByteLB0 | ResultOrMTVAL[7:0];
 
+    // OPTIMIZE
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
 
     wire [WORD_WIDTH-1:0] MemWriteData = {
@@ -778,16 +785,17 @@ module Pipeline #(
 
 
 
-
-    wire [4:0] RdNo1 = Insn[19:15];
-    wire [4:0] RdNo2 = Insn[24:20];
+    wire RdNo1H = 0;
+    wire RdNo2H = 0;
+    wire [5:0] RdNo1 = {RdNo1H, Insn[19:15]};
+    wire [5:0] RdNo2 = {RdNo2H, Insn[24:20]};
     wire [WORD_WIDTH-1:0] RdData1;
     wire [WORD_WIDTH-1:0] RdData2;
 
     RegisterSet RegSet(
         .clk(clk),
-        .we(m_WrEn),
-        .wa(m_WrNo),
+        .we(MemWrEn),
+        .wa(MemWrNo),
         .wd(MemResult),
         .ra1(RdNo1),
         .ra2(RdNo2),
@@ -847,7 +855,7 @@ module Pipeline #(
         e_PCImm <= PCImm;
         e_Target <= Target;
 
-        e_WrEn <= WrEn;
+        e_WrEn <= DecodeWrEn;
         e_InsnJALR <= InsnJALR;
         e_InsnBEQ <= InsnBEQ;
         e_InsnBLTorBLTU <= InsnBLTorBLTU;
@@ -885,8 +893,8 @@ module Pipeline #(
 
 
         // mem stage
-        w_WrEn <= m_WrEn;
-        w_WrNo <= m_WrNo;
+        w_WrEn <= MemWrEn;
+        w_WrNo <= MemWrNo;
         w_WrData <= MemResult;
 
 
@@ -1063,8 +1071,8 @@ module Pipeline #(
 
         if (DirectJump || e_InsnJALR) $display("B jump %h", FetchPC);
 
-        $display("C CYCLE=%h INSTRET=%h",
-            e_CounterCycle, e_CounterRetired);
+        $display("C CYCLE=%h INSTRET=%h MTVAL=%h %h",
+            e_CounterCycle, e_CounterRetired, d_CsrMTVAL, RegSet.regs[REG_CSR_MTVAL]);
 
         if (w_WrEn) 
             $display("W x%d=%h",w_WrNo, w_WrData);

@@ -1,7 +1,9 @@
 // wrapper for iCE40 HX8K breakout board
 module tb_uart;
-    localparam integer CLOCK_RATE = 12_000_000;
-    localparam integer BAUD_RATE = 9600;
+//    localparam integer CLOCK_RATE = 12_000_000;
+//    localparam integer BAUD_RATE = 9600;
+    localparam integer CLOCK_RATE = 1_024;
+    localparam integer BAUD_RATE = 32;
     wire uart_rx = 0;
 
     reg clk = 1;
@@ -17,7 +19,7 @@ module tb_uart;
 `endif
 
     initial begin
-        #20000 $display("***** TIMEOUT"); $stop;
+        #200000 $display("***** TIMEOUT"); $stop;
     end
 
 
