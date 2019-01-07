@@ -266,6 +266,7 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_NewMTVAL;
     reg m_ThrowExceptionMTVAL;
     reg m_ThrowException;
+    reg e_ThrowException;
 
 
     // CSR
@@ -341,12 +342,10 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ImmISU = { // 31 LE
         d_Insn[31],                                                     // 31
         d_Insn[4] ? d_Insn[30:12] : {19{d_Insn[31]}},                   // 30..12
-        d_Insn[31:25],                                                  // 11..5
-        (d_Insn[6:5]==2'b01 ? d_Insn[11:7] : d_Insn[24:20])};           // 4..0
-        //
-        // clear ImmU
-        //d_Insn[4] ? 7'b0000000 : d_Insn[31:25],                         // 11..5
-        //d_Insn[4] ? 5'b0 : (d_Insn[6:5]==2'b01 ? d_Insn[11:7] : d_Insn[24:20])}; // 4..0
+        //d_Insn[31:25],                                                  // 11..5
+        //d_Insn[6:5]==2'b01 ? d_Insn[11:7] : d_Insn[24:20])};            // 4..0
+        d_Insn[4] ? 7'b0000000 : d_Insn[31:25],                         // 11..5
+        d_Insn[4] ? 5'b0 : (d_Insn[6:5]==2'b01 ? d_Insn[11:7] : d_Insn[24:20])}; // 4..0
 
     wire [WORD_WIDTH-1:0] PCImm; // = d_PC + ImmBJU;
     FastAdder AddPCImm(
@@ -419,19 +418,8 @@ module Pipeline #(
         ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
         || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)); // BNE or BGE or BGEU
 
-    wire ReturnPC    = JALorJALR; // JAL or JALR
-    wire ReturnImm   = UpperOpcode & d_Insn[5]; // LUI
-    wire ReturnPCImm = UpperOpcode & ~d_Insn[5]; // AUIPC
 
-    wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12];
-    wire ShiftLeft = ~d_Insn[14];
-    wire ShiftArith = d_Insn[30];
 
-    wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD or SUB
-    wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
-    wire SetUnsigned = d_Insn[12];
-    wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
-    wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) ? d_Insn[13:12] : 2'b01;
 
     wire MemAccess       = MemOpcode;
     wire MemWr           = MemOpcode & d_Insn[5];
@@ -460,8 +448,6 @@ module Pipeline #(
 
 
 
-
-
     // level 1
     wire ArithOrUpper = ~d_Insn[6] & d_Insn[4] & ~d_Insn[3];
     wire JumpOpcode = d_Insn[6] & d_Insn[5] & ~d_Insn[4] & d_Insn[2];
@@ -471,7 +457,74 @@ module Pipeline #(
     wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
     // level 3
     // OPTIMIZE
-    wire DecodeWrEn = (EnableWrite | (CsrOp!=2'b00)) & ~DisableWrite ;
+    wire DecodeWrEn = ((EnableWrite | (CsrOp!=2'b00)) & ~DisableWrite) | m_ThrowException;
+
+
+    // control signals for the ALU that are set in the decode stage
+    wire [1:0] SelLogic = (ArithOpcode & d_Insn[14] & ~m_ThrowException) ? d_Insn[13:12] : 2'b01;
+    wire ReturnPC    = JALorJALR & ~m_ThrowException; // JAL or JALR
+    wire ReturnPCImm = UpperOpcode & ~d_Insn[5] & ~m_ThrowException; // AUIPC
+    wire ReturnImm   = (UpperOpcode & d_Insn[5]) | m_ThrowException; // LUI or set exception causeq
+
+    wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12] & ~m_ThrowException; // ADD or SUB
+    wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13] & ~m_ThrowException; // SLT or SLTU
+    wire SetUnsigned = d_Insn[12];
+    wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
+
+    wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12] & ~m_ThrowException;
+    wire ShiftLeft = ~d_Insn[14];
+    wire ShiftArith = d_Insn[30];
+
+
+
+
+    // ALU
+
+    wire [WORD_WIDTH-1:0] vLogicResult = ~e_SelLogic[1]
+        ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
+        : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
+    wire [WORD_WIDTH-1:0] vPCResult =
+          (e_ReturnPC ? d_PC : 0) 
+        | (e_ReturnPCImm ? e_PCImm : 0);
+    wire [WORD_WIDTH-1:0] vImmOrCsrResult =
+//         {(e_ReturnImm ? e_Imm[31:12] : 20'b0), 12'b0}
+          (e_ReturnImm ? e_Imm : 0)
+        | (e_ReturnCsr ? e_CsrRdData : 0);
+    wire [WORD_WIDTH-1:0] vFastResult = vLogicResult | vPCResult | vImmOrCsrResult;
+    wire [WORD_WIDTH-1:0] vExceptionResult =
+        m_ThrowException ? m_PC : vFastResult;
+
+    wire vSetAnd = e_SetCond & (e_A[31] ^ e_B[31]);
+    wire vSetXor = e_SetCond & ((e_A[31] ^ e_SetUnsigned) & (e_B[31] ^ e_SetUnsigned));
+    wire vCondResultBit = ((Sum[31] & vSetAnd) ^ vSetXor) & ~m_ThrowException;
+    wire vSumOrFast = e_SelSum & ~m_ThrowException;
+    wire [WORD_WIDTH-1:0] vNotShiftResult = {
+        vSumOrFast ? Sum[WORD_WIDTH-1:1] :  vExceptionResult[WORD_WIDTH-1:1],
+        vSumOrFast ? Sum[0]              : (vExceptionResult[0] | vCondResultBit)};
+
+    //                         62|61..32|31|30..0
+    // SLL (funct3 001)        31|30..1 | 0|  -
+    // SRL (funct3 101, i30 0)  -|   -  |31|30..0
+    // SRA (funct3 101, i30 1) 31|  31  |31|30..0
+    wire [62:0] vShift0 = {
+        (~e_ShiftLeft & ~e_ShiftArith) ? 1'b0 : e_A[31],
+        e_ShiftLeft ? e_A[30:1] : (e_ShiftArith ? {30{e_A[31]}} :  30'b0),
+        e_ShiftLeft ? e_A[0] : e_A[31],
+        e_ShiftLeft ? 31'b0 : e_A[30:0]};
+    wire vEnableShift = e_EnShift & ~m_ThrowException;
+
+    wire [46:0] vShift1 = e_B[4] ? vShift0[62:16] : vShift0[46:0];
+    wire [38:0] vShift2 = e_B[3] ? vShift1[46:8]  : vShift1[38:0];
+    wire [34:0] vShift3 = e_B[2] ? vShift2[38:4]  : vShift2[34:0];
+    wire [32:0] vShift4 = vEnableShift ? (e_B[1] ? vShift3[34:2]  : vShift3[32:0]) : 0;
+    wire [WORD_WIDTH-1:0] ALUResult = (e_B[0] ? vShift4[32:1]  : vShift4[31:0]) | vNotShiftResult;
+
+
+    wire ExecuteWrEn = m_ThrowException | e_ThrowException | (e_WrEn & ~ExecuteKill);
+
+    wire [5:0] ExecuteWrNo = m_ThrowException ? REG_CSR_MEPC : e_WrNo;
+
+
 
 
     // forwarding
@@ -492,52 +545,6 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}}; // 32 LE
 
 
-
-    // ALU
-
-    wire [WORD_WIDTH-1:0] LogicResult = ~e_SelLogic[1]
-        ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
-        : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
-    wire [WORD_WIDTH-1:0] PCResult =
-        (e_ReturnPC ? d_PC : 0) | (e_ReturnPCImm ? e_PCImm : 0);
-    wire [WORD_WIDTH-1:0] ImmOrCsrResult =
-        {(e_ReturnImm ? e_Imm[31:12] : 20'b0), 12'b0}
-        | (e_ReturnCsr ? e_CsrRdData : 0);
-    wire [WORD_WIDTH-1:0] FastResult = LogicResult | PCResult | ImmOrCsrResult;
-    wire [WORD_WIDTH-1:0] ExceptionResult =
-        m_ThrowException ? m_PC : FastResult;
-
-
-    wire SetAnd = e_SetCond & (e_A[31] ^ e_B[31]);
-    wire SetXor = e_SetCond & ((e_A[31] ^ e_SetUnsigned) & (e_B[31] ^ e_SetUnsigned));
-//    wire SetXor = e_SetCond & (e_SetUnsigned ? (~e_A[31] & ~e_B[31]) : (e_A[31] & e_B[31]));
-    wire CondResultBit = ((Sum[31] & SetAnd) ^ SetXor) & ~m_ThrowException;
-    wire SumOrFast = e_SelSum & ~m_ThrowException;
-    wire [WORD_WIDTH-1:0] NotShResult = {
-        SumOrFast ? Sum[WORD_WIDTH-1:1] : ExceptionResult[WORD_WIDTH-1:1],
-        SumOrFast ? Sum[0]              : (ExceptionResult[0] | CondResultBit)};
-
-
-
-    //                         62|61..32|31|30..0
-    // SLL (funct3 001)        31|30..1 | 0|  -
-    // SRL (funct3 101, i30 0)  -|   -  |31|30..0
-    // SRA (funct3 101, i30 1) 31|  31  |31|30..0
-    wire [62:0] Shift0 = {
-        (~e_ShiftLeft & ~e_ShiftArith) ? 1'b0 : e_A[31],
-        e_ShiftLeft ? e_A[30:1] : (e_ShiftArith ? {30{e_A[31]}} :  30'b0),
-        e_ShiftLeft ? e_A[0] : e_A[31],
-        e_ShiftLeft ? 31'b0 : e_A[30:0]};
-    wire EnableShift = e_EnShift & ~m_ThrowException;
-
-    wire [46:0] Shift1 = e_B[4] ? Shift0[62:16] : Shift0[46:0];
-    wire [38:0] Shift2 = e_B[3] ? Shift1[46:8]  : Shift1[38:0];
-    wire [34:0] Shift3 = e_B[2] ? Shift2[38:4]  : Shift2[34:0];
-    wire [32:0] Shift4 = EnableShift ? (e_B[1] ? Shift3[34:2]  : Shift3[32:0]) : 0;
-    wire [WORD_WIDTH-1:0] ALUResult = (e_B[0] ? Shift4[32:1]  : Shift4[31:0]) | NotShResult;
-
-    wire ExecuteWrEn = m_ThrowException | (e_WrEn & ~ExecuteKill);
-    wire [5:0] ExecuteWrNo = m_ThrowException ? REG_CSR_MEPC : e_WrNo;
 
 
 
@@ -855,7 +862,7 @@ m_ThrowException |
         d_PC <= DecodePC;
         e_A <= ForwardAE;
         e_B <= ForwardBE;
-        e_Imm <= ImmISU;
+        e_Imm <= m_ThrowException ? m_Cause : ImmISU;
         e_PCImm <= PCImm;
         e_Target <= Target;
 
@@ -881,9 +888,10 @@ m_ThrowException |
         e_SelLogic <= SelLogic;
         e_Carry <= NegB;
 
-        e_WrNo <= d_Insn[11:7];
+        e_WrNo <= m_ThrowException ? REG_CSR_MCAUSE : d_Insn[11:7];
         e_InvertBranch <= InvertBranch;
-        e_Kill <= m_Kill;
+        e_Kill <= m_Kill;// & ~m_ThrowException; 
+            // don't kill in execute stage if it is an exception that sets MCAUSE
 
 
         // execute
@@ -931,6 +939,7 @@ m_ThrowException |
         m_Cause <= e_Cause;
         m_ThrowException <= ThrowException;
         m_ThrowExceptionMTVAL <= ThrowExceptionMTVAL;
+        e_ThrowException <= m_ThrowException;
 
         // CSR decode
         e_Nop <= d_Bubble | ExecuteKill;
@@ -1085,15 +1094,14 @@ m_ThrowException |
             d_CsrMCAUSE, RegSet.regs[REG_CSR_MCAUSE],
             d_CsrMTVAL, RegSet.regs[REG_CSR_MTVAL]);
 
-        $display("C m_PC=%h FastResult=%h ExceptionResult=%h NotSh=%h m_ThrowE=%b",
-            m_PC, FastResult, ExceptionResult, NotShResult, m_ThrowException);
-        $display("C m_WrData=%h",
-            m_WrData);
+        $display("C m_PC=%h vFastResult=%h vExceptionResult=%h vNotSh=%h m_ThrowE=%b",
+            m_PC, vFastResult, vExceptionResult, vNotShiftResult, m_ThrowException);
+//        $display("C e_Kill=%b m_Kill=%b m_ThrowException=%b", 
+//            e_Kill, m_Kill, m_ThrowException); 
 
-        if (w_WrEn) 
-            $display("W x%d=%h",w_WrNo, w_WrData);
-
-
+//        if (e_WrEn) $display("E x%d", e_WrNo);
+        if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
+        if (w_WrEn) $display("W x%d<-%h",w_WrNo, w_WrData);
 `endif
 
 
