@@ -179,8 +179,11 @@ module Pipeline #(
     input [31:0] mem_rdata
 );
     localparam integer WORD_WIDTH = 32;
-    localparam integer REG_CSR_MTVAL = 32;
-
+    localparam integer REG_CSR_MTVEC    = 6'b100101;
+    localparam integer REG_CSR_MSCRATCH = 6'b100000;
+    localparam integer REG_CSR_MEPC     = 6'b100001;
+    localparam integer REG_CSR_MCAUSE   = 6'b100010;
+    localparam integer REG_CSR_MTVAL    = 6'b100011;
 
 
 
@@ -210,9 +213,9 @@ module Pipeline #(
     reg e_InsnBLTU;
     reg e_InvertBranch;
     reg [1:0] e_SelLogic;
-    reg e_InsnSLL;
-    reg e_InsnSRL;
-    reg e_InsnSRA;
+    reg e_EnShift;
+    reg e_ShiftLeft;
+    reg e_ShiftArith;
     reg e_ReturnPC;
     reg e_ReturnImm;
     reg e_ReturnPCImm;
@@ -403,11 +406,8 @@ module Pipeline #(
 
     wire JALorJALR = (d_Insn[6:4]==3'b110 && d_Insn[2]==1'b1); // JAL or JALR
     wire UpperOpcode = (~d_Insn[6] && d_Insn[4:2]==3'b101);
-
     wire ArithOpcode = (~d_Insn[6] && d_Insn[4:2]==3'b100);
-    wire ShiftRight = d_Insn[14] & ~d_Insn[13] & d_Insn[12];
-
-    wire MemOpcode = (~d_Insn[6] && d_Insn[4:2]==0); // ST or LD
+    wire MemOpcode   = (~d_Insn[6] && d_Insn[4:2]==3'b000); // ST or LD
 
     // LUT4 at level 2
     wire InsnJALR      = BranchOpcode & d_Insn[2];
@@ -423,9 +423,10 @@ module Pipeline #(
     wire ReturnImm   = UpperOpcode & d_Insn[5]; // LUI
     wire ReturnPCImm = UpperOpcode & ~d_Insn[5]; // AUIPC
 
-    wire InsnSLL = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & d_Insn[12];
-    wire InsnSRL = ArithOpcode & ShiftRight & ~d_Insn[30];
-    wire InsnSRA = ArithOpcode & ShiftRight & d_Insn[30];
+    wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12];
+    wire ShiftLeft = ~d_Insn[14];
+    wire ShiftArith = d_Insn[30];
+
     wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD or SUB
     wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
     wire SetUnsigned = d_Insn[12];
@@ -503,15 +504,18 @@ module Pipeline #(
         {(e_ReturnImm ? e_Imm[31:12] : 20'b0), 12'b0}
         | (e_ReturnCsr ? e_CsrRdData : 0);
     wire [WORD_WIDTH-1:0] FastResult = LogicResult | PCResult | ImmOrCsrResult;
+    wire [WORD_WIDTH-1:0] ExceptionResult =
+        m_ThrowException ? m_PC : FastResult;
 
 
     wire SetAnd = e_SetCond & (e_A[31] ^ e_B[31]);
     wire SetXor = e_SetCond & ((e_A[31] ^ e_SetUnsigned) & (e_B[31] ^ e_SetUnsigned));
 //    wire SetXor = e_SetCond & (e_SetUnsigned ? (~e_A[31] & ~e_B[31]) : (e_A[31] & e_B[31]));
-    wire CondResultBit = (Sum[31] & SetAnd) ^ SetXor;
+    wire CondResultBit = ((Sum[31] & SetAnd) ^ SetXor) & ~m_ThrowException;
+    wire SumOrFast = e_SelSum & ~m_ThrowException;
     wire [WORD_WIDTH-1:0] NotShResult = {
-        e_SelSum ? Sum[WORD_WIDTH-1:1] : FastResult[WORD_WIDTH-1:1],
-        e_SelSum ? Sum[0]              : (FastResult[0] | CondResultBit)};
+        SumOrFast ? Sum[WORD_WIDTH-1:1] : ExceptionResult[WORD_WIDTH-1:1],
+        SumOrFast ? Sum[0]              : (ExceptionResult[0] | CondResultBit)};
 
 
 
@@ -520,24 +524,20 @@ module Pipeline #(
     // SRL (funct3 101, i30 0)  -|   -  |31|30..0
     // SRA (funct3 101, i30 1) 31|  31  |31|30..0
     wire [62:0] Shift0 = {
-        e_InsnSRL ? 1'b0 : e_A[31],
-        e_InsnSLL ? e_A[30:1] : (e_InsnSRL ? 30'b0 : {30{e_A[31]}}),
-        e_InsnSLL ? e_A[0] : e_A[31],
-        e_InsnSLL ? 31'b0 : e_A[30:0]};
-    wire EnShift = (e_InsnSLL|e_InsnSRL|e_InsnSRA);
+        (~e_ShiftLeft & ~e_ShiftArith) ? 1'b0 : e_A[31],
+        e_ShiftLeft ? e_A[30:1] : (e_ShiftArith ? {30{e_A[31]}} :  30'b0),
+        e_ShiftLeft ? e_A[0] : e_A[31],
+        e_ShiftLeft ? 31'b0 : e_A[30:0]};
+    wire EnableShift = e_EnShift & ~m_ThrowException;
 
-/*
-    wire [31:0] ShiftResult;
-    `BARREL_SHIFTER BarrelShifter(Shift0, e_B[4:0], EnShift, ShiftResult);
-    wire [WORD_WIDTH-1:0] ALUResult = e_SelSum ? Sum : 
-        (FastResult | {31'b0, CondResultBit} | ShiftResult); // 32 LE
-*/
     wire [46:0] Shift1 = e_B[4] ? Shift0[62:16] : Shift0[46:0];
     wire [38:0] Shift2 = e_B[3] ? Shift1[46:8]  : Shift1[38:0];
     wire [34:0] Shift3 = e_B[2] ? Shift2[38:4]  : Shift2[34:0];
-    wire [32:0] Shift4 = EnShift ? (e_B[1] ? Shift3[34:2]  : Shift3[32:0]) : 0;
+    wire [32:0] Shift4 = EnableShift ? (e_B[1] ? Shift3[34:2]  : Shift3[32:0]) : 0;
     wire [WORD_WIDTH-1:0] ALUResult = (e_B[0] ? Shift4[32:1]  : Shift4[31:0]) | NotShResult;
 
+    wire ExecuteWrEn = m_ThrowException | (e_WrEn & ~ExecuteKill);
+    wire [5:0] ExecuteWrNo = m_ThrowException ? REG_CSR_MEPC : e_WrNo;
 
 
 
@@ -548,9 +548,13 @@ module Pipeline #(
         e_A[0] ^ e_Imm[0]};
 */
 
-    wire MemMisaligned = 
-        ((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
-        ((e_MemWidth==1) &  AddrOfs[0]);
+    wire MemMisaligned =
+m_ThrowException | 
+// VERY VERY DIRTY - MUST BE OPTIMIZED
+// if a exception is thrown and the next instruction is a load or store
+// then set MemByte and MemSign to 0
+        (((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
+         ((e_MemWidth==1) &  AddrOfs[0]));
 
     wire SignedLB = ~e_MemWidth[1] & ~e_MemWidth[0] & ~e_MemUnsignedLoad & ~MemMisaligned;
     wire [6:0] MemByte = {
@@ -860,9 +864,9 @@ module Pipeline #(
         e_InsnBEQ <= InsnBEQ;
         e_InsnBLTorBLTU <= InsnBLTorBLTU;
         e_InsnBLTU <= InsnBLTU;
-        e_InsnSLL <= InsnSLL;
-        e_InsnSRL <= InsnSRL;
-        e_InsnSRA <= InsnSRA;
+        e_EnShift <= EnShift;
+        e_ShiftLeft <= ShiftLeft;
+        e_ShiftArith <= ShiftArith;
         e_ReturnPC <= ReturnPC;
         e_ReturnImm <= ReturnImm;
         e_ReturnPCImm <= ReturnPCImm;
@@ -883,8 +887,8 @@ module Pipeline #(
 
 
         // execute
-        m_WrEn <= e_WrEn & ~ExecuteKill;
-        m_WrNo <= e_WrNo;
+        m_WrEn <= ExecuteWrEn;
+        m_WrNo <= ExecuteWrNo;
         m_WrData <= ALUResult;
         m_Kill <= Kill;
         m_MemSign <= MemSign;
@@ -1071,8 +1075,20 @@ module Pipeline #(
 
         if (DirectJump || e_InsnJALR) $display("B jump %h", FetchPC);
 
-        $display("C CYCLE=%h INSTRET=%h MTVAL=%h %h",
-            e_CounterCycle, e_CounterRetired, d_CsrMTVAL, RegSet.regs[REG_CSR_MTVAL]);
+
+        $display("C MTVEC=%h %h MSCRATCH=%h %h MEPC=%h %h",
+            d_CsrMTVEC, RegSet.regs[REG_CSR_MTVEC],
+            d_CsrMSCRATCH, RegSet.regs[REG_CSR_MSCRATCH],
+            d_CsrMEPC, RegSet.regs[REG_CSR_MEPC]);
+        $display("C CYCLE=%h INSTRET=%h MCAUSE=%h %h MTVAL=%h %h",
+            e_CounterCycle, e_CounterRetired,
+            d_CsrMCAUSE, RegSet.regs[REG_CSR_MCAUSE],
+            d_CsrMTVAL, RegSet.regs[REG_CSR_MTVAL]);
+
+        $display("C m_PC=%h FastResult=%h ExceptionResult=%h NotSh=%h m_ThrowE=%b",
+            m_PC, FastResult, ExceptionResult, NotShResult, m_ThrowException);
+        $display("C m_WrData=%h",
+            m_WrData);
 
         if (w_WrEn) 
             $display("W x%d=%h",w_WrNo, w_WrData);
