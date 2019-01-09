@@ -21,6 +21,7 @@ module RegisterSet(
 
     initial begin
         regs[0] <= 0;
+        regs[32] <= 0; // placeholder for unknown CSR
     end
 
     always @(posedge clk) begin
@@ -179,12 +180,22 @@ module Pipeline #(
     input [31:0] mem_rdata
 );
     localparam integer WORD_WIDTH = 32;
-    localparam integer REG_CSR_MTVEC    = 6'b100101;
-    localparam integer REG_CSR_MSCRATCH = 6'b100000;
-    localparam integer REG_CSR_MEPC     = 6'b100001;
-    localparam integer REG_CSR_MCAUSE   = 6'b100010;
-    localparam integer REG_CSR_MTVAL    = 6'b100011;
 
+    localparam integer REG_CSR_NONE     = 6'b100000; // used for any unknown CSR
+    localparam integer REG_CSR_MTVEC    = 6'b100001;
+    localparam integer REG_CSR_MSCRATCH = 6'b100100;
+    localparam integer REG_CSR_MEPC     = 6'b100101;
+    localparam integer REG_CSR_MCAUSE   = 6'b100110;
+    localparam integer REG_CSR_MTVAL    = 6'b100111;
+
+    localparam integer CSR_COUNTER_MCYCLE       = 3'b100;
+    localparam integer CSR_COUNTER_MCYCLEH      = 3'b101;
+    localparam integer CSR_COUNTER_CYCLE        = 3'b100;
+    localparam integer CSR_COUNTER_CYCLEH       = 3'b101;
+    localparam integer CSR_COUNTER_TIME         = 3'b100;
+    localparam integer CSR_COUNTER_TIMEH        = 3'b101;
+    localparam integer CSR_COUNTER_INSTRET      = 3'b110;
+    localparam integer CSR_COUNTER_INSTRETH     = 3'b111;
 
 
 // ---------------------------------------------------------------------
@@ -200,6 +211,7 @@ module Pipeline #(
     reg [31:0] d_Insn;
     reg [5:0] d_RdNo1;
     reg [5:0] d_RdNo2;
+    reg d_InsnAuxWrNoH;
 
     reg [31:0] d_DelayedInsn;
     reg d_SaveFetch;
@@ -226,6 +238,7 @@ module Pipeline #(
     reg e_MemWr;
     reg [1:0] e_MemWidth;
     reg e_MemUnsignedLoad;
+    reg [2:0] e_CsrCounter;
 
 
     reg [WORD_WIDTH-1:0] d_PC;
@@ -235,6 +248,9 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] e_Imm;
     reg [WORD_WIDTH-1:0] e_PCImm;
     reg [WORD_WIDTH-1:0] e_Target;
+
+    reg [WORD_WIDTH-1:0] m_A;
+    reg [4:0] e_Zimm;
 
     reg e_Carry;
     reg e_WrEn;
@@ -248,6 +264,7 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_WrData;
     reg [6:0] m_MemByte;
     reg [7:0] m_MemSign;
+    reg [2:0] m_CsrCounter;
 
     // write back
     reg w_WrEn;
@@ -258,7 +275,6 @@ module Pipeline #(
     // exceptions
     reg e_ExceptionDecode;
     reg e_ExceptionDirectJump;
-    reg e_InsnMRET;
     reg [3:0] e_Cause;
     reg [WORD_WIDTH-1:0] e_PC;
     reg [3:0] m_Cause;
@@ -274,29 +290,11 @@ module Pipeline #(
     reg [63:0] e_CounterCycle;
     reg [63:0] e_CounterRetired;
     reg [1:0] e_CsrOp;
-    reg e_ReturnCsr;
+    reg [1:0] m_CsrOp;
     reg e_CsrSelImm;
     reg [4:0] e_CsrImm;
-    reg [WORD_WIDTH-1:0] e_CsrRdData;
-    reg [WORD_WIDTH-1:0] m_CsrWrData;
 
     reg [WORD_WIDTH-1:0] d_CsrMTVEC;
-    reg [WORD_WIDTH-1:0] d_CsrMSCRATCH;
-    reg [WORD_WIDTH-1:0] d_CsrMEPC;
-    reg [WORD_WIDTH-1:0] d_CsrMCAUSE;
-    reg [WORD_WIDTH-1:0] d_CsrMTVAL;
-    reg e_WrCsrMTVEC;
-    reg e_WrCsrMSCRATCH;
-    reg e_WrCsrMEPC;
-    reg e_WrCsrMCAUSE;
-    reg e_WrCsrMTVAL;
-    reg m_WrCsrMTVEC;
-    reg m_WrCsrMSCRATCH;
-    reg m_WrCsrMEPC;
-    reg m_WrCsrMCAUSE;
-    reg m_WrCsrMTVAL;
-    
-
 
 
 
@@ -423,7 +421,8 @@ module Pipeline #(
 
     wire MemAccess       = MemOpcode;
     wire MemWr           = MemOpcode & d_Insn[5];
-    wire [1:0] MemWidth  = MemOpcode ? d_Insn[13:12] : 2'b11;
+    wire [1:0] MemWidth  = (MemOpcode & ~m_ThrowException) ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
+//                                    ~~~~~~~~~~~~~~~~~~~ to correctly set MCAUSE
     wire MemUnsignedLoad = d_Insn[14];
 
     // OPTIMIZE
@@ -431,9 +430,9 @@ module Pipeline #(
     wire CsrOpcode = (d_Insn[13] | d_Insn[12]) & d_Insn[5] & SysOpcode;
     wire PrivOpcode = d_Insn[5] & (d_Insn[14:12]==0);
 
-    wire MemOrCsr  = (MemOpcode | CsrOpcode);
-    wire SaveFetch =  (d_Bubble | (MemOrCsr & ~d_SaveFetch)) & ~m_Kill;
-    wire Bubble    = (~d_Bubble & MemOrCsr) & ~m_Kill;
+    wire vTwoCycleInsn  = (MemOpcode | CsrOpcode | InsnMRET);
+    wire SaveFetch =  (d_Bubble | (vTwoCycleInsn & ~d_SaveFetch)) & ~m_Kill;
+    wire Bubble    = (~d_Bubble & vTwoCycleInsn) & ~m_Kill;
 
     wire SUBorSLL   = d_Insn[13] |
         (~d_Insn[13] & d_Insn[12]) |
@@ -444,14 +443,14 @@ module Pipeline #(
     wire NegB = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
 
     // OPTIMIZE
-    wire [1:0] CsrOp = (d_Insn[6:2]==5'b11100) ? d_Insn[13:12] : 2'b00;
+    wire [1:0] CsrOp = (d_Insn[6:2]==5'b11100 && ~m_ThrowException) ? d_Insn[13:12] : 2'b00;
 
 
 
     // level 1
     wire ArithOrUpper = ~d_Insn[6] & d_Insn[4] & ~d_Insn[3];
     wire JumpOpcode = d_Insn[6] & d_Insn[5] & ~d_Insn[4] & d_Insn[2];
-    wire DestReg0 = (d_Insn[11:8] == 4'b0000);
+    wire DestReg0 = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
     wire EnableWrite = ArithOrUpper | JumpOpcode | (MemOpcode & ~d_Insn[5]);
     wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
@@ -459,9 +458,15 @@ module Pipeline #(
     // OPTIMIZE
     wire DecodeWrEn = ((EnableWrite | (CsrOp!=2'b00)) & ~DisableWrite) | m_ThrowException;
 
+    wire [5:0] DecodeWrNo = m_ThrowException ? REG_CSR_MCAUSE : {d_InsnAuxWrNoH, d_Insn[11:7]};
+
+
 
     // control signals for the ALU that are set in the decode stage
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14] & ~m_ThrowException) ? d_Insn[13:12] : 2'b01;
+
+
+
     wire ReturnPC    = JALorJALR & ~m_ThrowException; // JAL or JALR
     wire ReturnPCImm = UpperOpcode & ~d_Insn[5] & ~m_ThrowException; // AUIPC
     wire ReturnImm   = (UpperOpcode & d_Insn[5]) | m_ThrowException; // LUI or set exception causeq
@@ -469,7 +474,10 @@ module Pipeline #(
     wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12] & ~m_ThrowException; // ADD or SUB
     wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13] & ~m_ThrowException; // SLT or SLTU
     wire SetUnsigned = d_Insn[12];
+
     wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
+//    wire SelImm = (ArithOpcode & ~d_Insn[5]) // arith imm, only for forwarding
+//        | (CsrOpcode & d_Insn[14]); // csr, use zimm instead of rd2
 
     wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12] & ~m_ThrowException;
     wire ShiftLeft = ~d_Insn[14];
@@ -487,10 +495,44 @@ module Pipeline #(
           (e_ReturnPC ? d_PC : 0) 
         | (e_ReturnPCImm ? e_PCImm : 0);
     wire [WORD_WIDTH-1:0] vImmOrCsrResult =
-//         {(e_ReturnImm ? e_Imm[31:12] : 20'b0), 12'b0}
-          (e_ReturnImm ? e_Imm : 0)
-        | (e_ReturnCsr ? e_CsrRdData : 0);
-    wire [WORD_WIDTH-1:0] vFastResult = vLogicResult | vPCResult | vImmOrCsrResult;
+        //{(e_ReturnImm ? e_Imm[31:12] : 20'b0), 12'b0};
+          (e_ReturnImm ? e_Imm : 0);
+
+    // OPTIMIZE
+/*
+    wire [WORD_WIDTH-1:0] vCsrResult2 = ~e_CsrOp[1]
+        ? (~e_CsrOp[0] ? 32'h0 : e_B)
+        : (~e_CsrOp[0] ? (e_A | e_B) : (e_A & ~e_B));
+    wire [WORD_WIDTH-1:0] vCsrResult = (e_CsrOp!=0 && d_Bubble) ? e_A : vCsrResult2;
+*/
+    wire [WORD_WIDTH-1:0] vCsrResult = ~e_CsrOp[1]
+        ? (~e_CsrOp[0] ? 32'h0 : m_A)
+        : (~e_CsrOp[0] ? (e_A | m_A) : (e_A & ~m_A));
+
+        // Problem if in a csr instruction, rd is equal to rs1:
+        // In the second cycle, rs1 is read (as rs2) and a data dependency to rd
+        // of the first cycle is recognized, therefore ALUResult is forwarded.
+        // ALUResult is not yet the the new value for the CSR, because the
+        // correct value is valid not before the mem stage. But this is not the 
+        // problem, since the old value of rs1, before writing the CSR value is
+        // needed to modify the CSR.
+        //
+        // Solution:
+        // read value of rs1 in first cycle, safe it for one cycle and then
+        // use it in the execute stage of the second cycle. Cons:
+        //   * additional 32 bit register,
+        //   * bitwise logic cannot be combined with normal arithmetic
+        //     instruchtions AND, OR due to different operand sources,
+        //   * separate logic to select between zimm/rs1,  cannot be
+        //     combined with imm/rs2 from arithmetic instructions
+        //
+        // Alternative solutions:
+        //   * recognize special case when rd=rs1 for a csr instruction
+        //   * disable forwarding in this case
+        //   * ALUResult must be set to rs1 in the first cycle. Then it is
+        //     correctly forwarded to the execute stage of the second cycle
+        
+    wire [WORD_WIDTH-1:0] vFastResult = vLogicResult | vPCResult | vImmOrCsrResult | vCsrResult;
     wire [WORD_WIDTH-1:0] vExceptionResult =
         m_ThrowException ? m_PC : vFastResult;
 
@@ -605,8 +647,14 @@ m_ThrowException |
     wire MemWrEn = m_WrEn | m_ThrowExceptionMTVAL;
     wire [5:0] MemWrNo = m_ThrowExceptionMTVAL ? REG_CSR_MTVAL : m_WrNo;
 
-    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : m_WrData;
-//    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_WrData;
+    wire [WORD_WIDTH-1:0] vCsrValue =
+        ~m_CsrCounter[2] ? e_A // bypass from decode of previous cycle
+                         : (~m_CsrCounter[1] ? (m_CsrCounter[0] ? e_CounterCycle[63:32]
+                                                                : e_CounterCycle[31:0])
+                                             : (m_CsrCounter[0] ? e_CounterRetired[63:32]
+                                                                : e_CounterRetired[31:0]));
+    wire [WORD_WIDTH-1:0] vOverwriteByCsrRead = m_CsrOp==0 ? m_WrData : vCsrValue;
+    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : vOverwriteByCsrRead;
 
 
     //                                     6         54         3210
@@ -701,7 +749,7 @@ m_ThrowException |
         ((d_Insn[6:2]==5'b11000) & d_Insn[8]);
             // branch with unaligned offset
 
-    wire InsnMRET  = SysOpcode & PrivOpcode & ~d_Insn[22] & d_Insn[21];
+    wire InsnMRET  = SysOpcode & PrivOpcode & ~d_Insn[22] & d_Insn[21]; // check more bits?
     wire ExceptionUser = SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21];
         // throw in decode: EBREAK or ECALL
     wire ExceptionMisaligned = e_MemAccess & ~e_Kill & MemMisaligned;
@@ -728,7 +776,7 @@ m_ThrowException |
         ((ExceptionMisaligned | ExceptionJALR) & ~ExecuteKill);
         // true for exceptions that set MTVAL (in mem stage)
 
-    wire ExcOrMRET = e_ExceptionDecode | ExceptionJALR | e_InsnMRET;
+    wire ExcOrMRET = e_ExceptionDecode | ExceptionJALR;
     wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
     wire Xor31 = (~e_InsnBEQ & (e_InvertBranch ^ Lower)) | (ExcOrMRET);
     wire And31 = (e_InsnBLTorBLTU) & (e_A[31] ^ e_B[31]);
@@ -749,6 +797,7 @@ m_ThrowException |
     wire [WORD_WIDTH-1:0] FetchPC   = DirectJump           ? JumpTarget : NoBranch;
     wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC       : f_PC;
 
+/*
     wire [WORD_WIDTH-1:0] Target =
         (d_Insn[6:2]==5'b00011) 
             ? f_PC 
@@ -757,7 +806,15 @@ m_ThrowException |
                 : ((ExceptionUser | ExceptionMisaligned | ExceptionDirectJump) 
                     ? d_CsrMTVEC 
                     : PCImm));
-
+*/
+    wire [WORD_WIDTH-1:0] Target =
+        (d_Insn[6:2]==5'b00011) 
+            ? f_PC 
+//            : (InsnMRET 
+//                ? d_CsrMEPC
+                : ((ExceptionUser | ExceptionMisaligned | ExceptionDirectJump) 
+                    ? d_CsrMTVEC 
+                    : PCImm);
 
 
 
@@ -772,9 +829,52 @@ m_ThrowException |
     assign mem_wdata = MemWriteData;
     assign mem_addr = MemAddr;
 
+    reg [4:0] vCsrTranslate;
+    always @* begin
+        case (d_Insn[31:20])
+            12'h305: vCsrTranslate <= REG_CSR_MTVEC;
+            12'h340: vCsrTranslate <= REG_CSR_MSCRATCH;
+            12'h341: vCsrTranslate <= REG_CSR_MEPC;
+            12'h342: vCsrTranslate <= REG_CSR_MCAUSE;
+            12'h343: vCsrTranslate <= REG_CSR_MTVAL;
+            default: vCsrTranslate <= 0; // cannot be written, alwaysis 0
+        endcase
+    end
 
-    wire [31:0] NextInsn = Bubble ? 32'h4013 : d_DelayedInsn;
-    wire [31:0] Insn = (Bubble | ((d_Bubble | d_SaveFetch) & ~m_Kill)) ? NextInsn : mem_rdata;
+    reg [2:0] CsrCounter;
+    always @* begin
+        case (d_Insn[31:20])
+            12'hB00: CsrCounter <= CSR_COUNTER_MCYCLE;
+            12'hB80: CsrCounter <= CSR_COUNTER_MCYCLEH;
+            12'hC00: CsrCounter <= CSR_COUNTER_CYCLE;
+            12'hC01: CsrCounter <= CSR_COUNTER_TIME;
+            12'hC02: CsrCounter <= CSR_COUNTER_INSTRET;
+            12'hC80: CsrCounter <= CSR_COUNTER_CYCLEH;
+            12'hC81: CsrCounter <= CSR_COUNTER_TIMEH;
+            12'hC82: CsrCounter <= CSR_COUNTER_INSTRETH;
+            default: CsrCounter <= 0;
+        endcase
+    end
+
+
+    wire vFirstCsrCycle = CsrOpcode & ~m_Kill & ~d_Bubble;
+    wire vUnkilledMRET = InsnMRET & ~m_Kill & ~d_Bubble;
+        // set only in the first of the two csr instruction cycles
+//    wire InsnMRET = CsrOpcode & ~m_Kill & ~d_Bubble;
+    wire [31:0] vCsrInsn = vFirstCsrCycle
+        ? {12'b0, vCsrTranslate, d_Insn[14:12], vCsrTranslate, 7'b1110011}
+          //        rs1<-csr'       funct3=        rd<-csr'      opcode=
+        : (vUnkilledMRET
+            ? {12'b0, REG_CSR_MEPC[4:0], 15'b000_00000_1100111} 
+              // jalr x0, 0(mepc)
+            : 32'h4013);
+              // nop
+    wire InsnAuxRdNo1H = vFirstCsrCycle | vUnkilledMRET;
+    wire InsnAuxRdNo2H = 0;
+    wire InsnAuxWrNoH  = vFirstCsrCycle;
+
+    wire [31:0] vNextInsn = Bubble ? vCsrInsn : d_DelayedInsn;
+    wire [31:0] Insn = (Bubble | ((d_Bubble | d_SaveFetch) & ~m_Kill)) ? vNextInsn : mem_rdata;
 
 /* TRY: 
     To reduce logic in the fetch stage, some can be moved to the decode stage.
@@ -796,10 +896,8 @@ m_ThrowException |
 
 
 
-    wire RdNo1H = 0;
-    wire RdNo2H = 0;
-    wire [5:0] RdNo1 = {RdNo1H, Insn[19:15]};
-    wire [5:0] RdNo2 = {RdNo2H, Insn[24:20]};
+    wire [5:0] RdNo1 = {InsnAuxRdNo1H, Insn[19:15]};
+    wire [5:0] RdNo2 = {InsnAuxRdNo2H, Insn[24:20]};
     wire [WORD_WIDTH-1:0] RdData1;
     wire [WORD_WIDTH-1:0] RdData2;
 
@@ -836,7 +934,6 @@ m_ThrowException |
             // fake a jump to address 0 on reset
             e_ExceptionDecode <= 0;
             e_ExceptionDirectJump <= 0;
-            e_InsnMRET <= 0;
             e_InsnJALR <= 0;
             e_InsnBEQ <= 0;
             e_InsnBLTorBLTU <= 0;
@@ -852,11 +949,14 @@ m_ThrowException |
 
             // fetch
             d_Insn <= Insn;
+            d_InsnAuxWrNoH <= InsnAuxWrNoH;
             d_RdNo1 <= RdNo1;
             d_RdNo2 <= RdNo2;
             if (SaveFetch) d_DelayedInsn <= mem_rdata;
             d_SaveFetch <= SaveFetch;
             d_Bubble <= Bubble;
+
+            if (MemWrEn && MemWrNo==REG_CSR_MTVEC) d_CsrMTVEC <= MemResult;
 
         // decode
         d_PC <= DecodePC;
@@ -865,6 +965,9 @@ m_ThrowException |
         e_Imm <= m_ThrowException ? m_Cause : ImmISU;
         e_PCImm <= PCImm;
         e_Target <= Target;
+
+        e_Zimm <= d_Insn[19:15];
+        m_A <= e_MemUnsignedLoad /* = d_Insn[14] */ ? e_Zimm : e_A;
 
         e_WrEn <= DecodeWrEn;
         e_InsnJALR <= InsnJALR;
@@ -888,7 +991,7 @@ m_ThrowException |
         e_SelLogic <= SelLogic;
         e_Carry <= NegB;
 
-        e_WrNo <= m_ThrowException ? REG_CSR_MCAUSE : d_Insn[11:7];
+        e_WrNo <= DecodeWrNo;
         e_InvertBranch <= InvertBranch;
         e_Kill <= m_Kill;// & ~m_ThrowException; 
             // don't kill in execute stage if it is an exception that sets MCAUSE
@@ -931,7 +1034,6 @@ m_ThrowException |
             end
         end
 
-        e_InsnMRET  <= InsnMRET;
         e_ExceptionDecode <= ExceptionDecode;
         e_ExceptionDirectJump <= ExceptionDirectJump;
 
@@ -945,111 +1047,20 @@ m_ThrowException |
         e_Nop <= d_Bubble | ExecuteKill;
         e_CounterCycle <= e_CounterCycle + 1;
         e_CounterRetired <= e_CounterRetired + {63'b0, (~e_Nop & ~ExecuteKill)};
-        e_CsrRdData <= 0;
-        e_WrCsrMTVEC <= 0;
-        e_WrCsrMSCRATCH <= 0;
-        e_WrCsrMEPC <= 0;
-        e_WrCsrMCAUSE <= 0;
-        e_WrCsrMTVAL <= 0;
-        e_CsrOp <= CsrOp;
-        e_ReturnCsr <= (d_Insn[6:2]==5'b11100) && (d_Insn[13:12]!=2'b00);
+        e_CsrCounter <= CsrCounter;
+        m_CsrCounter <= e_CsrCounter;
+
         e_CsrSelImm <= d_Insn[14];
         e_CsrImm <= d_Insn[19:15];
-        case (d_Insn[31:20])
-//            12'h304: begin
-//                e_CsrRdData <= d_CsrMIE;
-//                e_WrCsrMIE <= 1;
-//            end
-            12'h305: begin
-                e_CsrRdData <= m_WrCsrMTVEC ? m_CsrWrData : d_CsrMTVEC;
-                e_WrCsrMTVEC <= 1;
-            end
-            12'h340: begin
-                e_CsrRdData <= m_WrCsrMSCRATCH ? m_CsrWrData : d_CsrMSCRATCH;
-                e_WrCsrMSCRATCH <= 1;
-            end
-            12'h341: begin
-//                e_CsrRdData <= m_ThrowException ? e_PC : (m_WrCsrMEPC ? m_CsrWrData : d_CsrMEPC);
-                e_CsrRdData <= (m_WrCsrMEPC ? m_CsrWrData : d_CsrMEPC);
-                e_WrCsrMEPC <= 1;
-            end
-            12'h342: begin
-//                e_CsrRdData <= m_ThrowException ? e_Cause ? m_WrCsrMCAUSE ? m_CsrWrData : d_CsrMCAUSE;
-                e_CsrRdData <= m_WrCsrMCAUSE ? m_CsrWrData : d_CsrMCAUSE;
-                e_WrCsrMCAUSE <= 1;
-            end
-            12'h343: begin
-                e_CsrRdData <= m_WrCsrMTVAL ? m_CsrWrData : d_CsrMTVAL;
-                e_WrCsrMTVAL <= 1;
-            end
-//            12'h344: begin
-//                e_CsrRdData <= d_CsrMIP;
-//                e_WrCsrMIP <= 1;
-//            end
-            12'hB00: begin // MCYCLE
-                e_CsrRdData <= e_CounterCycle[31:0];
-            end
-            12'hB80: begin // MCYCLEH
-                e_CsrRdData <= e_CounterCycle[63:32];
-            end
-            12'hC00: begin // CYCLE
-                e_CsrRdData <= e_CounterCycle[31:0];
-            end
-            12'hC01: begin // TIME
-                e_CsrRdData <= e_CounterCycle[31:0];
-            end
-            12'hC02: begin // INSTRET
-                e_CsrRdData <= e_CounterRetired[31:0];
-            end
-            12'hC80: begin // CYCLEH
-                e_CsrRdData <= e_CounterCycle[63:32];
-            end
-            12'hC81: begin // TIMEH
-                e_CsrRdData <= e_CounterCycle[63:32];
-            end
-            12'hC82: begin // INSTRETH
-                e_CsrRdData <= e_CounterRetired[63:32];
-            end
-            default: begin
-                e_CsrRdData <= 0;
-            end
-        endcase
-
-
-        // CSR execute
-        m_CsrWrData <= 0;
-        case (e_CsrOp & {~ExecuteKill, ~ExecuteKill})
-            2'b01: m_CsrWrData <= CsrUpdate;
-            2'b10: m_CsrWrData <= e_CsrRdData | CsrUpdate;
-            2'b11: m_CsrWrData <= e_CsrRdData & ~CsrUpdate;
-            default: m_CsrWrData <= CsrUpdate; // don't care
-        endcase
-        m_WrCsrMTVEC    <= e_WrCsrMTVEC    & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
-        m_WrCsrMSCRATCH <= e_WrCsrMSCRATCH & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
-        m_WrCsrMEPC     <= e_WrCsrMEPC     & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
-        m_WrCsrMCAUSE   <= e_WrCsrMCAUSE   & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
-        m_WrCsrMTVAL    <= e_WrCsrMTVAL    & (e_CsrOp[0] | e_CsrOp[1]) & ~ExecuteKill;
-
-
-
+        e_CsrOp <= CsrOp;
+        m_CsrOp <= (d_Bubble ? e_CsrOp : 2'b00) & {~ExecuteKill, ~ExecuteKill};
+            // set CsrOp for mem stage only in first cycle of csr instruction
 
         // CSR write (in memory stage)
-        d_CsrMTVEC    <= m_WrCsrMTVEC    ? m_CsrWrData : d_CsrMTVEC;
-        d_CsrMSCRATCH <= m_WrCsrMSCRATCH ? m_CsrWrData : d_CsrMSCRATCH;
-        d_CsrMEPC     <= m_ThrowException
-            ? m_PC 
-            : (m_WrCsrMEPC     ? m_CsrWrData : d_CsrMEPC);
-        d_CsrMCAUSE   <= m_ThrowException
-            ? {28'b0, m_Cause}
-            : (m_WrCsrMCAUSE   ? m_CsrWrData : d_CsrMCAUSE);
-
         m_NewMTVAL <= e_ExceptionDirectJump 
             ? e_PCImm
             : {AddrSum[WORD_WIDTH-1:1], AddrSum[0] & ~e_InsnJALR}; // TRY: AddrOfs[0]
-        if (m_ThrowExceptionMTVAL)
-            d_CsrMTVAL <= m_NewMTVAL;
-        else if (m_WrCsrMTVAL)
-            d_CsrMTVAL <= m_CsrWrData;
+
 
 
 `ifdef DEBUG
@@ -1070,6 +1081,9 @@ m_ThrowException |
             RegSet.regs[24], RegSet.regs[25], RegSet.regs[26], RegSet.regs[27], 
             RegSet.regs[28], RegSet.regs[29], RegSet.regs[30], RegSet.regs[31]);
 
+        $display("D read x%d=%h x%d=%h", 
+            d_RdNo1, RdData1, d_RdNo2, RdData2);
+
         $display("D Bubble=%b SaveFetch=%b",
             d_Bubble, d_SaveFetch);
 /*
@@ -1085,6 +1099,7 @@ m_ThrowException |
         if (DirectJump || e_InsnJALR) $display("B jump %h", FetchPC);
 
 
+/*
         $display("C MTVEC=%h %h MSCRATCH=%h %h MEPC=%h %h",
             d_CsrMTVEC, RegSet.regs[REG_CSR_MTVEC],
             d_CsrMSCRATCH, RegSet.regs[REG_CSR_MSCRATCH],
@@ -1096,8 +1111,22 @@ m_ThrowException |
 
         $display("C m_PC=%h vFastResult=%h vExceptionResult=%h vNotSh=%h m_ThrowE=%b",
             m_PC, vFastResult, vExceptionResult, vNotShiftResult, m_ThrowException);
+        $display("C vLogicResult=%h vPCResult=%h vImmOrCsrResult=%h vCsrResult=%h e_CsrOp=%b",
+            vLogicResult, vPCResult, vImmOrCsrResult, vCsrResult, e_CsrOp);
+        $display("C vOverwriteByCsrRead=%h m_CsrOp=%b ResultOrMTVAL=%h",
+            vOverwriteByCsrRead, m_CsrOp, ResultOrMTVAL);
+*/
+
+
 //        $display("C e_Kill=%b m_Kill=%b m_ThrowException=%b", 
 //            e_Kill, m_Kill, m_ThrowException); 
+
+        $display("C vCsrTranslate=%h InsnAuxRdNo1H=%b InsnAuxWrNoH=%b CsrOp=%b",
+            vCsrTranslate, InsnAuxRdNo1H, InsnAuxWrNoH, CsrOp);
+        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
+            MemResult, m_MemSign, m_MemByte);
+
+
 
 //        if (e_WrEn) $display("E x%d", e_WrNo);
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
