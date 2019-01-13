@@ -84,7 +84,7 @@ forth, `send_image.sh` can be used again to start a new program on the processor
 
 | chip resources  | used | unit      |                             |
 |:--------------- | ----:| ---------:|:--------------------------- |
-| LCs             | 2552 |      LUT4 | 40% for CSRs                |
+| LCs             | 2131 |      LUT4 | 25% for CSRs                |
 | BRAM            |    6 |   4 KiBit | registerset and boot loader |
 | SPRAM           |    2 | 256 KiBit | main memory                 |
 | clock frequency |   24 |       MHz |                             |

@@ -3,7 +3,8 @@
 //`define DISABLE_ADD
 
 `ifndef EQUAL_COMPERATOR
-`define EQUAL_COMPERATOR EqualParAdd
+//`define EQUAL_COMPERATOR EqualParAdd
+`define EQUAL_COMPERATOR EqualInfere
 `endif
 
 
@@ -219,6 +220,7 @@ module Pipeline #(
 
 
     // execute
+    reg e_InsnFENCEI;
     reg e_InsnJALR;
     reg e_InsnBEQ;
     reg e_InsnBLTorBLTU;
@@ -230,6 +232,7 @@ module Pipeline #(
     reg e_ReturnPC;
     reg e_ReturnUI;
     reg e_LUIorAUIPC;
+    reg e_SelMTVEC;
 
     reg e_SetCond;
     reg e_SetUnsigned;
@@ -578,8 +581,6 @@ module Pipeline #(
     wire [1:0] AddrOfs = {
         e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
         e_A[0] ^ e_Imm[0]};
-/*
-*/
 
     wire PreMemMisaligned =
         (((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
@@ -725,7 +726,6 @@ module Pipeline #(
 
 
 
-    wire ExecuteKill = m_Kill | e_Kill;
 
     wire ExceptionDirectJump =
         ((d_Insn[6:2]==5'b11011) & d_Insn[21]) |
@@ -733,67 +733,61 @@ module Pipeline #(
         ((d_Insn[6:2]==5'b11000) & d_Insn[8]);
             // branch with unaligned offset
 
-    wire ExceptionUser = SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21];
-        // throw in decode: EBREAK or ECALL
-    wire ExceptionMisaligned = e_MemAccess & ~e_Kill & PreMemMisaligned;
-        // throw in execute: memory access misaligned
-        // forward to decode stage of following instruction bubble
-    wire ExceptionDecode = ExceptionUser | ExceptionMisaligned;
-
-
-    wire AddrBit1 = e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]);
-
-    wire vUnkilledMemAccess = ~m_Kill & ~e_Kill & e_MemAccess;
-    wire vUnkilledJALR      = ~m_Kill & ~e_Kill & e_InsnJALR;
-    wire vUnkilledNoBEQ     = ~m_Kill & ~e_Kill & ~e_InsnBEQ;
-    wire vUnkilledBEQ       = ~m_Kill & ~e_Kill & e_InsnBEQ;
-    wire vUnkilledExcDecode = ~m_Kill & ~e_Kill & e_ExceptionDecode;
-
+    wire ExceptionDecode =
+        (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
+            // throw in decode: EBREAK or ECALL
+        (e_MemAccess & ~e_Kill & PreMemMisaligned);
+            // throw in execute: memory access misaligned
+            // forward to decode stage of following instruction bubble
 
     wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
-    wire Xor31 = (e_InvertBranch ^ Lower) | (e_InsnJALR & AddrBit1);
-    wire And31 = (e_InsnBLTorBLTU) & (e_A[31] ^ e_B[31]);
-    wire Jump31 = vUnkilledNoBEQ & (Xor31 ^ (And31 & Sum[31]));
-    wire JumpBEQ = (vUnkilledBEQ & (e_InvertBranch ^ Equal)) | vUnkilledExcDecode;
+    wire Xor31 = e_InvertBranch ^ Lower;
+    wire And31 = e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]);
+    wire vExc = (e_InsnJALR & AddrOfs[1]) | e_ExceptionDecode;
+    wire vNotBEQ = (Xor31 ^ (And31 & Sum[31])) | vExc;
+    wire vJump = e_InsnBEQ ? (e_InvertBranch ^ Equal) : vNotBEQ;
 
-    wire DirectJump = Jump31 | JumpBEQ;
+
+
+    wire ExecuteKill = m_Kill | e_Kill;
+    wire DirectJump = vJump & ~ExecuteKill;
         // taken conditional branch or direct jump
-    wire Kill = DirectJump | (e_InsnJALR & ~ExecuteKill);
+    wire Kill = (vJump | e_InsnJALR) & ~ExecuteKill;
         // taken conditional branch or direct jump or indirect jump = any jump
 
     // In the case of a misaligned memory access, throw the exception in the mem
     // stage of the bubble instruction, but write MTVAL in the mem stage of the
     // actual instruction (one cycle earlier). Therefore ThrowException depends
     // on the registered signal e_ExceptionDecode, while ThrowExceptionMTVAL
-    // depends on the unregistered signal ExceptionMisaligned.
-    wire vAnyException = (e_ExceptionDecode | (e_InsnJALR & AddrBit1)) & ~ExecuteKill;
-    wire ThrowException = (e_ExceptionDirectJump & DirectJump) | vAnyException;
+    // depends on the unregistered signal (PreMemMisaligned & vUnkilledMemAccess).
+    wire vUnkilledDecodeException = e_ExceptionDecode & ~ExecuteKill;
+    wire ThrowException = ((e_ExceptionDirectJump | e_InsnJALR) & DirectJump) | vUnkilledDecodeException;
+//    wire vAnyException = (e_ExceptionDecode | (e_InsnJALR & AddrOfs[1])) & ~ExecuteKill;
+//    wire ThrowException = (e_ExceptionDirectJump & DirectJump) | vAnyException;
+
         // true if there really is an exception (in mem stage)
         // DirectJump is already masked by ~ExecuteKill
-    wire vMTVALException = ((PreMemMisaligned & vUnkilledMemAccess) | (AddrBit1 & vUnkilledJALR));
+    wire vUnkilledMemAccess = ~m_Kill & ~e_Kill & e_MemAccess;
+    wire vUnkilledJALR      = ~m_Kill & ~e_Kill & e_InsnJALR;
+    wire vMTVALException = ((PreMemMisaligned & vUnkilledMemAccess) | (AddrOfs[1] & vUnkilledJALR));
     wire ThrowExceptionMTVAL = (e_ExceptionDirectJump & DirectJump) | vMTVALException;
         // true for exceptions that set MTVAL (in mem stage)
 
 
-    wire ExceptionJALR = (e_InsnJALR & AddrBit1); 
 
-    wire [WORD_WIDTH-1:0] JumpTarget = ExceptionJALR ? d_CsrMTVEC : e_Target;
+
     wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~ExecuteKill)
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
-    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC       : NextOrSum;
-
-    // feed a register
+    wire [WORD_WIDTH-1:0] JumpTarget = e_SelMTVEC          ? d_CsrMTVEC : e_Target;
     wire [WORD_WIDTH-1:0] MemAddr   = DirectJump           ? JumpTarget : NextOrSum;
+    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC       : NextOrSum;
     wire [WORD_WIDTH-1:0] FetchPC   = DirectJump           ? JumpTarget : NoBranch;
     wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC       : f_PC;
 
     wire [WORD_WIDTH-1:0] Target =
-        (d_Insn[6:2]==5'b00011) 
-            ? f_PC 
-            : ((ExceptionUser | ExceptionMisaligned | ExceptionDirectJump) 
-                ? d_CsrMTVEC 
-                : PCImm);
-
+        (d_Insn[6:2]==5'b00011) // FENCE.I
+            ? f_PC
+            : PCImm;
 
 
 // ---------------------------------------------------------------------
@@ -911,6 +905,7 @@ module Pipeline #(
             // fake a jump to address 0 on reset
             e_ExceptionDecode <= 0;
             e_ExceptionDirectJump <= 0;
+            e_SelMTVEC <= 0;
             e_InsnJALR <= 0;
             e_InsnBEQ <= 0;
             e_InsnBLTorBLTU <= 0;
@@ -943,11 +938,14 @@ module Pipeline #(
         e_PCImm <= PCImm;
         e_Target <= Target;
 
+
         e_WrEn <= DecodeWrEn;
         e_InsnJALR <= InsnJALR;
         e_InsnBEQ <= InsnBEQ;
         e_InsnBLTorBLTU <= InsnBLTorBLTU;
         e_InsnBLTU <= InsnBLTU;
+        e_InsnFENCEI <=  (d_Insn[6:2]==5'b00011);
+
         e_EnShift <= EnShift;
         e_ShiftArith <= ShiftArith;
         e_ReturnPC <= ReturnPC;
@@ -1010,6 +1008,7 @@ module Pipeline #(
 
         e_ExceptionDecode <= ExceptionDecode;
         e_ExceptionDirectJump <= ExceptionDirectJump;
+        e_SelMTVEC <= InsnJALR | ExceptionDecode | ExceptionDirectJump;
 
         m_PC <= e_PC;
         m_Cause <= e_Cause;
@@ -1084,8 +1083,8 @@ module Pipeline #(
             d_CsrMCAUSE, RegSet.regs[REG_CSR_MCAUSE],
             d_CsrMTVAL, RegSet.regs[REG_CSR_MTVAL]);
 
-        $display("C m_PC=%h vFastResult=%h vExceptionResult=%h vNotSh=%h m_ThrowE=%b",
-            m_PC, vFastResult, vExceptionResult, vNotShiftResult, m_ThrowException);
+        $display("C m_PC=%h vFastResult=%h vNotSh=%h m_ThrowE=%b",
+            m_PC, vFastResult, vNotShiftResult, m_ThrowException);
         $display("C vLogicResult=%h vPCResult=%h vImmOrCsrResult=%h vCsrResult=%h e_CsrOp=%b",
             vLogicResult, vPCResult, vImmOrCsrResult, vCsrResult, e_CsrOp);
         $display("C vOverwriteByCsrRead=%h m_CsrOp=%b ResultOrMTVAL=%h",
