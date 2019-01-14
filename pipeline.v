@@ -575,54 +575,37 @@ module Pipeline #(
 
 
 
-//    wire [1:0] AddrOfs = AddrSum[1:0];
-/* TRY + 50LC +0.5ns
-*/
     wire [1:0] AddrOfs = {
         e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
         e_A[0] ^ e_Imm[0]};
-
-    wire PreMemMisaligned =
+    wire MemMisaligned =
         (((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
          ((e_MemWidth==1) &  AddrOfs[0]));
-    wire MemMisaligned = m_ThrowException | PreMemMisaligned;
-// VERY VERY DIRTY - MUST BE OPTIMIZED
-// if a exception is thrown and the next instruction is a load or store
-// then set MemByte and MemSign to 0
+    wire [6:0] MemBytePre = {                                                      (e_MemWidth==2) && (AddrOfs==0),
+                                              (e_MemWidth==1) && (AddrOfs==2),
+                                             ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0)),
+         (e_MemWidth==0) && (AddrOfs==3),
+        ((e_MemWidth==0) && (AddrOfs==2)) || ((e_MemWidth==1) && (AddrOfs==2)),
+         (e_MemWidth==0) && (AddrOfs==1),
+        ((e_MemWidth==0) && (AddrOfs==0)) || ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0))
+    };
+    wire [6:0] MemByte = m_ThrowException ? 0 : MemBytePre;
 
-    wire SignedLB = ~e_MemWidth[1] & ~e_MemWidth[0] & ~e_MemUnsignedLoad & ~MemMisaligned;
-    wire [6:0] MemByte = {
-         ~MemMisaligned & (  e_MemWidth[1] & ~e_MemWidth[0]),
-         ~MemMisaligned & ( ~e_MemWidth[1] &  e_MemWidth[0] &  AddrOfs[1]),
-         ~MemMisaligned & ((~e_MemWidth[1] &  e_MemWidth[0] & ~AddrOfs[1])               | (e_MemWidth[1] & ~e_MemWidth[0])),
-         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] &  AddrOfs[0])),
-         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] & ~AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] &  AddrOfs[1])),
-         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] &  AddrOfs[0])),
-         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] & ~AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] & ~AddrOfs[1]) | (e_MemWidth[1] & ~e_MemWidth[0]))};
-    wire [7:0] MemSign = {
-         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] &  AddrOfs[1] &  AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] &  AddrOfs[1])) & ~e_MemUnsignedLoad,
-        SignedLB &  AddrOfs[1] & ~AddrOfs[0],
-         ~MemMisaligned & ((~e_MemWidth[1] & ~e_MemWidth[0] & ~AddrOfs[1] &  AddrOfs[0]) | (~e_MemWidth[1] & e_MemWidth[0] & ~AddrOfs[1])) & ~e_MemUnsignedLoad,
-        SignedLB & ~AddrOfs[1] & ~AddrOfs[0],
-        SignedLB &  AddrOfs[1] &  AddrOfs[0],
-        SignedLB &  AddrOfs[1] & ~AddrOfs[0],
-        SignedLB & ~AddrOfs[1] &  AddrOfs[0],
-        SignedLB & ~AddrOfs[1] & ~AddrOfs[0]};
-        // MemSign[6]==MemSign[2] and MemSign[4]==MemSign[0]
-        // TRY: using this fact increases the clock rate
-        // m_MemSign[0] and m_MemSign[2] unused
+    wire [5:0] MemSignPre = {
+        ((e_MemWidth==0 && AddrOfs==3) || (e_MemWidth==1 && AddrOfs==2)),
+        ((e_MemWidth==0 && AddrOfs==1) || (e_MemWidth==1 && AddrOfs==0)),
+         (e_MemWidth==0 && AddrOfs==3),
+         (e_MemWidth==0 && AddrOfs==2),
+         (e_MemWidth==0 && AddrOfs==1),
+         (e_MemWidth==0 && AddrOfs==0)
+    };
+    wire [5:0] MemSign = (m_ThrowException | e_MemUnsignedLoad) ? 0 : MemSignPre;
 
-    // OPTIMIZE
-    // disable if misaligned!
     wire [3:0] MemWriteMask = {
-        (((e_MemWidth==0) &  AddrOfs[1] &  AddrOfs[0]) | ((e_MemWidth==1) &  AddrOfs[1])
-            | (e_MemWidth==2)) & ~MemMisaligned,
-        (((e_MemWidth==0) &  AddrOfs[1] & ~AddrOfs[0]) | ((e_MemWidth==1) &  AddrOfs[1])
-            | (e_MemWidth==2)) & ~MemMisaligned,
-        (((e_MemWidth==0) & ~AddrOfs[1] &  AddrOfs[0]) | ((e_MemWidth==1) & ~AddrOfs[1])
-            | (e_MemWidth==2)) & ~MemMisaligned,
-        (((e_MemWidth==0) & ~AddrOfs[1] & ~AddrOfs[0]) | ((e_MemWidth==1) & ~AddrOfs[1])
-            | (e_MemWidth==2)) & ~MemMisaligned
+        ((e_MemWidth==0) && (AddrOfs==3)) || ((e_MemWidth==1) && (AddrOfs==2)) || ((e_MemWidth==2) && (AddrOfs==0)),
+        ((e_MemWidth==0) && (AddrOfs==2)) || ((e_MemWidth==1) && (AddrOfs==2)) || ((e_MemWidth==2) && (AddrOfs==0)),
+        ((e_MemWidth==0) && (AddrOfs==1)) || ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0)),
+        ((e_MemWidth==0) && (AddrOfs==0)) || ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0))
     };
 
 
@@ -659,13 +642,12 @@ module Pipeline #(
     // lw  ..   31..16  15..8    7..0      1 0000    01 0000    0001    1010001 00000000
 
 
-    wire SignHH1 = (m_MemSign[7] ? mem_rdata[31] : 1'b0) |                      // 1 LE
-                   (m_MemSign[5] ? mem_rdata[15] : 1'b0);
-    wire SignHH0 = (m_MemSign[6] ? mem_rdata[23] : 1'b0) |                      // 1 LE
-                   (m_MemSign[4] ? mem_rdata[7]  : 1'b0);
+    wire SignHH1 = (m_MemSign[5] ? mem_rdata[31] : 1'b0) |                      // 1 LE
+                   (m_MemSign[4] ? mem_rdata[15] : 1'b0);
+    wire SignHH0 = (m_MemSign[2] ? mem_rdata[23] : 1'b0) |                      // 1 LE
+                   (m_MemSign[0] ? mem_rdata[7]  : 1'b0);
     wire [15:0] VectorHH = m_MemByte[6] ? mem_rdata[31:16] : 0;
     wire [15:0] HiHalf = (SignHH1|SignHH0) ? 16'hFFFF : VectorHH | ResultOrMTVAL[31:16];
-
 
     wire SignHB1 = (m_MemSign[3] ? mem_rdata[31] : 1'b0) |                      // 1 LE
                    (m_MemSign[1] ? mem_rdata[15] : 1'b0);
@@ -736,7 +718,7 @@ module Pipeline #(
     wire ExceptionDecode =
         (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
             // throw in decode: EBREAK or ECALL
-        (e_MemAccess & ~e_Kill & PreMemMisaligned);
+        (e_MemAccess & ~e_Kill & MemMisaligned);
             // throw in execute: memory access misaligned
             // forward to decode stage of following instruction bubble
 
@@ -759,7 +741,7 @@ module Pipeline #(
     // stage of the bubble instruction, but write MTVAL in the mem stage of the
     // actual instruction (one cycle earlier). Therefore ThrowException depends
     // on the registered signal e_ExceptionDecode, while ThrowExceptionMTVAL
-    // depends on the unregistered signal (PreMemMisaligned & vUnkilledMemAccess).
+    // depends on the unregistered signal (MemMisaligned & vUnkilledMemAccess).
     wire vUnkilledDecodeException = e_ExceptionDecode & ~ExecuteKill;
     wire ThrowException = ((e_ExceptionDirectJump | e_InsnJALR) & DirectJump) | vUnkilledDecodeException;
 //    wire vAnyException = (e_ExceptionDecode | (e_InsnJALR & AddrOfs[1])) & ~ExecuteKill;
@@ -769,7 +751,7 @@ module Pipeline #(
         // DirectJump is already masked by ~ExecuteKill
     wire vUnkilledMemAccess = ~m_Kill & ~e_Kill & e_MemAccess;
     wire vUnkilledJALR      = ~m_Kill & ~e_Kill & e_InsnJALR;
-    wire vMTVALException = ((PreMemMisaligned & vUnkilledMemAccess) | (AddrOfs[1] & vUnkilledJALR));
+    wire vMTVALException = ((MemMisaligned & vUnkilledMemAccess) | (AddrOfs[1] & vUnkilledJALR));
     wire ThrowExceptionMTVAL = (e_ExceptionDirectJump & DirectJump) | vMTVALException;
         // true for exceptions that set MTVAL (in mem stage)
 
