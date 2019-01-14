@@ -25,11 +25,11 @@ module top (
         reset_counter <= reset_counter + !rstn;
     end
 
-    reg        ff_SelMain;
-    reg        ff_SelBoot;
-    reg [31:0] ff_MappedRData;
     reg  [7:0] ff_Leds;
     reg        ff_TX;
+    reg        ff_MemWrEn;
+    reg [31:0] ff_MemAddr;
+    reg [31:0] ff_MemWData;
 
     wire MemWrEn;
     wire mem_wren_main = MemWrEn & ~mem_addr[28] & ~mem_addr[17];
@@ -39,34 +39,42 @@ module top (
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
-    wire [31:0] MemRData = ff_SelMain ? mem_rdata_main : 
-        (ff_SelBoot ? mem_rdata_boot : ff_MappedRData);
+
+
+    reg [31:0] MappedRData;
+    always @* begin
+        MappedRData <= 32'h0000006f; // avoid that code is executed
+        case (ff_MemAddr[15:12])
+            4'h2: MappedRData <= {31'b0, uart_rx};
+            4'h4: MappedRData <= CLOCK_RATE / BAUD_RATE;
+        endcase
+    end
+
+    wire [31:0] MemRData = ff_MemAddr[28]
+        ? MappedRData
+        : (ff_MemAddr[17]
+            ? mem_rdata_boot
+            : mem_rdata_main);
 
     always @(posedge clk) begin
         if (~rstn) begin
-            ff_SelMain <= 0;
-            ff_SelBoot <= 0;
-            ff_MappedRData <= 0;
+            ff_MemWrEn <= 0;
+            ff_MemAddr <= 0;
             ff_Leds <= 0;
             ff_TX <= 0;
         end else begin
-            ff_SelMain <= ~mem_addr[28] & ~mem_addr[17];
-            ff_SelBoot <= ~mem_addr[28] & mem_addr[17];
-
-            ff_MappedRData <= 32'h0000006f; // avoid that code is executed
-            case (mem_addr[15:12])
-                4'h2: ff_MappedRData <= {31'b0, uart_rx};
-                4'h4: ff_MappedRData <= CLOCK_RATE / BAUD_RATE;
-            endcase
-
-            if (MemWrEn & mem_addr[28]) begin
-                case (mem_addr[15:12])
+            if (ff_MemWrEn & ff_MemAddr[28]) begin
+                case (ff_MemAddr[15:12])
                     4'h0: ; // char output: ignored
-                    4'h1: ff_Leds <= mem_wdata[7:0];
+                    4'h1: ff_Leds <= ff_MemWData[7:0];
                     4'h2: ;
-                    4'h3: ff_TX <= mem_wdata[0];
+                    4'h3: ff_TX <= ff_MemWData[0];
                 endcase
             end
+
+            ff_MemWrEn  <= MemWrEn;
+            ff_MemAddr  <= mem_addr;
+            ff_MemWData <= mem_wdata;
         end
     end
 

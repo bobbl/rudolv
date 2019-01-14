@@ -407,9 +407,12 @@ module Pipeline #(
     wire BEQOpcode = ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
 
     wire JALorJALR = (d_Insn[6:4]==3'b110 && d_Insn[2]==1'b1); // JAL or JALR
-    wire UpperOpcode = (~d_Insn[6] && d_Insn[4:2]==3'b101);
-    wire ArithOpcode = (~d_Insn[6] && d_Insn[4:2]==3'b100);
-    wire MemOpcode   = (~d_Insn[6] && d_Insn[4:2]==3'b000); // ST or LD
+    wire UpperOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b101;
+    wire ArithOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b100;
+    wire MemAccess   = ~d_Insn[6] && d_Insn[4:2]==3'b000; // ST or LD
+    wire SysOpcode   =  d_Insn[6] && d_Insn[4:2]==3'b100;
+    wire PrivOpcode  =  d_Insn[5] && (d_Insn[14:12]==0);
+    wire MRETOpcode  = (d_Insn[23:20]==4'b0010);
 
     // LUT4 at level 2
     wire InsnJALR      = BranchOpcode & d_Insn[2];
@@ -421,22 +424,18 @@ module Pipeline #(
         ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
         || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)); // BNE or BGE or BGEU
 
-
-
-
-    wire MemAccess       = MemOpcode;
-    wire MemWr           = MemOpcode & d_Insn[5];
-    wire [1:0] MemWidth  = (MemOpcode & ~m_ThrowException) ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
+    wire MemWr          = MemAccess & d_Insn[5];
+    wire [1:0] MemWidth = (MemAccess & ~m_ThrowException) ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
 //                                    ~~~~~~~~~~~~~~~~~~~ to correctly set MCAUSE
 
-    // OPTIMIZE
-    wire SysOpcode = d_Insn[6] & (d_Insn[4:2]==3'b100);
-    wire CsrOpcode = (d_Insn[13] | d_Insn[12]) & d_Insn[5] & SysOpcode;
-    wire PrivOpcode = d_Insn[5] & (d_Insn[14:12]==0);
+    wire CsrOpcode   = SysOpcode & (d_Insn[13] | d_Insn[12]) & d_Insn[5];
     wire [1:0] CsrOp = (SysOpcode & d_Insn[5] & ~m_ThrowException) ? d_Insn[13:12] : 2'b00;
+    wire InsnMRET = SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
 
-    wire InsnMRET = SysOpcode & PrivOpcode & ~d_Insn[22] & d_Insn[21]; // check more bits?
-    wire vTwoCycleInsn  = (MemOpcode | CsrOpcode | InsnMRET);
+    // LUT4 at level 3
+    wire vTwoCycleInsn  = (MemAccess | CsrOpcode | InsnMRET);
+
+    // LUT at level 4
     wire SaveFetch =  (d_Bubble | (vTwoCycleInsn & ~d_SaveFetch)) & ~m_Kill;
     wire Bubble    = (~d_Bubble & vTwoCycleInsn) & ~m_Kill;
 
@@ -455,7 +454,7 @@ module Pipeline #(
     wire JumpOpcode = d_Insn[6] & d_Insn[5] & ~d_Insn[4] & d_Insn[2];
     wire DestReg0 = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
-    wire EnableWrite = ArithOrUpper | JumpOpcode | (MemOpcode & ~d_Insn[5]);
+    wire EnableWrite = ArithOrUpper | JumpOpcode | (MemAccess & ~d_Insn[5]);
     wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
     // level 3
     wire DecodeWrEn = ((EnableWrite | CsrOpcode) & ~DisableWrite) | m_ThrowException;
@@ -470,9 +469,7 @@ module Pipeline #(
     wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD or SUB
     wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
     wire SetUnsigned = d_Insn[12];
-
     wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
-
     wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12] & ~m_ThrowException;
     wire ShiftArith = d_Insn[30];
 
@@ -524,7 +521,6 @@ module Pipeline #(
         e_SelSum ? Sum[0]              : (vFastResult[0] | vCondResultBit)};
 
 
-//    wire [WORD_WIDTH-1:0] vShiftAlternative = m_ThrowException ? m_PC : vSumOrFast;
     wire vCombinedThrow = m_ThrowException | w_ThrowException;
     wire [WORD_WIDTH-1:0] vMEPCorMCAUSE = w_ThrowException ? w_Cause : m_PC;
     wire [WORD_WIDTH-1:0] vShiftAlternative = vCombinedThrow ? vMEPCorMCAUSE : vSumOrFast;
@@ -578,6 +574,8 @@ module Pipeline #(
     wire [1:0] AddrOfs = {
         e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
         e_A[0] ^ e_Imm[0]};
+//    wire [1:0] AddrOfs = AddrSum[1:0];
+
     wire MemMisaligned =
         (((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
          ((e_MemWidth==1) &  AddrOfs[0]));
@@ -654,7 +652,6 @@ module Pipeline #(
     wire [7:0] SelByteHB = (m_MemByte[5] ? mem_rdata[31:24] : 8'b0) |           // 8 LE
                            (m_MemByte[4] ? mem_rdata[15:8]  : 8'b0);
     wire [7:0] HiByte = (SignHH0 | SignHB1) ? 8'hFF : (SelByteHB | ResultOrMTVAL[15:8]);        // 8 LE
-    // m_MemSign[0] and m_MemSign[2] unused
 
     wire [7:0] SelByteLB1 = (m_MemByte[3] ? mem_rdata[31:24] : 8'b0) |          // 8 LE
                             (m_MemByte[2] ? mem_rdata[23:16] : 8'b0);
@@ -662,7 +659,6 @@ module Pipeline #(
                             (m_MemByte[0] ? mem_rdata[ 7:0]  : 8'b0);
     wire [7:0] LoByte = SelByteLB1 | SelByteLB0 | ResultOrMTVAL[7:0];
 
-    // OPTIMIZE
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
 
     wire [WORD_WIDTH-1:0] MemWriteData = {
@@ -973,7 +969,7 @@ module Pipeline #(
         // potential exception cause (only one possible per instruction class)
         if (~d_Bubble) begin
             // in a bubble the exception cause remains unchanged
-            if (MemOpcode) begin
+            if (MemAccess) begin
                 e_Cause <= d_Insn[5] 
                     ? 6         // store address misaligned
                     : 4;        // load address misaligned
