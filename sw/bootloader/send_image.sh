@@ -9,6 +9,5 @@ then
 fi
 
 stty -F "$1" 115200
-#stty -F "$1" 9600
 echo $(wc -c < "$2") >> "$1"
 cat "$2" >> "$1"

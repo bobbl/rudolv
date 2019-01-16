@@ -1,4 +1,15 @@
-// wrapper for iCE40 HX8K breakout board
+/* wrapper for iCE40 HX8K breakout board
+
+Memory map
+0000'0000h main memory (BRAM, 8 KiByte)
+0000'1E00h start address of boot loader
+
+1000'1000h LEDs (each bit), lowest bit indicates program termination
+1000'2000h UART RX
+1000'3000h UART TX
+1000'4000h UART signal width of one bit in clock cycles
+*/
+
 module top (
     input clk,
     input uart_rx,
@@ -6,66 +17,63 @@ module top (
     output [7:0] leds
 );
     localparam integer CLOCK_RATE = 12_000_000;
-//    localparam integer BAUD_RATE = 115200;
-    localparam integer BAUD_RATE = 9600;
+    localparam integer BAUD_RATE = 115200;
 
     reg [5:0] reset_counter = 0;
     wire rstn = &reset_counter;
-
     always @(posedge clk) begin
         reset_counter <= reset_counter + !rstn;
     end
 
-    reg        ff_SelMapped;
-    reg [31:0] ff_MappedRData;
     reg  [7:0] ff_Leds;
     reg        ff_TX;
+    reg        ff_MemWrEn;
+    reg [31:0] ff_MemAddr;
+    reg [31:0] ff_MemWData;
 
     wire MemWrEn;
-    wire mem_wren = MemWrEn & mem_addr[28];
+    wire mem_wren = MemWrEn & ~mem_addr[28];
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire [31:0] MemRData = ff_SelMapped ? ff_MappedRData : mem_rdata;
+
+    reg [31:0] MappedRData;
+    always @* begin
+        MappedRData <= 32'h0000006f; // avoid that code is executed
+        case (ff_MemAddr[15:12])
+            4'h2: MappedRData <= {31'b0, uart_rx};
+            4'h4: MappedRData <= CLOCK_RATE / BAUD_RATE;
+        endcase
+    end
+
+    wire [31:0] MemRData = ff_MemAddr[28] ? MappedRData : mem_rdata;
 
     always @(posedge clk) begin
         if (~rstn) begin
-            ff_SelMapped <= 0;
-            ff_MappedRData <= 0;
+            ff_MemWrEn <= 0;
+            ff_MemAddr <= 0;
             ff_Leds <= 0;
             ff_TX <= 0;
         end else begin
-            ff_SelMapped <= mem_addr[28];
-            ff_MappedRData <= {31'b0, uart_rx};
-
-            ff_MappedRData <= 0;
-            case (mem_addr[15:12])
-                4'h2: ff_MappedRData <= {31'b0, uart_rx};
-                4'h4: ff_MappedRData <= CLOCK_RATE / BAUD_RATE;
-            endcase
-
-            if (mem_wren & mem_addr[28]) begin
-                case (mem_addr[15:12])
+            if (ff_MemWrEn & ff_MemAddr[28]) begin
+                case (ff_MemAddr[15:12])
                     4'h0: ; // char output: ignored
-                    4'h1: ff_Leds <= mem_wdata[7:0];
+                    4'h1: ff_Leds <= ff_MemWData[7:0];
                     4'h2: ;
-                    4'h3: ff_TX <= mem_wdata[0];
+                    4'h3: ff_TX <= ff_MemWData[0];
                 endcase
             end
+
+            ff_MemWrEn  <= MemWrEn;
+            ff_MemAddr  <= mem_addr;
+            ff_MemWData <= mem_wdata;
         end
     end
 
-    Memory mem (
-        .clk    (clk),
-        .wren   (mem_wren),
-        .wmask  (mem_wmask),
-        .wdata  (mem_wdata),
-        .addr   (mem_addr[12:2]),
-        .rdata  (mem_rdata)
-    );
-
-    Pipeline pipe (
+    Pipeline #(
+        .START_PC       (32'h_0000_1e00)
+    ) pipe (
         .clk            (clk),
         .rstn           (rstn),
 
@@ -76,13 +84,22 @@ module top (
         .mem_rdata      (MemRData)
     );
 
+    BRAMMemory mem (
+        .clk    (clk),
+        .wren   (mem_wren),
+        .wmask  (mem_wmask),
+        .wdata  (mem_wdata),
+        .addr   (mem_addr[12:2]),
+        .rdata  (mem_rdata)
+    );
+
     assign leds = ff_Leds;
     assign uart_tx = ff_TX;
 endmodule
 
 
 // instruction memory
-module Memory (
+module BRAMMemory (
     input clk, 
     input wren,
     input [3:0] wmask,
@@ -93,7 +110,10 @@ module Memory (
     reg [31:0] mem [0:2047];
 
     initial begin
-        $readmemh("code.hex", mem);
+        $readmemh("bootloader_hx8k.hex", mem);
+            // bootloader code is the same as on other platforms, but at the
+            // beginning there must be '@1e00' to load the code at the correct
+            // start adress
     end
 
     always @(posedge clk) begin

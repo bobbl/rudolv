@@ -7,8 +7,9 @@ SRC_FILES = crt.S $(PROJ).c
 all: $(PROJ).hex
 
 $(PROJ).elf: $(SRC_FILES) link.ld
-	$(RV32_PREFIX)gcc -O0 -march=rv32i -I. -nostartfiles -Tlink.ld -o $@ $(SRC_FILES)
+	$(RV32_PREFIX)gcc -O2 -march=rv32i -I. -nostartfiles -Tlink.ld -o $@ $(SRC_FILES)
 
+#CAUTION: with -O0 the code is too slow for 115200 baud at 12 MHz
 
 
 %.bin: %.elf

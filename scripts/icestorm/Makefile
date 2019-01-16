@@ -21,10 +21,10 @@ all: arachne timing
 %.hex:
 	$(MAKE) -C `dirname $@`
 
-code.hex: $(CODE)
-	cp $(CODE) code.hex
+bootloader_hx8k.hex: ../../sw/bootloader/bootloader.hex
+	sed -e 's/@0 /@780 /' $< > $@
 
-hx8k.blif: hx8k.v $(VERILOG_FILES) code.hex
+hx8k.blif: hx8k.v $(VERILOG_FILES) bootloader_hx8k.hex
 	$(YOSYS) -ql $(DEVICE).log -p 'synth_ice40 -top top -blif $@' $< $(VERILOG_FILES)
 
 up5k.blif: up5k.v $(VERILOG_FILES) ../../sw/bootloader/bootloader.hex
@@ -55,7 +55,8 @@ nextpnr: $(DEVICE).json $(DEVICE).pcf
 
 clean:
 	rm -f code.hex $(DEVICE).blif $(DEVICE).json $(DEVICE).asc \
-	    $(DEVICE).rpt $(DEVICE).bin $(DEVICE).log
+	    $(DEVICE).rpt $(DEVICE).bin $(DEVICE).log \
+	    bootloader_hx8k.hex
 
 .SECONDARY:
 .PHONY: all prog timing prog arachne nextpnr clean

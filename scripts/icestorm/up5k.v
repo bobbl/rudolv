@@ -1,4 +1,15 @@
-// wrapper for iCE40 UP5K MDP board
+/* wrapper for iCE40 UP5K MDP board
+
+Memory map
+0000'0000h main memory (SPRAM)
+
+0002'0000h boot loader (BRAM)
+
+1000'1000h LEDs (each bit), lowest bit indicates program termination
+1000'2000h UART RX
+1000'3000h UART TX
+1000'4000h UART signal width of one bit in clock cycles
+*/
 
 module top (
     input uart_rx,
@@ -16,14 +27,12 @@ module top (
         .CLKHF(clk)   );
     defparam OSCInst0.CLKHF_DIV = "0b01"; // 48 MHz / 2
 
-
-
     reg [5:0] reset_counter = 0;
     wire rstn = &reset_counter;
-
     always @(posedge clk) begin
         reset_counter <= reset_counter + !rstn;
     end
+
 
     reg  [7:0] ff_Leds;
     reg        ff_TX;
@@ -39,7 +48,6 @@ module top (
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
-
 
     reg [31:0] MappedRData;
     always @* begin

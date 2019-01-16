@@ -893,6 +893,12 @@ module Pipeline #(
             e_PCImm <= 0;
             e_Target <= START_PC;
 
+            m_WrEn <= 0;
+            w_WrEn <= 0;
+            m_ThrowExceptionMTVAL <= 0;
+            m_ThrowException <= 0;
+            w_ThrowException <= 0;
+
         end else begin
 
 //            f_ChangeInsn <= ChangeInsn;
@@ -1049,6 +1055,10 @@ module Pipeline #(
 
 
         if (DirectJump || e_InsnJALR) $display("B jump %h", FetchPC);
+
+
+        $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
+            FwdAE, FwdAM, FwdAW, ForwardAR, ForwardAM, ForwardAE);
 
 
 /*
