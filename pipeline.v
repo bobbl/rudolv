@@ -287,9 +287,13 @@ module Pipeline #(
 
 
     // CSR
-    reg e_Nop;
-    reg [63:0] e_CounterCycle;
-    reg [63:0] e_CounterRetired;
+    reg        e_CarryCYCLE;
+    reg [32:0] e_CounterCYCLE;
+    reg [31:0] e_CounterCYCLEH;
+    reg        e_CarryINSTRET;
+    reg [32:0] e_CounterINSTRET;
+    reg [31:0] e_CounterINSTRETH;
+
     reg [1:0] e_CsrOp;
     reg [1:0] m_CsrOp;
     reg [4:0] e_CsrImm;
@@ -609,20 +613,28 @@ module Pipeline #(
 
 
 
-    // memory stage
-    wire MemWrEn = m_WrEn | m_ThrowExceptionMTVAL;
-    wire [5:0] MemWrNo = m_ThrowExceptionMTVAL ? REG_CSR_MTVAL : m_WrNo;
+    wire Retired = ~d_Bubble & ~m_Kill & ~e_Kill;
+        // For the number of retired instructions, do not count bubbles or
+        // killed instructions. In the execute stage that can be decided.
+    wire [32:0] CounterCYCLE    = {1'b0, e_CounterCYCLE} + 1;
+    wire [31:0] CounterCYCLEH   = e_CounterCYCLEH + e_CarryCYCLE;
+    wire [32:0] CounterINSTRET  = {1'b0, e_CounterINSTRET} + {62'b0, Retired};
+    wire [31:0] CounterINSTRETH = e_CounterINSTRETH + e_CarryINSTRET;
+    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_CsrImm} : e_A;
 
     wire [WORD_WIDTH-1:0] vCsrValue =
         ~m_CsrCounter[2] ? e_A // bypass from decode of previous cycle
-                         : (~m_CsrCounter[1] ? (m_CsrCounter[0] ? e_CounterCycle[63:32]
-                                                                : e_CounterCycle[31:0])
-                                             : (m_CsrCounter[0] ? e_CounterRetired[63:32]
-                                                                : e_CounterRetired[31:0]));
+                         : (~m_CsrCounter[1] ? (m_CsrCounter[0] ? e_CounterCYCLEH
+                                                                : e_CounterCYCLE)
+                                             : (m_CsrCounter[0] ? e_CounterINSTRETH
+                                                                : e_CounterINSTRET));
     wire [WORD_WIDTH-1:0] vOverwriteByCsrRead = m_CsrOp==0 ? m_WrData : vCsrValue;
     wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : vOverwriteByCsrRead;
 
+    // memory stage
 
+    wire MemWrEn = m_WrEn | m_ThrowExceptionMTVAL;
+    wire [5:0] MemWrNo = m_ThrowExceptionMTVAL ? REG_CSR_MTVAL : m_WrNo;
     //                                     6         54         3210
     //          31..16  15..8    7..0      HiHalf    HiByte   LoByte    MemByte MemSign
     // lb  00    7..7    7..7    7..0      0 0001    00 0001    0001    0000001 00010001
@@ -685,6 +697,7 @@ module Pipeline #(
         .sum(Sum)
     );
 
+/*
     wire [WORD_WIDTH-1:0] AddrSum; // = e_A + e_Imm; // 32 LE
     FastAdder AddrAdder(
         .a(e_A),
@@ -700,8 +713,10 @@ module Pipeline #(
         .carry(1'b0),
         .sum(NextPC)
     );
+*/
 
-
+    wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
+    wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
 
 
 
@@ -755,17 +770,25 @@ module Pipeline #(
 
 
     wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~ExecuteKill)
-        ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
-    wire [WORD_WIDTH-1:0] JumpTarget = e_SelMTVEC          ? d_CsrMTVEC : e_Target;
-    wire [WORD_WIDTH-1:0] MemAddr   = DirectJump           ? JumpTarget : NextOrSum;
-    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC       : NextOrSum;
-    wire [WORD_WIDTH-1:0] FetchPC   = DirectJump           ? JumpTarget : NoBranch;
-    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC       : f_PC;
+        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
+    wire [WORD_WIDTH-1:0] JumpTarget = e_Target; //e_SelMTVEC            ? d_CsrMTVEC : e_Target;
+    wire [WORD_WIDTH-1:0] MemAddr   = (vJump & ~ExecuteKill) ? JumpTarget : NextOrSum;
+    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill)   ? f_PC       : NextOrSum;
+    wire [WORD_WIDTH-1:0] FetchPC   = (vJump & ~ExecuteKill) ? JumpTarget : NoBranch;
+    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill)   ? d_PC       : f_PC;
 
+/*
     wire [WORD_WIDTH-1:0] Target =
         (d_Insn[6:2]==5'b00011) // FENCE.I
             ? f_PC
             : PCImm;
+*/
+    wire SelMTVEC = InsnJALR | ExceptionDecode | ExceptionDirectJump;
+
+    wire [WORD_WIDTH-1:0] Target = SelMTVEC ? d_CsrMTVEC : (
+        (d_Insn[6:2]==5'b00011) // FENCE.I
+            ? f_PC
+            : PCImm);
 
 
 // ---------------------------------------------------------------------
@@ -861,8 +884,6 @@ module Pipeline #(
         .rd2(RdData2)
     );
 
-    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_CsrImm} : e_A;
-
     always @(posedge clk) begin
         if (!rstn) begin
             e_WrEn <= 0;
@@ -875,9 +896,12 @@ module Pipeline #(
             d_Bubble <= 0;
             d_DelayedInsn <= 0;
 
-            e_CounterCycle <= 0;
-            e_CounterRetired <= 0;
-            e_Nop <= 0;
+            e_CarryCYCLE <= 0;
+            e_CounterCYCLE <= 0;
+            e_CounterCYCLEH <= 0;
+            e_CarryINSTRET <= 0;
+            e_CounterINSTRET <= 0;
+            e_CounterINSTRETH <= 0;
 
 
             // fake a jump to address 0 on reset
@@ -992,7 +1016,7 @@ module Pipeline #(
 
         e_ExceptionDecode <= ExceptionDecode;
         e_ExceptionDirectJump <= ExceptionDirectJump;
-        e_SelMTVEC <= InsnJALR | ExceptionDecode | ExceptionDirectJump;
+        e_SelMTVEC <= SelMTVEC;
 
         m_PC <= e_PC;
         m_Cause <= e_Cause;
@@ -1001,13 +1025,16 @@ module Pipeline #(
         m_ThrowExceptionMTVAL <= ThrowExceptionMTVAL;
         w_ThrowException <= m_ThrowException;
 
-        // CSR decode
-        e_Nop <= d_Bubble | ExecuteKill;
-        e_CounterCycle <= e_CounterCycle + 1;
-        e_CounterRetired <= e_CounterRetired + {63'b0, (~e_Nop & ~ExecuteKill)};
+            // CSR decode
+            e_CarryCYCLE      = CounterCYCLE[32];
+            e_CounterCYCLE    = CounterCYCLE[31:0];
+            e_CounterCYCLEH   = CounterCYCLEH;
+            e_CarryINSTRET    = CounterINSTRET[32];
+            e_CounterINSTRET  = CounterINSTRET[31:0];
+            e_CounterINSTRETH = CounterINSTRETH;
+
         e_CsrCounter <= CsrCounter;
         m_CsrCounter <= e_CsrCounter;
-
         e_CsrOp <= CsrOp;
         m_CsrOp <= (d_Bubble ? e_CsrOp : 2'b00) & {~ExecuteKill, ~ExecuteKill};
             // set CsrOp for mem stage only in first cycle of csr instruction

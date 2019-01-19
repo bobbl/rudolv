@@ -41,9 +41,10 @@ module top (
     reg [31:0] ff_MemWData;
 
     wire MemWrEn;
-    wire mem_wren_main = MemWrEn & ~mem_addr[28] & ~mem_addr[17];
+    wire mem_wren_main = 1; //MemWrEn & ~mem_addr[28] & ~mem_addr[17];
     wire mem_wren_boot = MemWrEn & ~mem_addr[28] & mem_addr[17];
     wire  [3:0] mem_wmask;
+    wire  [3:0] mem_wmask_main = (MemWrEn & ~mem_addr[28] & ~mem_addr[17]) ? mem_wmask : 0;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
@@ -102,7 +103,7 @@ module top (
     SPRAMMemory mainmem (
         .clk    (clk),
         .wren   (mem_wren_main),
-        .wmask  (mem_wmask),
+        .wmask  (mem_wmask_main),
         .wdata  (mem_wdata),
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata_main)
