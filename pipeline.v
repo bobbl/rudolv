@@ -428,6 +428,7 @@ module Pipeline #(
         ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
         || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)); // BNE or BGE or BGEU
 
+
     wire MemWr          = MemAccess & d_Insn[5];
     wire [1:0] MemWidth = (MemAccess & ~m_ThrowException) ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
 //                                    ~~~~~~~~~~~~~~~~~~~ to correctly set MCAUSE
@@ -580,76 +581,34 @@ module Pipeline #(
         e_A[0] ^ e_Imm[0]};
 //    wire [1:0] AddrOfs = AddrSum[1:0];
 
-    wire MemMisaligned =
-        (((e_MemWidth==2) & (AddrOfs[1] | AddrOfs[0])) |
-         ((e_MemWidth==1) &  AddrOfs[0]));
-    wire [6:0] MemBytePre = {                                                      (e_MemWidth==2) && (AddrOfs==0),
-                                              (e_MemWidth==1) && (AddrOfs==2),
-                                             ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0)),
-         (e_MemWidth==0) && (AddrOfs==3),
-        ((e_MemWidth==0) && (AddrOfs==2)) || ((e_MemWidth==1) && (AddrOfs==2)),
-         (e_MemWidth==0) && (AddrOfs==1),
-        ((e_MemWidth==0) && (AddrOfs==0)) || ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0))
-    };
-    wire [6:0] MemByte = m_ThrowException ? 0 : MemBytePre;
+    reg [17:0] MemSignals;
+    always @* case ({e_MemWidth, AddrOfs})
+        4'b0000: MemSignals = 18'b0_0000001_000001_0001;
+        4'b0001: MemSignals = 18'b0_0000010_010010_0010;
+        4'b0010: MemSignals = 18'b0_0000100_000100_0100;
+        4'b0011: MemSignals = 18'b0_0001000_101000_1000;
+        4'b0100: MemSignals = 18'b0_0010001_010000_0011;
+        4'b0101: MemSignals = 18'b1_0000000_000000_0000;
+        4'b0110: MemSignals = 18'b0_0100100_100000_1100;
+        4'b0111: MemSignals = 18'b1_0000000_000000_0000;
+        4'b1000: MemSignals = 18'b0_1010001_000000_1111;
+        4'b1001: MemSignals = 18'b1_0000000_000000_0000;
+        4'b1010: MemSignals = 18'b1_0000000_000000_0000;
+        4'b1011: MemSignals = 18'b1_0000000_000000_0000;
+        default: MemSignals = 0;
+    endcase
 
-    wire [5:0] MemSignPre = {
-        ((e_MemWidth==0 && AddrOfs==3) || (e_MemWidth==1 && AddrOfs==2)),
-        ((e_MemWidth==0 && AddrOfs==1) || (e_MemWidth==1 && AddrOfs==0)),
-         (e_MemWidth==0 && AddrOfs==3),
-         (e_MemWidth==0 && AddrOfs==2),
-         (e_MemWidth==0 && AddrOfs==1),
-         (e_MemWidth==0 && AddrOfs==0)
-    };
-    wire [5:0] MemSign = (m_ThrowException | e_MemUnsignedLoad) ? 0 : MemSignPre;
-
-    wire [3:0] MemWriteMask = {
-        ((e_MemWidth==0) && (AddrOfs==3)) || ((e_MemWidth==1) && (AddrOfs==2)) || ((e_MemWidth==2) && (AddrOfs==0)),
-        ((e_MemWidth==0) && (AddrOfs==2)) || ((e_MemWidth==1) && (AddrOfs==2)) || ((e_MemWidth==2) && (AddrOfs==0)),
-        ((e_MemWidth==0) && (AddrOfs==1)) || ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0)),
-        ((e_MemWidth==0) && (AddrOfs==0)) || ((e_MemWidth==1) && (AddrOfs==0)) || ((e_MemWidth==2) && (AddrOfs==0))
-    };
+    wire MemMisaligned = MemSignals[17];
+    wire [6:0] MemByte = m_ThrowException ? 0 : MemSignals[16:10];
+    wire [5:0] MemSign = (m_ThrowException | e_MemUnsignedLoad) ? 0 : MemSignals[9:4];
+    wire [3:0] MemWriteMask = MemSignals[3:0];
 
 
-
-
-    wire Retired = ~d_Bubble & ~m_Kill & ~e_Kill;
-        // For the number of retired instructions, do not count bubbles or
-        // killed instructions. In the execute stage that can be decided.
-    wire [32:0] CounterCYCLE    = {1'b0, e_CounterCYCLE} + 1;
-    wire [31:0] CounterCYCLEH   = e_CounterCYCLEH + e_CarryCYCLE;
-    wire [32:0] CounterINSTRET  = {1'b0, e_CounterINSTRET} + {62'b0, Retired};
-    wire [31:0] CounterINSTRETH = e_CounterINSTRETH + e_CarryINSTRET;
-    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_CsrImm} : e_A;
-
-    wire [WORD_WIDTH-1:0] vCsrValue =
-        ~m_CsrCounter[2] ? e_A // bypass from decode of previous cycle
-                         : (~m_CsrCounter[1] ? (m_CsrCounter[0] ? e_CounterCYCLEH
-                                                                : e_CounterCYCLE)
-                                             : (m_CsrCounter[0] ? e_CounterINSTRETH
-                                                                : e_CounterINSTRET));
-    wire [WORD_WIDTH-1:0] vOverwriteByCsrRead = m_CsrOp==0 ? m_WrData : vCsrValue;
-    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : vOverwriteByCsrRead;
 
     // memory stage
 
     wire MemWrEn = m_WrEn | m_ThrowExceptionMTVAL;
     wire [5:0] MemWrNo = m_ThrowExceptionMTVAL ? REG_CSR_MTVAL : m_WrNo;
-    //                                     6         54         3210
-    //          31..16  15..8    7..0      HiHalf    HiByte   LoByte    MemByte MemSign
-    // lb  00    7..7    7..7    7..0      0 0001    00 0001    0001    0000001 00010001
-    // lb  01   15..15  15..15  15..8      0 0010    00 0010    0010    0000010 00100010
-    // lb  10   23..23  23..23  23..16     0 0100    00 0100    0100    0000100 01000100
-    // lb  11   31..31  31..31  31..24     0 1000    00 1000    1000    0001000 10001000
-    // lbu 00     -       -      7..0      0 0000    00 0000    0001    0000001 00000000
-    // lbu 01     -       -     15..8      0 0000    00 0000    0010    0000010 00000000
-    // lbu 10     -       -     23..16     0 0000    00 0000    0100    0000100 00000000
-    // lbu 11     -       -     31..24     0 0000    00 0000    1000    0001000 00000000
-    // lh  0.   15..15  15..8    7..0      0 0010    01 0000    0001    0010001 00100000
-    // lh  1.   31..31  31..24  23..16     0 1000    10 0000    0100    0100100 10000000
-    // lhu 0.     -     15..8    7..0      0 0000    01 0000    0001    0010001 00000000
-    // lhu 1.     -     31..24  23..16     0 0000    10 0000    0100    0100100 00000000
-    // lw  ..   31..16  15..8    7..0      1 0000    01 0000    0001    1010001 00000000
 
 
     wire SignHH1 = (m_MemSign[5] ? mem_rdata[31] : 1'b0) |                      // 1 LE
@@ -679,6 +638,41 @@ module Pipeline #(
         e_MemWidth==0 ? e_B[7:0] : e_B[15:8],
         e_B[7:0]};
 
+    //                                     6         54         3210
+    //          31..16  15..8    7..0      HiHalf    HiByte   LoByte    MemByte MemSign
+    // lb  00    7..7    7..7    7..0      0 0001    00 0001    0001    0000001 00010001
+    // lb  01   15..15  15..15  15..8      0 0010    00 0010    0010    0000010 00100010
+    // lb  10   23..23  23..23  23..16     0 0100    00 0100    0100    0000100 01000100
+    // lb  11   31..31  31..31  31..24     0 1000    00 1000    1000    0001000 10001000
+    // lbu 00     -       -      7..0      0 0000    00 0000    0001    0000001 00000000
+    // lbu 01     -       -     15..8      0 0000    00 0000    0010    0000010 00000000
+    // lbu 10     -       -     23..16     0 0000    00 0000    0100    0000100 00000000
+    // lbu 11     -       -     31..24     0 0000    00 0000    1000    0001000 00000000
+    // lh  0.   15..15  15..8    7..0      0 0010    01 0000    0001    0010001 00100000
+    // lh  1.   31..31  31..24  23..16     0 1000    10 0000    0100    0100100 10000000
+    // lhu 0.     -     15..8    7..0      0 0000    01 0000    0001    0010001 00000000
+    // lhu 1.     -     31..24  23..16     0 0000    10 0000    0100    0100100 00000000
+    // lw  ..   31..16  15..8    7..0      1 0000    01 0000    0001    1010001 00000000
+
+    // CSRs
+
+    wire Retired = ~d_Bubble & ~m_Kill & ~e_Kill;
+        // For the number of retired instructions, do not count bubbles or
+        // killed instructions. In the execute stage that can be decided.
+    wire [32:0] CounterCYCLE    = {1'b0, e_CounterCYCLE} + 1;
+    wire [31:0] CounterCYCLEH   = e_CounterCYCLEH + e_CarryCYCLE;
+    wire [32:0] CounterINSTRET  = {1'b0, e_CounterINSTRET} + {62'b0, Retired};
+    wire [31:0] CounterINSTRETH = e_CounterINSTRETH + e_CarryINSTRET;
+    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_CsrImm} : e_A;
+
+    wire [WORD_WIDTH-1:0] vCsrValue =
+        ~m_CsrCounter[2] ? e_A // bypass from decode of previous cycle
+                         : (~m_CsrCounter[1] ? (m_CsrCounter[0] ? e_CounterCYCLEH
+                                                                : e_CounterCYCLE)
+                                             : (m_CsrCounter[0] ? e_CounterINSTRETH
+                                                                : e_CounterINSTRET));
+    wire [WORD_WIDTH-1:0] vOverwriteByCsrRead = m_CsrOp==0 ? m_WrData : vCsrValue;
+    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : vOverwriteByCsrRead;
 
 
     // PC generation
