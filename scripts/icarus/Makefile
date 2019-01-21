@@ -31,11 +31,13 @@ compliance: tb_compliance.v $(VERILOG_FILES)
 	    && echo "ok - $(NAME)"
 
 picorv32-dhrystone:
+	$(MAKE) -C ../../sw/picorv32-dhrystone
 	$(IVERILOG) -o tmp.vvp -DDHRYSTONE -DCODE=\"../../sw/picorv32-dhrystone/dhrystone.hex\" \
 	    tb_dhrystone.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
 riscv-dhrystone:
+	$(MAKE) -C ../../sw/riscv-dhrystone
 	$(IVERILOG) -o tmp.vvp -DDHRYSTONE -DCODE=\"../../sw/riscv-dhrystone/dhrystone.hex\" \
 	    tb_dhrystone.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
