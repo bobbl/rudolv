@@ -454,6 +454,9 @@ module Pipeline #(
 
 
 
+
+
+
     // level 1
     wire ArithOrUpper = ~d_Insn[6] & d_Insn[4] & ~d_Insn[3];
     wire JumpOpcode = d_Insn[6] & d_Insn[5] & ~d_Insn[4] & d_Insn[2];
@@ -675,6 +678,23 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : vOverwriteByCsrRead;
 
 
+    // potential exception cause (only one possible per instruction class)
+    reg [3:0] Cause;
+    always @* case ({d_Insn[20], d_Insn[6:4]})
+        4'b0000: Cause = 4;  // LW:           load address misaligned
+        4'b0010: Cause = 6;  // SW:           store address misaligned
+        4'b0110: Cause = 0;  // JAL,JALR,B**: instruction address misaligned
+        4'b0111: Cause = 11; // ECALL:        environment call from M-mode
+        4'b1000: Cause = 4;  // LW:           load address misaligned
+        4'b1010: Cause = 6;  // SW:           store address misaligned
+        4'b1110: Cause = 0;  // JAL,JALR,B**: instruction address misaligned
+        4'b1111: Cause = 3;  // EBREAK:       breakpoint
+        default: Cause = 0;
+    endcase
+
+
+
+
     // PC generation
 
 
@@ -746,10 +766,8 @@ module Pipeline #(
     // depends on the unregistered signal (MemMisaligned & vUnkilledMemAccess).
 
     wire ThrowException = ((e_ExceptionDirectJump & vJump) | vExc) & ~ExecuteKill;
-
-
-
         // true if there really is an exception (in mem stage)
+
         // DirectJump is already masked by ~ExecuteKill
     wire vUnkilledMemAccess = ~m_Kill & ~e_Kill & e_MemAccess;
     wire vUnkilledJALR      = ~m_Kill & ~e_Kill & e_InsnJALR;
@@ -757,6 +775,10 @@ module Pipeline #(
     wire ThrowExceptionMTVAL = (e_ExceptionDirectJump & DirectJump) | vMTVALException;
         // true for exceptions that set MTVAL (in mem stage)
 
+/* TRY: unexpectedly decreases clock rate
+    wire vMTVALException = ((MemMisaligned & e_MemAccess) | (AddrOfs[1] & e_InsnJALR));
+    wire ThrowExceptionMTVAL = ((e_ExceptionDirectJump & vJump) | vMTVALException) & ~ExecuteKill;
+*/
 
 
 
@@ -820,6 +842,11 @@ module Pipeline #(
         endcase
     end
 
+/* TRY
+    wire [3:0] AlternaCause = d_Bubble 
+            ? (e_MemWr ? 6 : 4)
+            : (d_Insn[4] ? (d_Insn[20] ? 3 : 11) : 0);
+*/
 
     wire vFirstCsrCycle = CsrOpcode & ~m_Kill & ~d_Bubble;
     wire vUnkilledMRET = InsnMRET & ~m_Kill & ~d_Bubble;
@@ -988,22 +1015,11 @@ module Pipeline #(
         e_PC <= d_Bubble ? e_PC : d_PC;
 
         // potential exception cause (only one possible per instruction class)
-        if (~d_Bubble) begin
-            // in a bubble the exception cause remains unchanged
-            if (MemAccess) begin
-                e_Cause <= d_Insn[5] 
-                    ? 6         // store address misaligned
-                    : 4;        // load address misaligned
-            end else if (d_Insn[6:4]==3'b110) begin
-                 // jump or branch
-                e_Cause <= 0;   // instruction address misaligned
-            end else begin
-                // software trap
-                e_Cause <= d_Insn[20]
-                    ? 3         // breakpoint
-                    : 11;       // environment call from M-mode
-            end
-        end
+        e_Cause <= d_Bubble 
+            ? (e_MemWr ? 6 : 4)
+            : Cause;
+        // TRY: unexpectedly decreases clock rate
+        // e_Cause <= AlternaCause;
 
         e_ExceptionDecode <= ExceptionDecode;
         e_ExceptionDirectJump <= ExceptionDirectJump;
@@ -1017,18 +1033,19 @@ module Pipeline #(
         w_ThrowException <= m_ThrowException;
 
             // CSR decode
-            e_CarryCYCLE      = CounterCYCLE[32];
-            e_CounterCYCLE    = CounterCYCLE[31:0];
-            e_CounterCYCLEH   = CounterCYCLEH;
-            e_CarryINSTRET    = CounterINSTRET[32];
-            e_CounterINSTRET  = CounterINSTRET[31:0];
-            e_CounterINSTRETH = CounterINSTRETH;
+            e_CarryCYCLE      <= CounterCYCLE[32];
+            e_CounterCYCLE    <= CounterCYCLE[31:0];
+            e_CounterCYCLEH   <= CounterCYCLEH;
+            e_CarryINSTRET    <= CounterINSTRET[32];
+            e_CounterINSTRET  <= CounterINSTRET[31:0];
+            e_CounterINSTRETH <= CounterINSTRETH;
 
         e_CsrCounter <= CsrCounter;
         m_CsrCounter <= e_CsrCounter;
         e_CsrOp <= CsrOp;
-        m_CsrOp <= (d_Bubble ? e_CsrOp : 2'b00) & {~ExecuteKill, ~ExecuteKill};
-            // set CsrOp for mem stage only in first cycle of csr instruction
+        m_CsrOp <= (d_Bubble & ~e_Kill & ~m_Kill) ? e_CsrOp : 2'b00;
+
+
         e_CsrImm <= d_Insn[19:15];
         m_CsrUpdate <= CsrUpdate;
 
