@@ -1,4 +1,4 @@
-/* verilator lint_off INITIALDLY */
+// CAUTION: if a single (empty) line is removed, the synthesis result will become 2 MHz worse (up5k)
 
 //`define DISABLE_ADD
 
@@ -462,7 +462,7 @@ module Pipeline #(
     wire EnableWrite = ArithOrUpper | JumpOpcode | (MemAccess & ~d_Insn[5]);
     wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
     // level 3
-    wire DecodeWrEn = ((EnableWrite | CsrOpcode) & ~DisableWrite) | m_ThrowException;
+    wire DecodeWrEn = ((EnableWrite | CsrOpcode) & ~DisableWrite);
 
     wire [5:0] DecodeWrNo = m_ThrowException ? REG_CSR_MCAUSE : {d_InsnAuxWrNoH, d_Insn[11:7]};
 
@@ -475,7 +475,7 @@ module Pipeline #(
     wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
     wire SetUnsigned = d_Insn[12];
     wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
-    wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12] & ~m_ThrowException;
+    wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12];
     wire ShiftArith = d_Insn[30];
 
 
@@ -516,19 +516,19 @@ module Pipeline #(
         //   * ALUResult must be set to rs1 in the first cycle. Then it is
         //     correctly forwarded to the execute stage of the second cycle
 
-    wire [WORD_WIDTH-1:0] vFastResult = vLogicResult | vPCResult | vUIResult | vCsrResult;
+    wire [WORD_WIDTH-1:0] vFastResultPre = vLogicResult | vPCResult | vUIResult | vCsrResult;
+    wire [WORD_WIDTH-1:0] vMEPCorMCAUSE = w_ThrowException ? w_Cause : m_PC;
+    wire vCombinedThrow = m_ThrowException | w_ThrowException;
+    wire [WORD_WIDTH-1:0] vFastResult = vCombinedThrow ? vMEPCorMCAUSE : vFastResultPre;
 
     wire vSetAnd = e_SetCond & (e_A[31] ^ e_B[31]);
     wire vSetXor = e_SetCond & ((e_A[31] ^ e_SetUnsigned) & (e_B[31] ^ e_SetUnsigned));
     wire vCondResultBit = ((Sum[31] & vSetAnd) ^ vSetXor);
-    wire [WORD_WIDTH-1:0] vSumOrFast = {
-        e_SelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
-        e_SelSum ? Sum[0]              : (vFastResult[0] | vCondResultBit)};
+    wire vSelSum = e_SelSum & ~m_ThrowException & ~w_ThrowException;
+    wire [WORD_WIDTH-1:0] vShiftAlternative = {
+        vSelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
+        vSelSum ? Sum[0]              : (vFastResult[0] | vCondResultBit)};
 
-
-    wire vCombinedThrow = m_ThrowException | w_ThrowException;
-    wire [WORD_WIDTH-1:0] vMEPCorMCAUSE = w_ThrowException ? w_Cause : m_PC;
-    wire [WORD_WIDTH-1:0] vShiftAlternative = vCombinedThrow ? vMEPCorMCAUSE : vSumOrFast;
 
 
 
@@ -747,10 +747,10 @@ module Pipeline #(
     // actual instruction (one cycle earlier). Therefore ThrowException depends
     // on the registered signal e_ExceptionDecode, while ThrowExceptionMTVAL
     // depends on the unregistered signal (MemMisaligned & vUnkilledMemAccess).
-    wire vUnkilledDecodeException = e_ExceptionDecode & ~ExecuteKill;
-    wire ThrowException = ((e_ExceptionDirectJump | e_InsnJALR) & DirectJump) | vUnkilledDecodeException;
-//    wire vAnyException = (e_ExceptionDecode | (e_InsnJALR & AddrOfs[1])) & ~ExecuteKill;
-//    wire ThrowException = (e_ExceptionDirectJump & DirectJump) | vAnyException;
+
+    wire ThrowException = ((e_ExceptionDirectJump & vJump) | vExc) & ~ExecuteKill;
+
+
 
         // true if there really is an exception (in mem stage)
         // DirectJump is already masked by ~ExecuteKill
