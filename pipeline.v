@@ -1,4 +1,5 @@
-// CAUTION: if a single (empty) line is removed, the synthesis result will become 2 MHz worse (up5k)
+
+
 
 //`define DISABLE_ADD
 
@@ -410,7 +411,6 @@ module Pipeline #(
     wire BranchOpcode = (d_Insn[6:3]==4'b1100);
     wire BEQOpcode = ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
 
-    wire JALorJALR = (d_Insn[6:4]==3'b110 && d_Insn[2]==1'b1); // JAL or JALR
     wire UpperOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b101;
     wire ArithOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b100;
     wire MemAccess   = ~d_Insn[6] && d_Insn[4:2]==3'b000; // ST or LD
@@ -470,7 +470,7 @@ module Pipeline #(
 
     // control signals for the ALU that are set in the decode stage
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) ? d_Insn[13:12] : 2'b01;
-    wire ReturnPC    = JALorJALR; // JAL or JALR
+    wire ReturnPC = (d_Insn[6:4]==3'b110 && d_Insn[2]==1'b1); // JAL or JALR
     wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD or SUB
     wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
     wire SetUnsigned = d_Insn[12];
@@ -712,8 +712,6 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
     wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
 
-
-
     wire ExceptionDirectJump =
         ((d_Insn[6:2]==5'b11011) & d_Insn[21]) |
             // JAL with unaligned offset
@@ -733,7 +731,6 @@ module Pipeline #(
     wire vExc = (e_InsnJALR & AddrOfs[1]) | e_ExceptionDecode;
     wire vNotBEQ = (Xor31 ^ (And31 & Sum[31])) | vExc;
     wire vJump = e_InsnBEQ ? (e_InvertBranch ^ Equal) : vNotBEQ;
-
 
 
     wire ExecuteKill = m_Kill | e_Kill;
