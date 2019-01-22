@@ -8,7 +8,6 @@
 `define EQUAL_COMPERATOR EqualInfere
 `endif
 
-
 module RegisterSet(
     input clk, 
     input we,
@@ -31,136 +30,6 @@ module RegisterSet(
         rd1 <= regs[ra1];
         rd2 <= regs[ra2];
     end
-endmodule
-
-
-
-
-module FastAdder(
-    input [31:0] a,
-    input [31:0] b,
-    input carry,
-    output [31:0] sum
-);
-`ifdef DISABLE_ADD
-    assign sum = a ^ b ^ {31'b0, carry};
-`else
-    assign sum = a + b + {31'b0, carry};
-`endif
-endmodule
-
-
-
-module ArithAdder(
-    input [31:0] a,
-    input [31:0] b,
-    input carry,
-    output [31:0] sum
-);
-`ifdef DISABLE_ADD
-    assign sum = a ^ b ^ {31'b0, carry};
-`else
-    assign sum = a + b + {31'b0, carry};
-`endif
-endmodule
-
-
-
-
-
-
-
-
-// ---------------------------------------------------------------------
-// equality check alternatives
-// ---------------------------------------------------------------------
-
-
-// do not check equality (only for debug purposes)
-module EqualDisable #(
-    parameter WORD_WIDTH = 32
-) (
-    input [WORD_WIDTH-1:0] a,
-    input [WORD_WIDTH-1:0] nb,
-    output equal
-);
-    assign equal = (a[0] == ~nb[0]);
-endmodule
-
-
-// let the tool infere a solution (often not the best result)
-module EqualInfere #(
-    parameter WORD_WIDTH = 32
-) (
-    input [WORD_WIDTH-1:0] a,
-    input [WORD_WIDTH-1:0] nb,
-    output equal
-);
-    assign equal = (a == ~nb);
-endmodule
-
-
-// logarithmic tree: slow
-module EqualLog #(
-    parameter WORD_WIDTH = 32
-) (
-    input [WORD_WIDTH-1:0] a,
-    input [WORD_WIDTH-1:0] nb,
-    output equal
-);
-    wire [0:15] Eq0;
-    wire [0:3] Eq1;
-    assign Eq0[0] = a[1:0] == ~nb[1:0];
-    assign Eq0[1] = a[3:2] == ~nb[3:2];
-    assign Eq0[2] = a[5:4] == ~nb[5:4];
-    assign Eq0[3] = a[7:6] == ~nb[7:6];
-    assign Eq0[4] = a[9:8] == ~nb[9:8];
-    assign Eq0[5] = a[11:10] == ~nb[11:10];
-    assign Eq0[6] = a[13:12] == ~nb[13:12];
-    assign Eq0[7] = a[15:14] == ~nb[15:14];
-    assign Eq0[8] = a[17:16] == ~nb[17:16];
-    assign Eq0[9] = a[19:18] == ~nb[19:18];
-    assign Eq0[10] = a[21:20] == ~nb[21:20];
-    assign Eq0[11] = a[23:22] == ~nb[23:22];
-    assign Eq0[12] = a[25:24] == ~nb[25:24];
-    assign Eq0[13] = a[27:26] == ~nb[27:26];
-    assign Eq0[14] = a[29:28] == ~nb[29:28];
-    assign Eq0[15] = a[31:30] == ~nb[31:30];
-
-    assign Eq1[0] = Eq0[0] & Eq0[1] & Eq0[2] & Eq0[3];
-    assign Eq1[1] = Eq0[4] & Eq0[5] & Eq0[6] & Eq0[7];
-    assign Eq1[2] = Eq0[8] & Eq0[9] & Eq0[10] & Eq0[11];
-    assign Eq1[3] = Eq0[12] & Eq0[13] & Eq0[14] & Eq0[15];
-
-    assign equal = Eq1[0] & Eq1[1] & Eq1[2] & Eq1[3];
-endmodule
-
-
-// sequential adders: same speed as inference
-module EqualSeqAdd #(
-    parameter WORD_WIDTH = 32
-) (
-    input [WORD_WIDTH-1:0] a,
-    input [WORD_WIDTH-1:0] nb,
-    output equal
-);
-    wire [WORD_WIDTH-1:0] Sum = a + nb + 1;
-    wire [WORD_WIDTH:0] EqSum = {1'b0, Sum} + {1'b0, {WORD_WIDTH{1'b1}}};
-    assign equal = ~EqSum[WORD_WIDTH];
-endmodule
-
-
-// parallel adders: fastest solution
-module EqualParAdd #(
-    parameter WORD_WIDTH = 32
-) (
-    input [WORD_WIDTH-1:0] a,
-    input [WORD_WIDTH-1:0] nb,
-    output equal
-);
-    wire [WORD_WIDTH:0] AminusB = {1'b0, a} + {1'b0, nb} + 1;
-    wire [WORD_WIDTH:0] BminusA = {1'b0, ~a} + {1'b0, ~nb} + 1;
-    assign equal = AminusB[WORD_WIDTH] & BminusA[WORD_WIDTH];
 endmodule
 
 
@@ -318,24 +187,7 @@ module Pipeline #(
 
 
     wire [WORD_WIDTH-1:0] ImmI = {{21{d_Insn[31]}}, d_Insn[30:20]};
-    //wire [WORD_WIDTH-1:0] ImmS = {{21{d_Insn[31]}}, d_Insn[30:25], d_Insn[11:8], d_Insn[7]};
-    //wire [WORD_WIDTH-1:0] ImmB = {{20{d_Insn[31]}}, d_Insn[7], d_Insn[30:2OD5], d_Insn[11:8], 1'b0};
-    //wire [WORD_WIDTH-1:0] ImmU = {d_Insn[31:12], 12'b0};
-    //wire [WORD_WIDTH-1:0] ImmJ = {{12{d_Insn[31]}}, d_Insn[19:12], d_Insn[20], d_Insn[30:21], 1'b0};
 
-
-    //                                31|30..20|19..12|11|10..5 | 4..1 |0
-    // ImmB for branch (opcode 11000) 31|  31  |  31  | 7|30..25|11..8 |-
-    // ImmJ for JAL    (opcode 11011) 31|  31  |19..12|20|30..25|24..21|-
-    // ImmU for AUIPC  (opcode 00101) 31|30..20|19..12| -|   -  |   -  |-
-    wire [WORD_WIDTH-1:0] ImmBJU = { // 30 LE
-        d_Insn[31],                                                     // 31
-        d_Insn[4] ? d_Insn[30:20] : {11{d_Insn[31]}},                   // 30..20
-        d_Insn[2] ? d_Insn[19:12] : {8{d_Insn[31]}},                    // 19..12
-        ~d_Insn[4] & (d_Insn[2] ? d_Insn[20] : d_Insn[7]),              // 11
-        d_Insn[4] ? 6'b000000 : d_Insn[30:25],                          // 10..5
-        {4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
-        1'b0};                                                          // 0
 
     //                               31|30..12|11..5 | 4..0
     // ImmI for JALR  (opcode 11011) 31|  31  |31..25|24..20
@@ -355,17 +207,20 @@ module Pipeline #(
         d_Insn[4] ? 7'b0000000 : d_Insn[31:25],                         // 11..5
         d_Insn[4] ? 5'b0 : (d_Insn[6:5]==2'b01 ? d_Insn[11:7] : d_Insn[24:20])}; // 4..0
 
-    wire [WORD_WIDTH-1:0] PCImm; // = d_PC + ImmBJU;
-    FastAdder AddPCImm(
-        .a(d_PC),
-        .b(ImmBJU),
-        .carry(1'b0),
-        .sum(PCImm)
-    );
+    //                                31|30..20|19..12|11|10..5 | 4..1 |0
+    // ImmB for branch (opcode 11000) 31|  31  |  31  | 7|30..25|11..8 |-
+    // ImmJ for JAL    (opcode 11011) 31|  31  |19..12|20|30..25|24..21|-
+    // ImmU for AUIPC  (opcode 00101) 31|30..20|19..12| -|   -  |   -  |-
+    wire [WORD_WIDTH-1:0] ImmBJU = { // 30 LE
+        d_Insn[31],                                                     // 31
+        d_Insn[4] ? d_Insn[30:20] : {11{d_Insn[31]}},                   // 30..20
+        d_Insn[2] ? d_Insn[19:12] : {8{d_Insn[31]}},                    // 19..12
+        ~d_Insn[4] & (d_Insn[2] ? d_Insn[20] : d_Insn[7]),              // 11
+        d_Insn[4] ? 6'b000000 : d_Insn[30:25],                          // 10..5
+        {4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
+        1'b0};                                                          // 0
 
-
-
-
+    wire [WORD_WIDTH-1:0] PCImm = d_PC + ImmBJU;
 
 
 
@@ -408,49 +263,61 @@ module Pipeline #(
 
     // LUT4 at level 1
 
-    wire BranchOpcode = (d_Insn[6:3]==4'b1100);
-    wire BEQOpcode = ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
+    wire SetUnsigned    = d_Insn[12];
+    wire ShiftArith     = d_Insn[30];
 
-    wire UpperOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b101;
-    wire ArithOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b100;
-    wire MemAccess   = ~d_Insn[6] && d_Insn[4:2]==3'b000; // ST or LD
-    wire SysOpcode   =  d_Insn[6] && d_Insn[4:2]==3'b100;
-    wire PrivOpcode  =  d_Insn[5] && (d_Insn[14:12]==0);
-    wire MRETOpcode  = (d_Insn[23:20]==4'b0010);
+    wire BranchOpcode   = (d_Insn[6:3]==4'b1100);
+    wire BEQOpcode      = ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
+
+    wire UpperOpcode    = ~d_Insn[6] && d_Insn[4:2]==3'b101;
+    wire ArithOpcode    = ~d_Insn[6] && d_Insn[4:2]==3'b100;
+    wire MemAccess      = ~d_Insn[6] && d_Insn[4:2]==3'b000; // ST or LD
+    wire SysOpcode      =  d_Insn[6] && d_Insn[4:2]==3'b100;
+    wire PrivOpcode     =  d_Insn[5] && (d_Insn[14:12]==0);
+    wire JumpOpcode     =  d_Insn[6:4]==3'b110 && d_Insn[2]; // JAL or JALR
+    wire MRETOpcode     = (d_Insn[23:20]==4'b0010);
+
+    wire SUBorSLL       =  d_Insn[13] | d_Insn[12] | (d_Insn[5] & d_Insn[30]);
+    wire SUBandSLL      = ~d_Insn[14] & ~d_Insn[6] & d_Insn[4];
+    wire PartBranch     = (d_Insn[6:4]==3'b110);
+    wire LowPart        = (d_Insn[3:0]==4'b0011);
+    wire CsrPart        = (d_Insn[5] & (d_Insn[13] | d_Insn[12]));
+
+    wire vKillOrBubble  = m_Kill | d_Bubble;
 
     // LUT4 at level 2
-    wire InsnJALR      = BranchOpcode & d_Insn[2];
-    wire InsnBEQ       = BranchOpcode & BEQOpcode;
-    wire InsnBLTorBLTU = BranchOpcode & ~d_Insn[2] & d_Insn[14];
-    wire InsnBLTU      = BranchOpcode & ~d_Insn[2] & d_Insn[13];
-    wire InvertBranch  = 
-        (   d_Insn[6:2]==5'b11011 // JAL
-        ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
-        || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)); // BNE or BGE or BGEU
+    wire InsnJALR       = BranchOpcode & d_Insn[2];
+    wire InsnBEQ        = BranchOpcode & BEQOpcode;
+    wire InsnBLTorBLTU  = BranchOpcode & ~d_Insn[2] & d_Insn[14];
+    wire InsnBLTU       = BranchOpcode & ~d_Insn[2] & d_Insn[13];
 
+    wire SelSum         = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD or SUB
+    wire SetCond        = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
+    wire SelImm         = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
+    wire EnShift        = ArithOpcode & ~d_Insn[13] & d_Insn[12];
 
-    wire MemWr          = MemAccess & d_Insn[5];
+    wire MemWr          =  MemAccess & d_Insn[5];
     wire [1:0] MemWidth = (MemAccess & ~m_ThrowException) ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
 //                                    ~~~~~~~~~~~~~~~~~~~ to correctly set MCAUSE
 
-    wire CsrOpcode   = SysOpcode & (d_Insn[13] | d_Insn[12]) & d_Insn[5];
-    wire [1:0] CsrOp = (SysOpcode & d_Insn[5] & ~m_ThrowException) ? d_Insn[13:12] : 2'b00;
-    wire InsnMRET = SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
+    wire [1:0] CsrOp    = (SysOpcode & d_Insn[5] & ~m_ThrowException) ? d_Insn[13:12] : 2'b00;
+    wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
+    wire vUnkilledMRET  =  SysOpcode & PrivOpcode & MRETOpcode & ~vKillOrBubble;
+    wire vFirstCsrCycle =  SysOpcode & CsrPart & ~vKillOrBubble;
 
-    // LUT4 at level 3
-    wire vTwoCycleInsn  = (MemAccess | CsrOpcode | InsnMRET);
+    wire NegB           = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
+    wire vMemOrCsr      = MemAccess | (SysOpcode & CsrPart);
 
-    // LUT at level 4
-    wire SaveFetch =  (d_Bubble | (vTwoCycleInsn & ~d_SaveFetch)) & ~m_Kill;
-    wire Bubble    = (~d_Bubble & vTwoCycleInsn) & ~m_Kill;
+    // LUT at level 3
+    wire Bubble    = ~d_Bubble & (vMemOrCsr | InsnMRET) & ~m_Kill;
 
-    wire SUBorSLL   = d_Insn[13] |
-        (~d_Insn[13] & d_Insn[12]) |
-        (~d_Insn[13] & d_Insn[5] & d_Insn[30]);
-    wire SUBandSLL  = ~d_Insn[14] & ~d_Insn[6] & d_Insn[4];
-    wire PartBranch = d_Insn[6] & d_Insn[5] & ~d_Insn[4];
-    wire LowPart    = (d_Insn[3:0] == 4'b0011);
-    wire NegB = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
+    wire SaveFetch =  (d_Bubble | ((vMemOrCsr | InsnMRET) & ~d_SaveFetch)) & ~m_Kill;
+
+
+    wire InvertBranch   = 
+        (   d_Insn[6:2]==5'b11011 // JAL
+        ||  d_Insn[6:2]==5'b00011 // FENCE.I*/
+        || (d_Insn[6:2]==5'b11000 && d_Insn[12]==1'b1)); // BNE or BGE or BGEU
 
 
 
@@ -459,27 +326,74 @@ module Pipeline #(
 
     // level 1
     wire ArithOrUpper = ~d_Insn[6] & d_Insn[4] & ~d_Insn[3];
-    wire JumpOpcode = d_Insn[6] & d_Insn[5] & ~d_Insn[4] & d_Insn[2];
     wire DestReg0 = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
     wire EnableWrite = ArithOrUpper | JumpOpcode | (MemAccess & ~d_Insn[5]);
     wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
     // level 3
-    wire DecodeWrEn = ((EnableWrite | CsrOpcode) & ~DisableWrite);
+    wire DecodeWrEn = ((EnableWrite | (SysOpcode & CsrPart)) & ~DisableWrite);
 
     wire [5:0] DecodeWrNo = m_ThrowException ? REG_CSR_MCAUSE : {d_InsnAuxWrNoH, d_Insn[11:7]};
 
 
 
     // control signals for the ALU that are set in the decode stage
-    wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) ? d_Insn[13:12] : 2'b01;
-    wire ReturnPC = (d_Insn[6:4]==3'b110 && d_Insn[2]==1'b1); // JAL or JALR
-    wire SelSum  = ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD or SUB
-    wire SetCond = ArithOpcode & ~d_Insn[14] & d_Insn[13]; // SLT or SLTU
-    wire SetUnsigned = d_Insn[12];
-    wire SelImm = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
-    wire EnShift = ArithOpcode & ~d_Insn[13] & d_Insn[12];
-    wire ShiftArith = d_Insn[30];
+//    wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) ? d_Insn[13:12] : 2'b01;
+    wire [1:0] SelLogic = (ArithOpcode & d_Insn[14]) 
+        ? d_Insn[13:12] 
+        : ((BranchOpcode & BEQOpcode) ? 2'b00 : 2'b01);
+
+
+
+
+
+    wire ExceptionDirectJump =
+        (d_Insn[6:4]==3'b110) &
+        (((d_Insn[3:2]==2'b11) & d_Insn[21]) |
+            // JAL with unaligned offset
+        ((d_Insn[3:2]==2'b00) & d_Insn[8]));
+            // branch with unaligned offset
+
+    wire ExceptionDecode =
+        (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
+            // throw in decode: EBREAK or ECALL
+        (~e_Kill & MemMisaligned);
+            // throw in execute: memory access misaligned
+            // forward to decode stage of following instruction bubble
+    wire SelMTVEC = InsnJALR | ExceptionDecode | ExceptionDirectJump;
+
+
+
+
+
+
+    // forwarding
+
+    wire FwdAE = e_WrEn & (d_RdNo1 == e_WrNo); // 4 LE
+    wire FwdAM = m_WrEn & (d_RdNo1 == m_WrNo); // 4 LE
+    wire FwdAW = w_WrEn & (d_RdNo1 == w_WrNo); // 4 LE
+    wire [WORD_WIDTH-1:0] ForwardAR = (FwdAE | FwdAM | FwdAW) ? 0 : RdData1; // 32 LE
+    wire [WORD_WIDTH-1:0] ForwardAM = FwdAM ? MemResult : (FwdAW ? w_WrData : 0); // 32 LE
+    wire [WORD_WIDTH-1:0] ForwardAE = FwdAE ? ALUResult : (ForwardAR | ForwardAM); // 32 LE
+
+    wire FwdBE = e_WrEn & (d_RdNo2 == e_WrNo) & ~SelImm; // 4 LE
+    wire FwdBM = m_WrEn & (d_RdNo2 == m_WrNo) & ~SelImm; // 4 LE
+    wire FwdBW = w_WrEn & (d_RdNo2 == w_WrNo); // 4 LE
+    wire [WORD_WIDTH-1:0] ForwardImm = SelImm ? ImmI : 0; // 32 LE
+    wire [WORD_WIDTH-1:0] ForwardBRW = SelImm ?    0 : (FwdBW ? w_WrData : RdData2); // 32 LE
+    wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBRW | ForwardImm); // 32 LE
+    wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}}; // 32 LE
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -488,6 +402,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vLogicResult = ~e_SelLogic[1]
         ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
         : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
+    wire Equal = (vLogicResult == ~0);
     wire [WORD_WIDTH-1:0] vPCResult =
           (e_ReturnPC ? d_PC : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
@@ -519,21 +434,20 @@ module Pipeline #(
         //   * ALUResult must be set to rs1 in the first cycle. Then it is
         //     correctly forwarded to the execute stage of the second cycle
 
-    wire [WORD_WIDTH-1:0] vFastResultPre = vLogicResult | vPCResult | vUIResult | vCsrResult;
-    wire [WORD_WIDTH-1:0] vMEPCorMCAUSE = w_ThrowException ? w_Cause : m_PC;
     wire vCombinedThrow = m_ThrowException | w_ThrowException;
-    wire [WORD_WIDTH-1:0] vFastResult = vCombinedThrow ? vMEPCorMCAUSE : vFastResultPre;
-
     wire vSetAnd = e_SetCond & (e_A[31] ^ e_B[31]);
     wire vSetXor = e_SetCond & ((e_A[31] ^ e_SetUnsigned) & (e_B[31] ^ e_SetUnsigned));
     wire vCondResultBit = ((Sum[31] & vSetAnd) ^ vSetXor);
     wire vSelSum = e_SelSum & ~m_ThrowException & ~w_ThrowException;
+    wire vEnableShift = e_EnShift & ~vCombinedThrow;
+
+    wire [WORD_WIDTH-1:0] vFastResultPre = vLogicResult | vPCResult | vUIResult | vCsrResult;
+    wire [WORD_WIDTH-1:0] vMEPCorMCAUSE = w_ThrowException ? w_Cause : m_PC;
+    wire [WORD_WIDTH-1:0] vFastResult = vCombinedThrow ? vMEPCorMCAUSE : vFastResultPre;
+    wire [WORD_WIDTH-1:0] Sum = e_A + e_B + e_Carry;
     wire [WORD_WIDTH-1:0] vShiftAlternative = {
         vSelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
         vSelSum ? Sum[0]              : (vFastResult[0] | vCondResultBit)};
-
-
-
 
     //                         62|61..32|31|30..0
     // SLL (funct3 001)        31|30..1 | 0|  -
@@ -544,7 +458,6 @@ module Pipeline #(
         ~e_ShiftRight ? e_A[30:1] : (e_ShiftArith ? {30{e_A[31]}} :  30'b0),
         ~e_ShiftRight ? e_A[0] : e_A[31],
         ~e_ShiftRight ? 31'b0 : e_A[30:0]};
-    wire vEnableShift = e_EnShift & ~vCombinedThrow;
 
     wire [46:0] vShift1 = e_B[4] ? vShift0[62:16] : vShift0[46:0];
     wire [38:0] vShift2 = e_B[3] ? vShift1[46:8]  : vShift1[38:0];
@@ -554,26 +467,6 @@ module Pipeline #(
 
     wire ExecuteWrEn = m_ThrowException | w_ThrowException | (e_WrEn & ~ExecuteKill);
     wire [5:0] ExecuteWrNo = m_ThrowException ? REG_CSR_MEPC : e_WrNo;
-
-
-
-
-    // forwarding
-
-    wire FwdAE = e_WrEn & (d_RdNo1 == e_WrNo); // 4 LE
-    wire FwdAM = m_WrEn & (d_RdNo1 == m_WrNo); // 4 LE
-    wire FwdAW = w_WrEn & (d_RdNo1 == w_WrNo); // 4 LE
-    wire [WORD_WIDTH-1:0] ForwardAR = (FwdAE | FwdAM | FwdAW) ? 0 : RdData1; // 32 LE
-    wire [WORD_WIDTH-1:0] ForwardAM = FwdAM ? MemResult : (FwdAW ? w_WrData : 0); // 32 LE
-    wire [WORD_WIDTH-1:0] ForwardAE = FwdAE ? ALUResult : (ForwardAR | ForwardAM); // 32 LE
-
-    wire FwdBE = e_WrEn & (d_RdNo2 == e_WrNo) & ~SelImm; // 4 LE
-    wire FwdBM = m_WrEn & (d_RdNo2 == m_WrNo) & ~SelImm; // 4 LE
-    wire FwdBW = w_WrEn & (d_RdNo2 == w_WrNo); // 4 LE
-    wire [WORD_WIDTH-1:0] ForwardImm = SelImm ? ImmI : 0; // 32 LE
-    wire [WORD_WIDTH-1:0] ForwardBRW = SelImm ?    0 : (FwdBW ? w_WrData : RdData2); // 32 LE
-    wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBRW | ForwardImm); // 32 LE
-    wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}}; // 32 LE
 
 
 
@@ -697,67 +590,52 @@ module Pipeline #(
 
     // PC generation
 
-
-    wire Equal;
-    `EQUAL_COMPERATOR #(
-        .WORD_WIDTH(WORD_WIDTH)
-    ) EqualityCheck(e_A, e_B, Equal);
-
-    wire [WORD_WIDTH-1:0] Sum; // = e_A + e_B + e_Carry; // 32 LE
-    ArithAdder ALUAdder(
-        .a(e_A),
-        .b(e_B),
-        .carry(e_Carry),
-        .sum(Sum)
-    );
-
 /*
-    wire [WORD_WIDTH-1:0] AddrSum; // = e_A + e_Imm; // 32 LE
-    FastAdder AddrAdder(
-        .a(e_A),
-        .b(e_Imm),
-        .carry(1'b0),
-        .sum(AddrSum)
-    );
-
-    wire [WORD_WIDTH-1:0] NextPC; // = f_PC + 4;
-    FastAdder IncPC(
-        .a(f_PC),
-        .b(32'h00000004),
-        .carry(1'b0),
-        .sum(NextPC)
-    );
-*/
-
-    wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
-    wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
-
-    wire ExceptionDirectJump =
-        ((d_Insn[6:2]==5'b11011) & d_Insn[21]) |
-            // JAL with unaligned offset
-        ((d_Insn[6:2]==5'b11000) & d_Insn[8]);
-            // branch with unaligned offset
-
-    wire ExceptionDecode =
-        (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
-            // throw in decode: EBREAK or ECALL
-        (e_MemAccess & ~e_Kill & MemMisaligned);
-            // throw in execute: memory access misaligned
-            // forward to decode stage of following instruction bubble
-
     wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
-    wire Xor31 = e_InvertBranch ^ Lower;
-    wire And31 = e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]);
+    wire Xor31 = (e_InvertBranch ^ Lower) | vExc;
+    wire And31 = e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]) & ~e_ExceptionDecode;
     wire vExc = (e_InsnJALR & AddrOfs[1]) | e_ExceptionDecode;
-    wire vNotBEQ = (Xor31 ^ (And31 & Sum[31])) | vExc;
-    wire vJump = e_InsnBEQ ? (e_InvertBranch ^ Equal) : vNotBEQ;
+    wire vUnkilledNotBEQ = ~e_InsnBEQ & ~ExecuteKill;
+    wire vNotBEQ = (Xor31 ^ (And31 & Sum[31])) & vUnkilledNotBEQ;
+    wire vUnkilledBEQ = e_InsnBEQ & ~ExecuteKill;
+    wire vBEQ = vUnkilledBEQ & (e_InvertBranch ^ Equal);
+    wire vJump = vBEQ | vNotBEQ;
+        // taken conditional branch or direct jump
+*/
+    wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
+    wire vInvert = e_InvertBranch | e_ExceptionDecode;
+    wire And31 = e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]) & ~e_ExceptionDecode;
+    wire vUnkilledNotBEQ = ~e_InsnBEQ & ~ExecuteKill;
+    wire vUnkilledBEQ = e_InsnBEQ & ~ExecuteKill;
+
+    wire Xor31 = (vInvert ^ Lower) | (e_InsnJALR & AddrOfs[1]);
+    wire vBEQ = vUnkilledBEQ & (e_InvertBranch ^ Equal);
+
+    wire vNotBEQ = (Xor31 ^ (And31 & Sum[31])) & vUnkilledNotBEQ;
+
+    wire vJump = vBEQ | vNotBEQ;
+        // taken conditional branch or direct jump or exception
+
 
 
     wire ExecuteKill = m_Kill | e_Kill;
-    wire DirectJump = vJump & ~ExecuteKill;
-        // taken conditional branch or direct jump
-    wire Kill = (vJump | e_InsnJALR) & ~ExecuteKill;
-        // taken conditional branch or direct jump or indirect jump = any jump
+    wire Kill = (vBEQ | vNotBEQ | (e_InsnJALR & ~ExecuteKill));
+        // taken conditional branch or direct jump or indirect jump = any jump or exception
+
+
+    wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
+    wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
+    wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~ExecuteKill)
+        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
+    wire [WORD_WIDTH-1:0] JumpTarget = e_Target; //e_SelMTVEC            ? d_CsrMTVEC : e_Target;
+    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ) ? JumpTarget : NextOrSum;
+    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill)   ? f_PC       : NextOrSum;
+    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ) ? JumpTarget : NoBranch;
+    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill)   ? d_PC       : f_PC;
+
+
+
+
 
     // In the case of a misaligned memory access, throw the exception in the mem
     // stage of the bubble instruction, but write MTVAL in the mem stage of the
@@ -765,30 +643,13 @@ module Pipeline #(
     // on the registered signal e_ExceptionDecode, while ThrowExceptionMTVAL
     // depends on the unregistered signal (MemMisaligned & vUnkilledMemAccess).
 
+    wire vExc = (e_InsnJALR & AddrOfs[1]) | e_ExceptionDecode;
     wire ThrowException = ((e_ExceptionDirectJump & vJump) | vExc) & ~ExecuteKill;
         // true if there really is an exception (in mem stage)
-
-        // DirectJump is already masked by ~ExecuteKill
-    wire vUnkilledMemAccess = ~m_Kill & ~e_Kill & e_MemAccess;
-    wire vUnkilledJALR      = ~m_Kill & ~e_Kill & e_InsnJALR;
-    wire vMTVALException = ((MemMisaligned & vUnkilledMemAccess) | (AddrOfs[1] & vUnkilledJALR));
-    wire ThrowExceptionMTVAL = (e_ExceptionDirectJump & DirectJump) | vMTVALException;
+    wire vMTVALException = (MemMisaligned | (AddrOfs[1] & e_InsnJALR));
+    wire ThrowExceptionMTVAL = ((e_ExceptionDirectJump & vJump) | vMTVALException) & ~ExecuteKill;
         // true for exceptions that set MTVAL (in mem stage)
 
-/* TRY: unexpectedly decreases clock rate
-    wire vMTVALException = ((MemMisaligned & e_MemAccess) | (AddrOfs[1] & e_InsnJALR));
-    wire ThrowExceptionMTVAL = ((e_ExceptionDirectJump & vJump) | vMTVALException) & ~ExecuteKill;
-*/
-
-
-
-    wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~ExecuteKill)
-        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
-    wire [WORD_WIDTH-1:0] JumpTarget = e_Target; //e_SelMTVEC            ? d_CsrMTVEC : e_Target;
-    wire [WORD_WIDTH-1:0] MemAddr   = (vJump & ~ExecuteKill) ? JumpTarget : NextOrSum;
-    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill)   ? f_PC       : NextOrSum;
-    wire [WORD_WIDTH-1:0] FetchPC   = (vJump & ~ExecuteKill) ? JumpTarget : NoBranch;
-    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill)   ? d_PC       : f_PC;
 
 /*
     wire [WORD_WIDTH-1:0] Target =
@@ -796,12 +657,11 @@ module Pipeline #(
             ? f_PC
             : PCImm;
 */
-    wire SelMTVEC = InsnJALR | ExceptionDecode | ExceptionDirectJump;
-
     wire [WORD_WIDTH-1:0] Target = SelMTVEC ? d_CsrMTVEC : (
         (d_Insn[6:2]==5'b00011) // FENCE.I
             ? f_PC
             : PCImm);
+
 
 
 // ---------------------------------------------------------------------
@@ -842,14 +702,11 @@ module Pipeline #(
         endcase
     end
 
-/* TRY
     wire [3:0] AlternaCause = d_Bubble 
             ? (e_MemWr ? 6 : 4)
             : (d_Insn[4] ? (d_Insn[20] ? 3 : 11) : 0);
-*/
 
-    wire vFirstCsrCycle = CsrOpcode & ~m_Kill & ~d_Bubble;
-    wire vUnkilledMRET = InsnMRET & ~m_Kill & ~d_Bubble;
+
         // set only in the first of the two csr instruction cycles
     wire [31:0] vCsrInsn = vFirstCsrCycle
         ? {12'b0, vCsrTranslate, d_Insn[14:12], vCsrTranslate, 7'b1110011}
@@ -974,7 +831,7 @@ module Pipeline #(
 
         e_EnShift <= EnShift;
         e_ShiftArith <= ShiftArith;
-        e_ReturnPC <= ReturnPC;
+        e_ReturnPC <= JumpOpcode;
         e_ReturnUI <= UpperOpcode;
         e_LUIorAUIPC <= d_Insn[5];
 
@@ -990,7 +847,7 @@ module Pipeline #(
 
         e_WrNo <= DecodeWrNo;
         e_InvertBranch <= InvertBranch;
-        e_Kill <= m_Kill;// & ~m_ThrowException; 
+        e_Kill <= m_Kill; 
             // don't kill in execute stage if it is an exception that sets MCAUSE
 
             e_InsnBit14 <= d_Insn[14];
@@ -1014,12 +871,8 @@ module Pipeline #(
         // exception handling
         e_PC <= d_Bubble ? e_PC : d_PC;
 
-        // potential exception cause (only one possible per instruction class)
-        e_Cause <= d_Bubble 
-            ? (e_MemWr ? 6 : 4)
-            : Cause;
-        // TRY: unexpectedly decreases clock rate
-        // e_Cause <= AlternaCause;
+            // potential exception cause (only one possible per instruction class)
+            e_Cause <= AlternaCause;
 
         e_ExceptionDecode <= ExceptionDecode;
         e_ExceptionDirectJump <= ExceptionDirectJump;
@@ -1089,7 +942,7 @@ module Pipeline #(
             e_A, e_B, ALUResult);
 
 
-        if (DirectJump || e_InsnJALR) $display("B jump %h", FetchPC);
+        if (vJump || e_InsnJALR) $display("B jump %h", FetchPC);
 
 
         $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
