@@ -144,16 +144,21 @@ module Pipeline #(
 
     // exceptions
     reg e_ExceptionDecode;
-    reg e_ExceptionDirectJump;
+    reg e_ExcJAL;
     reg [3:0] e_Cause;
-    reg [WORD_WIDTH-1:0] e_PC;
+    reg [WORD_WIDTH-1:0] e_MEPC;
+    reg [WORD_WIDTH-1:0] m_MEPC;
+    reg [WORD_WIDTH-1:0] w_MEPC;
     reg [3:0] m_Cause;
     reg [3:0] w_Cause;
-    reg [WORD_WIDTH-1:0] m_PC;
     reg [WORD_WIDTH-1:0] m_NewMTVAL;
-    reg m_ThrowExceptionMTVAL;
+    reg m_WriteMTVAL;
     reg m_ThrowException;
     reg w_ThrowException;
+
+    reg e_ExcIfBranchTaken;
+    reg m_ExcIfBranchTaken;
+    reg d_ExcBranch;
 
 
     // CSR
@@ -296,11 +301,10 @@ module Pipeline #(
     wire SelImm         = ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
     wire EnShift        = ArithOpcode & ~d_Insn[13] & d_Insn[12];
 
-    wire MemWr          =  MemAccess & d_Insn[5];
-    wire [1:0] MemWidth = (MemAccess & ~m_ThrowException) ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
-//                                    ~~~~~~~~~~~~~~~~~~~ to correctly set MCAUSE
+    wire MemWr          = MemAccess & d_Insn[5];
+    wire [1:0] MemWidth = MemAccess ? d_Insn[13:12] : 2'b11 /*= no mem access*/;
 
-    wire [1:0] CsrOp    = (SysOpcode & d_Insn[5] & ~m_ThrowException) ? d_Insn[13:12] : 2'b00;
+    wire [1:0] CsrOp    = (SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00;
     wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
     wire vUnkilledMRET  =  SysOpcode & PrivOpcode & MRETOpcode & ~vKillOrBubble;
     wire vFirstCsrCycle =  SysOpcode & CsrPart & ~vKillOrBubble;
@@ -329,11 +333,11 @@ module Pipeline #(
     wire DestReg0 = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
     wire EnableWrite = ArithOrUpper | JumpOpcode | (MemAccess & ~d_Insn[5]);
-    wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill;
+    wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill | d_ExcBranch;
     // level 3
     wire DecodeWrEn = ((EnableWrite | (SysOpcode & CsrPart)) & ~DisableWrite);
 
-    wire [5:0] DecodeWrNo = m_ThrowException ? REG_CSR_MCAUSE : {d_InsnAuxWrNoH, d_Insn[11:7]};
+    wire [5:0] DecodeWrNo = {d_InsnAuxWrNoH, d_Insn[11:7]};
 
 
 
@@ -347,20 +351,18 @@ module Pipeline #(
 
 
 
-    wire ExceptionDirectJump =
-        (d_Insn[6:4]==3'b110) &
-        (((d_Insn[3:2]==2'b11) & d_Insn[21]) |
-            // JAL with unaligned offset
-        ((d_Insn[3:2]==2'b00) & d_Insn[8]));
-            // branch with unaligned offset
+    wire ExcJAL = (d_Insn[6:2]==5'b11011) & d_Insn[21];
+        // JAL with unaligned target address
 
     wire ExceptionDecode =
         (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
             // throw in decode: EBREAK or ECALL
-        (~e_Kill & MemMisaligned);
+        (~e_Kill & MemMisaligned) |
             // throw in execute: memory access misaligned
             // forward to decode stage of following instruction bubble
-    wire SelMTVEC = InsnJALR | ExceptionDecode | ExceptionDirectJump;
+        d_ExcBranch;
+            // throw in memory: taken branch to misaligned address
+    wire SelMTVEC = InsnJALR | ExceptionDecode | ExcJAL;
 
 
 
@@ -434,16 +436,15 @@ module Pipeline #(
         //   * ALUResult must be set to rs1 in the first cycle. Then it is
         //     correctly forwarded to the execute stage of the second cycle
 
-    wire vCombinedThrow = m_ThrowException | w_ThrowException;
     wire vSetAnd = e_SetCond & (e_A[31] ^ e_B[31]);
     wire vSetXor = e_SetCond & ((e_A[31] ^ e_SetUnsigned) & (e_B[31] ^ e_SetUnsigned));
     wire vCondResultBit = ((Sum[31] & vSetAnd) ^ vSetXor);
-    wire vSelSum = e_SelSum & ~m_ThrowException & ~w_ThrowException;
-    wire vEnableShift = e_EnShift & ~vCombinedThrow;
+    wire vSelSum = e_SelSum & ~w_ThrowException;
+    wire vEnableShift = e_EnShift & ~w_ThrowException;
 
+    // OPTIMIZE? vFastResult has one input left
     wire [WORD_WIDTH-1:0] vFastResultPre = vLogicResult | vPCResult | vUIResult | vCsrResult;
-    wire [WORD_WIDTH-1:0] vMEPCorMCAUSE = w_ThrowException ? w_Cause : m_PC;
-    wire [WORD_WIDTH-1:0] vFastResult = vCombinedThrow ? vMEPCorMCAUSE : vFastResultPre;
+    wire [WORD_WIDTH-1:0] vFastResult = w_ThrowException ? w_Cause : vFastResultPre;
     wire [WORD_WIDTH-1:0] Sum = e_A + e_B + e_Carry;
     wire [WORD_WIDTH-1:0] vShiftAlternative = {
         vSelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
@@ -465,8 +466,8 @@ module Pipeline #(
     wire [32:0] vShift4 = vEnableShift ? (e_B[1] ? vShift3[34:2]  : vShift3[32:0]) : 0;
     wire [WORD_WIDTH-1:0] ALUResult = (e_B[0] ? vShift4[32:1]  : vShift4[31:0]) | vShiftAlternative;
 
-    wire ExecuteWrEn = m_ThrowException | w_ThrowException | (e_WrEn & ~ExecuteKill);
-    wire [5:0] ExecuteWrNo = m_ThrowException ? REG_CSR_MEPC : e_WrNo;
+    wire ExecuteWrEn = w_ThrowException | (e_WrEn & ~ExecuteKill);
+    wire [5:0] ExecuteWrNo = w_ThrowException ? REG_CSR_MCAUSE : e_WrNo;
 
 
 
@@ -495,16 +496,15 @@ module Pipeline #(
     endcase
 
     wire MemMisaligned = MemSignals[17];
-    wire [6:0] MemByte = m_ThrowException ? 0 : MemSignals[16:10];
-    wire [5:0] MemSign = (m_ThrowException | e_MemUnsignedLoad) ? 0 : MemSignals[9:4];
+    wire [6:0] MemByte = (m_ThrowException | w_ThrowException) ? 0 : MemSignals[16:10];
+    wire [5:0] MemSign = (m_ThrowException | w_ThrowException | e_MemUnsignedLoad)
+        ? 0 : MemSignals[9:4];
     wire [3:0] MemWriteMask = MemSignals[3:0];
 
 
 
     // memory stage
 
-    wire MemWrEn = m_WrEn | m_ThrowExceptionMTVAL;
-    wire [5:0] MemWrNo = m_ThrowExceptionMTVAL ? REG_CSR_MTVAL : m_WrNo;
 
 
     wire SignHH1 = (m_MemSign[5] ? mem_rdata[31] : 1'b0) |                      // 1 LE
@@ -533,6 +533,9 @@ module Pipeline #(
         (~e_MemWidth[1]) ? e_B[7:0] : e_B[23:16],
         e_MemWidth==0 ? e_B[7:0] : e_B[15:8],
         e_B[7:0]};
+
+
+
 
     //                                     6         54         3210
     //          31..16  15..8    7..0      HiHalf    HiByte   LoByte    MemByte MemSign
@@ -568,12 +571,31 @@ module Pipeline #(
                                              : (m_CsrCounter[0] ? e_CounterINSTRETH
                                                                 : e_CounterINSTRET));
     wire [WORD_WIDTH-1:0] vOverwriteByCsrRead = m_CsrOp==0 ? m_WrData : vCsrValue;
-    wire [WORD_WIDTH-1:0] ResultOrMTVAL = m_ThrowExceptionMTVAL ? m_NewMTVAL : vOverwriteByCsrRead;
 
+    wire ExcBranch = m_ExcIfBranchTaken & m_Kill;
+    wire ReallyWriteMTVAL = m_WriteMTVAL | ExcBranch;
 
+/*
+    wire [WORD_WIDTH-1:0] ResultOrMTVAL = 
+        ReallyWriteMTVAL
+            ? m_NewMTVAL
+            : vOverwriteByCsrRead;
+*/
+
+    wire [WORD_WIDTH-1:0] ResultOrMTVAL = 
+        w_ThrowException ? w_MEPC :
+(        ReallyWriteMTVAL
+            ? m_NewMTVAL
+            : vOverwriteByCsrRead);
+
+    wire MemWrEn = m_WrEn | w_ThrowException | ReallyWriteMTVAL;
+    wire [5:0] MemWrNo = ReallyWriteMTVAL ? REG_CSR_MTVAL : 
+        (w_ThrowException ? REG_CSR_MEPC : m_WrNo);
+
+/*
     // potential exception cause (only one possible per instruction class)
     reg [3:0] Cause;
-    always @* case ({d_Insn[20], d_Insn[6:4]})
+    always @* begin case ({d_Insn[20], d_Insn[6:4]})
         4'b0000: Cause = 4;  // LW:           load address misaligned
         4'b0010: Cause = 6;  // SW:           store address misaligned
         4'b0110: Cause = 0;  // JAL,JALR,B**: instruction address misaligned
@@ -584,24 +606,13 @@ module Pipeline #(
         4'b1111: Cause = 3;  // EBREAK:       breakpoint
         default: Cause = 0;
     endcase
-
-
+        if (d_ExcBranch) Cause = 0;
+    end
+*/
 
 
     // PC generation
 
-/*
-    wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
-    wire Xor31 = (e_InvertBranch ^ Lower) | vExc;
-    wire And31 = e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]) & ~e_ExceptionDecode;
-    wire vExc = (e_InsnJALR & AddrOfs[1]) | e_ExceptionDecode;
-    wire vUnkilledNotBEQ = ~e_InsnBEQ & ~ExecuteKill;
-    wire vNotBEQ = (Xor31 ^ (And31 & Sum[31])) & vUnkilledNotBEQ;
-    wire vUnkilledBEQ = e_InsnBEQ & ~ExecuteKill;
-    wire vBEQ = vUnkilledBEQ & (e_InvertBranch ^ Equal);
-    wire vJump = vBEQ | vNotBEQ;
-        // taken conditional branch or direct jump
-*/
     wire Lower = (e_InsnBLTorBLTU) & (e_A[31] ^ e_InsnBLTU) & (e_B[31] ^ e_InsnBLTU);
     wire vInvert = e_InvertBranch | e_ExceptionDecode;
     wire And31 = e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]) & ~e_ExceptionDecode;
@@ -640,14 +651,13 @@ module Pipeline #(
     // In the case of a misaligned memory access, throw the exception in the mem
     // stage of the bubble instruction, but write MTVAL in the mem stage of the
     // actual instruction (one cycle earlier). Therefore ThrowException depends
-    // on the registered signal e_ExceptionDecode, while ThrowExceptionMTVAL
+    // on the registered signal e_ExceptionDecode, while WriteMTVAL
     // depends on the unregistered signal (MemMisaligned & vUnkilledMemAccess).
 
-    wire vExc = (e_InsnJALR & AddrOfs[1]) | e_ExceptionDecode;
-    wire ThrowException = ((e_ExceptionDirectJump & vJump) | vExc) & ~ExecuteKill;
+    wire vExc = e_ExcJAL | (e_InsnJALR & AddrOfs[1]);
+    wire ThrowException = (e_ExceptionDecode | vExc) & ~ExecuteKill;
         // true if there really is an exception (in mem stage)
-    wire vMTVALException = (MemMisaligned | (AddrOfs[1] & e_InsnJALR));
-    wire ThrowExceptionMTVAL = ((e_ExceptionDirectJump & vJump) | vMTVALException) & ~ExecuteKill;
+    wire WriteMTVAL = (MemMisaligned | vExc) & ~ExecuteKill;
         // true for exceptions that set MTVAL (in mem stage)
 
 
@@ -702,9 +712,16 @@ module Pipeline #(
         endcase
     end
 
+/*
     wire [3:0] AlternaCause = d_Bubble 
             ? (e_MemWr ? 6 : 4)
             : (d_Insn[4] ? (d_Insn[20] ? 3 : 11) : 0);
+*/
+    wire [3:0] AlternaCause = 
+        d_ExcBranch ? 0 : (
+            d_Bubble 
+                ? (e_MemWr ? 6 : 4)
+                : (d_Insn[4] ? (d_Insn[20] ? 3 : 11) : 0));
 
 
         // set only in the first of the two csr instruction cycles
@@ -781,7 +798,7 @@ module Pipeline #(
 
             // fake a jump to address 0 on reset
             e_ExceptionDecode <= 0;
-            e_ExceptionDirectJump <= 0;
+            e_ExcJAL <= 0;
             e_SelMTVEC <= 0;
             e_InsnJALR <= 0;
             e_InsnBEQ <= 0;
@@ -794,10 +811,13 @@ module Pipeline #(
 
             m_WrEn <= 0;
             w_WrEn <= 0;
-            m_ThrowExceptionMTVAL <= 0;
+            m_WriteMTVAL <= 0;
             m_ThrowException <= 0;
             w_ThrowException <= 0;
 
+            d_ExcBranch <= 0;
+            e_ExcIfBranchTaken <= 0;
+            m_ExcIfBranchTaken <= 0;
         end else begin
 
 //            f_ChangeInsn <= ChangeInsn;
@@ -868,22 +888,25 @@ module Pipeline #(
         w_WrData <= MemResult;
 
 
-        // exception handling
-        e_PC <= d_Bubble ? e_PC : d_PC;
+            // exception handling
+            e_MEPC <= d_ExcBranch 
+                ? w_MEPC
+                : (d_Bubble ? e_MEPC : d_PC);
+            m_MEPC <= e_MEPC;
+            w_MEPC <= m_MEPC;
 
             // potential exception cause (only one possible per instruction class)
             e_Cause <= AlternaCause;
 
-        e_ExceptionDecode <= ExceptionDecode;
-        e_ExceptionDirectJump <= ExceptionDirectJump;
-        e_SelMTVEC <= SelMTVEC;
+            e_ExceptionDecode <= ExceptionDecode;
+            e_ExcJAL <= ExcJAL;
+            e_SelMTVEC <= SelMTVEC;
 
-        m_PC <= e_PC;
-        m_Cause <= e_Cause;
-        w_Cause <= m_Cause;
-        m_ThrowException <= ThrowException;
-        m_ThrowExceptionMTVAL <= ThrowExceptionMTVAL;
-        w_ThrowException <= m_ThrowException;
+            m_Cause <= e_Cause;
+            w_Cause <= m_Cause;
+            m_WriteMTVAL <= WriteMTVAL;
+            m_ThrowException <= ThrowException;
+            w_ThrowException <= m_ThrowException;
 
             // CSR decode
             e_CarryCYCLE      <= CounterCYCLE[32];
@@ -903,9 +926,19 @@ module Pipeline #(
         m_CsrUpdate <= CsrUpdate;
 
         // CSR write (in memory stage)
-        m_NewMTVAL <= e_ExceptionDirectJump 
+        m_NewMTVAL <= (e_ExcJAL | e_ExcIfBranchTaken)
             ? e_PCImm
             : {AddrSum[WORD_WIDTH-1:1], AddrSum[0] & ~e_InsnJALR}; // TRY: AddrOfs[0]
+        // TRY: e_MemAcces | e_JALR
+
+        // exception on unconditional branch
+        e_ExcIfBranchTaken <= (d_Insn[6:2]==5'b11000) & d_Insn[8];
+            // detect a branch with unaligned offset in decode stage
+        m_ExcIfBranchTaken <= e_ExcIfBranchTaken & ~ExecuteKill;
+            // kill on request in execute stage
+        d_ExcBranch = ExcBranch;
+            // throw in mem stage if branch was taken in execute stage
+
 
 
 
@@ -949,18 +982,16 @@ module Pipeline #(
             FwdAE, FwdAM, FwdAW, ForwardAR, ForwardAM, ForwardAE);
 
 
-/*
-        $display("C MTVEC=%h %h MSCRATCH=%h %h MEPC=%h %h",
+        $display("C MTVEC=%h %h MSCRATCH=%h MEPC=%h",
             d_CsrMTVEC, RegSet.regs[REG_CSR_MTVEC],
-            d_CsrMSCRATCH, RegSet.regs[REG_CSR_MSCRATCH],
-            d_CsrMEPC, RegSet.regs[REG_CSR_MEPC]);
-        $display("C CYCLE=%h INSTRET=%h MCAUSE=%h %h MTVAL=%h %h",
-            e_CounterCycle, e_CounterRetired,
-            d_CsrMCAUSE, RegSet.regs[REG_CSR_MCAUSE],
-            d_CsrMTVAL, RegSet.regs[REG_CSR_MTVAL]);
-
-        $display("C m_PC=%h vFastResult=%h vNotSh=%h m_ThrowE=%b",
-            m_PC, vFastResult, vNotShiftResult, m_ThrowException);
+            RegSet.regs[REG_CSR_MSCRATCH],
+            RegSet.regs[REG_CSR_MEPC]);
+        $display("C MCAUSE=%h MTVAL=%h",
+            RegSet.regs[REG_CSR_MCAUSE],
+            RegSet.regs[REG_CSR_MTVAL]);
+/*
+        $display("C m_MEPC=%h vFastResult=%h vNotSh=%h m_ThrowE=%b",
+            m_MEPC, vFastResult, vNotShiftResult, m_ThrowException);
         $display("C vLogicResult=%h vPCResult=%h vImmOrCsrResult=%h vCsrResult=%h e_CsrOp=%b",
             vLogicResult, vPCResult, vImmOrCsrResult, vCsrResult, e_CsrOp);
         $display("C vOverwriteByCsrRead=%h m_CsrOp=%b ResultOrMTVAL=%h",
@@ -975,6 +1006,9 @@ module Pipeline #(
             vCsrTranslate, InsnAuxRdNo1H, InsnAuxWrNoH, CsrOp);
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
+
+        $display("X d_ExcBranch=%b ExcBranch=%b m_ExcIfBranchTaken=%b m_NewMTVAL=%h",
+            d_ExcBranch, ExcBranch, m_ExcIfBranchTaken, m_NewMTVAL);
 
 
 
