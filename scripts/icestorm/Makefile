@@ -54,9 +54,7 @@ nextpnr: $(DEVICE).json $(DEVICE).pcf
 
 
 clean:
-	rm -f code.hex $(DEVICE).blif $(DEVICE).json $(DEVICE).asc \
-	    $(DEVICE).rpt $(DEVICE).bin $(DEVICE).log \
-	    bootloader_hx8k.hex
+	rm -f *.blif *.json *.asc *.rpt *.bin *.log bootloader_hx8k.hex
 
 .SECONDARY:
 .PHONY: all prog timing prog arachne nextpnr clean
