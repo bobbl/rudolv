@@ -51,7 +51,7 @@ Dhrystone results:
 |                      | DMIPS/MHz | Dhrystones/s/MHz | CPI   | cycles per Dhrystone |
 | -------------------- | --------- | ---------------- | ----- | -------------------- |
 | `riscv-dhrystone`    | 0.75      | 1362             | 1.66  | 734                  |
-| `picorv32-dhrystone` | 0.968     | 1702             | 1.497 | 587                  |
+| `picorv32-dhrystone` | 0.968     | 1702             | 1.599 | 587                  |
 
 
 
@@ -84,10 +84,10 @@ forth, `send_image.sh` can be used again to start a new program on the processor
 
 | chip resources  | used | unit      |                             |
 |:--------------- | ----:| ---------:|:--------------------------- |
-| LCs             | 2131 |      LUT4 | 25% for CSRs                |
+| LCs             | 2053 |      LUT4 | 25% for CSRs                |
 | BRAM            |    6 |   4 KiBit | registerset and boot loader |
 | SPRAM           |    2 | 256 KiBit | main memory                 |
-| clock frequency |   24 |       MHz |                             |
+| clock frequency |   25 |       MHz |                             |
 
 
 
