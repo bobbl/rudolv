@@ -1,13 +1,5 @@
 
 
-
-//`define DISABLE_ADD
-
-`ifndef EQUAL_COMPERATOR
-//`define EQUAL_COMPERATOR EqualParAdd
-`define EQUAL_COMPERATOR EqualInfere
-`endif
-
 module RegisterSet(
     input clk, 
     input we,
@@ -31,11 +23,6 @@ module RegisterSet(
         rd2 <= regs[ra2];
     end
 endmodule
-
-
-
-
-
 
 
 module Pipeline #(
@@ -341,7 +328,7 @@ module Pipeline #(
                             (d_Insn[3:2]==2'b00); // any branch
 //    wire SelJumpTarget  = (PartBranch & vPartJALorBranch) | vInsnFENCEI;
 //    wire UncondJump     = vInsnJAL | vInsnFENCEI | ExceptionDecode | InsnMRET;
-    wire UncondJump     = vInsnJAL;
+    wire UncondJump     = vInsnJAL | vInsnFENCEI;
 
     wire NegB           = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
     wire SaveFetch      = (d_Bubble | (vMemOrSys & ~d_SaveFetch)) & ~m_Kill;
