@@ -88,7 +88,7 @@ module Pipeline #(
     reg e_ReturnUI;
     reg e_LUIorAUIPC;
     reg e_UncondJump;
-    reg e_SelJumpTarget;
+//    reg e_SelJumpTarget;
 
     reg e_SetCond;
     reg e_LTU;
@@ -105,7 +105,7 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] e_B;
     reg [WORD_WIDTH-1:0] e_Imm;
     reg [WORD_WIDTH-1:0] e_PCImm;
-    reg [WORD_WIDTH-1:0] e_Target;
+//    reg [WORD_WIDTH-1:0] e_Target;
 
 
     reg e_Carry;
@@ -199,22 +199,24 @@ module Pipeline #(
         d_Insn[4] ? 7'b0000000 : d_Insn[31:25],                         // 11..5
         d_Insn[4] ? 5'b0 : (d_Insn[6:5]==2'b01 ? d_Insn[11:7] : d_Insn[24:20])}; // 4..0
 
-    //                                31|30..20|19..12|11|10..5 | 4..1 |0
-    // ImmB for branch (opcode 11000) 31|  31  |  31  | 7|30..25|11..8 |-
-    // ImmJ for JAL    (opcode 11011) 31|  31  |19..12|20|30..25|24..21|-
-    // ImmU for AUIPC  (opcode 00101) 31|30..20|19..12| -|   -  |   -  |-
+    //                                31|30..20|19..13|12|11|10..5 | 4..1 |0
+    // ImmB for branch (opcode 11000) 31|  31  |  31  |31| 7|30..25|11..8 |-
+    // ImmJ for JAL    (opcode 11011) 31|  31  |19..13|12|20|30..25|24..21|-
+    // ImmU for AUIPC  (opcode 00101) 31|30..20|19..13|12| -|   -  |   -  |-
+    //  4 for  FENCE.I (opcode 00011)                   -|         | --X- |-
     wire [WORD_WIDTH-1:0] ImmBJU = { // 30 LE
         d_Insn[31],                                                     // 31
         d_Insn[4] ? d_Insn[30:20] : {11{d_Insn[31]}},                   // 30..20
-        d_Insn[2] ? d_Insn[19:12] : {8{d_Insn[31]}},                    // 19..12
+        d_Insn[2] ? d_Insn[19:13] : {7{d_Insn[31]}},                    // 19..13
+        d_Insn[2] ? ((d_Insn[4] | d_Insn[5]) & d_Insn[12]) : d_Insn[31], // 12
         ~d_Insn[4] & (d_Insn[2] ? d_Insn[20] : d_Insn[7]),              // 11
         d_Insn[4] ? 6'b000000 : d_Insn[30:25],                          // 10..5
-        {4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
+//        {4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
+        d_Insn[4] ? 4'b0000 : (d_Insn[2] ? (d_Insn[5] ? d_Insn[24:21] : 4'b0010) : d_Insn[11:8]),
         1'b0};                                                          // 0
 
     wire [WORD_WIDTH-1:0] PCImm = d_PC + ImmBJU;
-    wire [WORD_WIDTH-1:0] Target = (d_Insn[6:2]==5'b00011) ? f_PC : PCImm;
-        // change for FENCE.I
+//    wire [WORD_WIDTH-1:0] Target = vInsnFENCEI ? f_PC : PCImm;
 
 
 
@@ -492,7 +494,7 @@ module Pipeline #(
 //        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 //    wire [WORD_WIDTH-1:0] JumpTarget = e_SelJumpTarget ? e_Target : RdData2;
-    wire [WORD_WIDTH-1:0] JumpTarget = e_Target;
+    wire [WORD_WIDTH-1:0] JumpTarget = e_PCImm;
         // TRY: RdData1 instead of RdData2 would also be possible, if vCsrInsn is adjusted
         // FIXME: ForwardBM instead of RdData2 due to data dependencies
 
@@ -671,15 +673,29 @@ module Pipeline #(
     wire vFirstCsrCycle =  SysOpcode & CsrPart & ~vKillOrBubble;
         // set only in the first of the two csr instruction cycles
 
+/*
     wire [31:0] vCsrInsn =
         {7'b0000000,
-         vFirstCsrCycle ? vCsrTranslate[4:0] : (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
+//         vFirstCsrCycle ? vCsrTranslate[4:0] : (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
+         vCsrTranslate[4:0],
                         // rs2
          5'b00000,      // rs1=x0
          3'b110,        // func3=OR
          vFirstCsrCycle ? d_Insn[11:7]       : 5'b0,
                         // rd
          7'b0110011};   // opcode=RR
+*/
+
+    reg [31:0] vCsrInsn;
+    always @* begin
+        if (MemAccess) // memory bubble
+            vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, 5'b00000,     7'b0110011};
+        else /*if (vFirstCsrCycle)*/ begin // CSR
+            vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, d_Insn[11:7], 7'b0110011};
+        end
+    end
+
+
 
     wire RdNo2Aux = Bubble;
 
@@ -775,11 +791,11 @@ module Pipeline #(
             e_InsnBEQ <= 0;
             e_InsnBLTorBLTU <= 0;
             e_InvertBranch <= 0;
-            e_SelJumpTarget <= 1;
+//            e_SelJumpTarget <= 1;
             m_Kill <= 0;
             w_Kill <= 0;
-            e_PCImm <= 0;
-            e_Target <= START_PC;
+            e_PCImm <= START_PC;
+//            e_Target <= START_PC;
 
             m_WrEn <= 0;
             w_WrEn <= 0;
@@ -808,9 +824,9 @@ module Pipeline #(
         e_B <= ForwardBE;
         e_Imm <= ImmISU;
         e_PCImm <= PCImm;
-        e_Target <= Target;
+//        e_Target <= Target;
 //        e_SelJumpTarget <= SelJumpTarget;
-        e_SelJumpTarget <= 0;
+//        e_SelJumpTarget <= 0;
 
         e_WrEn <= DecodeWrEn;
         e_InsnJALR <= InsnJALR;
@@ -973,10 +989,8 @@ module Pipeline #(
         $display("C vOverwriteByCsrRead=%h m_CsrOp=%b CsrResult=%h",
             vOverwriteByCsrRead, m_CsrOp, CsrResult);
 */
-        $display("Z e_SelJumpTarget=%b JumpTarget=%h NextOrSum=%h NoBranch=%h",
-            e_SelJumpTarget, JumpTarget, NextOrSum, NoBranch);
-        $display("Z Target=%h e_Target=%h",
-            Target, e_Target);
+        $display("Z JumpTarget=%h NextOrSum=%h NoBranch=%h",
+            JumpTarget, NextOrSum, NoBranch);
 
 
 
