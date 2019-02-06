@@ -157,8 +157,15 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_MEPC;
     reg e_ExcUser;
     reg m_ExcUser;
-    reg m_MemMisaligned;
-    reg e_InsnBit20;
+    reg w_ExcUser;
+    reg d_ExcJump;
+    reg e_ExcJump;
+    reg m_ExcMem;
+    reg w_ExcMem;
+    reg x_ExcMem;
+    reg e_EBREAKorECALL;
+    reg m_EBREAKorECALL;
+    reg w_EBREAKorECALL;
 
 
     // CSR
@@ -328,10 +335,6 @@ module Pipeline #(
 
 
 
-`ifdef ENABLE_EXCEPTIONS
-    wire ExcUser        = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
-`endif
-    wire ReturnPC      = JumpOpcode | ExcUser;
 
 
 
@@ -351,7 +354,8 @@ module Pipeline #(
                             (d_Insn[3:2]==2'b00); // any branch
 //    wire SelJumpTarget  = (PartBranch & vPartJALorBranch) | vInsnFENCEI;
 //    wire UncondJump     = vInsnJAL | vInsnFENCEI | ExceptionDecode | InsnMRET;
-    wire UncondJump     = vInsnJAL | vInsnFENCEI;
+    wire UncondJump     = vInsnJAL | vInsnFENCEI 
+        | MemMisaligned; // from execute of previous cycle
 
     wire NegB           = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
     wire SaveFetch      = (d_Bubble | (vMemOrSys & ~d_SaveFetch)) & ~m_Kill;
@@ -367,13 +371,14 @@ module Pipeline #(
     wire DestReg0 = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
     wire EnableWrite = ArithOrUpper | JumpOpcode | (MemAccess & ~d_Insn[5]);
-    wire EnableWrite2 = (SysOpcode & CsrPart) | ExcUser;
+    wire EnableWrite2 = (SysOpcode & CsrPart)/* | ExcUser*/;
 //    wire DisableWrite = (DestReg0 & ~d_Insn[7]) | m_Kill | d_ExcBranch;
-    wire DisableWrite = (DestReg0 & ~d_Insn[7] & ~ExcUser) | m_Kill;
+    wire DisableWrite = (DestReg0 & ~d_Insn[7] /*& ~ExcUser*/) | m_Kill;
     // level 3
     wire DecodeWrEn = ((EnableWrite | EnableWrite2) & ~DisableWrite);
 
-    wire [5:0] DecodeWrNo = ExcUser ? REG_CSR_MEPC : {1'b0, d_Insn[11:7]};
+//    wire [5:0] DecodeWrNo = ExcUser ? REG_CSR_MEPC : {1'b0, d_Insn[11:7]};
+    wire [5:0] DecodeWrNo = {1'b0, d_Insn[11:7]};
 
 
 
@@ -603,16 +608,22 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
 
 
-    wire ExcInMemStage = 
-        f_PC[1] |       // jump misaligned
-        m_MemMisaligned |  // memory misaligned
+    wire WriteMEPC =
+        ExcJump |       // jump misaligned
+        m_ExcMem |      // memory misaligned
         m_ExcUser;      // user trap
 //    wire [WORD_WIDTH-1:0] CsrResult = (w_ThrowException | ReallyWriteMTVAL) ? m_MEPCorMTVAL : vCsrOrALU;
 //    wire [WORD_WIDTH-1:0] CsrResult = vCsrOrALU;
-    wire [WORD_WIDTH-1:0] CsrResult = 
-        ExcInMemStage   ? m_MEPC :
-        (w_Throw        ? w_Cause :
-                          vCsrOrALU);
+    wire [WORD_WIDTH-1:0] CsrResult =
+//        WriteMEPC       ? m_MEPC :
+        WriteMEPC       ? m_MEPC : // MEPC
+        (e_ExcJump      ? e_MEPC : // MTVAL
+        (d_ExcJump      ? 32'h0 : // MCAUSE=0 instruction address misaligned
+        (x_ExcMem       ? 32'h4 : // MCAUSE=4 or 6
+        (w_ExcUser      ? (w_EBREAKorECALL ? 32'h03 : 32'h0b)  // MCAUSE
+                        : vCsrOrALU))));
+//        (w_Throw        ? w_Cause :
+//                          vCsrOrALU)));
 
 
 /*
@@ -622,10 +633,19 @@ module Pipeline #(
         (ReallyWriteMTVAL ? REG_CSR_MTVAL : 
         (w_ThrowException ? REG_CSR_MEPC : m_WrNo));
 */
-    wire MemWrEn = w_Throw | m_WrEn | (m_CsrCounter[3] && m_CsrWrNo!=0);
+    wire MemWrEn = m_WrEn | (m_CsrCounter[3] && m_CsrWrNo!=0)
+        | WriteMEPC
+        | e_ExcJump
+        | d_ExcJump
+        | w_ExcUser
+        | x_ExcMem
+        ;
     wire [5:0] MemWrNo = 
-        w_Throw ? REG_CSR_MCAUSE : 
-        (m_CsrCounter[3] ? m_CsrWrNo : m_WrNo);
+        WriteMEPC       ? REG_CSR_MEPC :
+        (e_ExcJump ? REG_CSR_MTVAL :
+        ((d_ExcJump | w_ExcUser | x_ExcMem) ? REG_CSR_MCAUSE :
+        (m_CsrCounter[3] ? m_CsrWrNo : m_WrNo)
+        ));
 
 
 
@@ -701,7 +721,7 @@ module Pipeline #(
     // set the exception cause in the decode stage of the instruction that jumps to MTVEC
     wire [3:0] Cause = 
         e_ExcUser 
-            ? (e_InsnBit20 
+            ? (e_EBREAKorECALL
                 ? 3             // EBREAK   breakpoint
                 : 11)           // ECALL    environment call from M-mode
             : (e_MemAccess
@@ -710,9 +730,13 @@ module Pipeline #(
                     : 4)        // LW       load address misaligned
                 : 0);           // jump     instruction address misaligned
 
+    wire ExcUser = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
+    wire ExcJump = m_Kill & f_PC[1];
+
     wire ThrowD = ExcUser;
 
 `endif
+    wire ReturnPC      = JumpOpcode | ExcUser;
 
 
 /*
@@ -749,14 +773,15 @@ module Pipeline #(
     reg [31:0] vCsrInsn;
     always @* begin
 `ifdef ENABLE_EXCEPTIONS
-        if (ExcUser) // ECALL or EBREAK: jalr mtvec
+        if (ExcUser | ExcJump) // ECALL or EBREAK: jalr mtvec
             vCsrInsn <= {7'b0000000, 5'b00000, REG_CSR_MTVEC[4:0], 3'b000, 5'b00000,     7'b1100111};
         else if (InsnMRET) // MRET: jalr mepc
             vCsrInsn <= {7'b0000000, 5'b00000, REG_CSR_MEPC[4:0],  3'b000, 5'b00000,     7'b1100111};
         else
 `endif
         if (MemAccess) // memory bubble: or x0, x0, csr
-            vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, 5'b00000,     7'b0110011};
+//            vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, 5'b00000,     7'b0110011};
+            vCsrInsn <= {7'b0000000, 5'b00000, REG_CSR_MTVEC[4:0], 3'b000, 5'b00000,     7'b0110011};
         else /*if (vFirstCsrCycle)*/ begin // CSR bubble: or csr, x0, csr
             vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, d_Insn[11:7], 7'b0110011};
         end
@@ -764,7 +789,7 @@ module Pipeline #(
 
 
 
-    wire RdNo1Aux = ExcUser | InsnMRET;
+    wire RdNo1Aux = ExcUser | ExcJump | InsnMRET;
     wire RdNo2Aux = Bubble;
 
 
@@ -795,7 +820,7 @@ module Pipeline #(
             // throw in memory: taken branch to misaligned address
 */
 
-    wire [31:0] Insn = Bubble ? vCsrInsn : (
+    wire [31:0] Insn = (Bubble | ExcJump) ? vCsrInsn : (
         ((d_Bubble | d_SaveFetch) & ~m_Kill) ? d_DelayedInsn : mem_rdata);
 
 
@@ -880,7 +905,9 @@ module Pipeline #(
             m_Throw <= 0;
             w_Throw <= 0;
             e_ExcUser <= 0;
-
+            m_ExcUser <= 0;
+            d_ExcJump <= 0;
+            e_ExcJump <= 0;
 
 
             e_UncondJump  <= 1;
@@ -993,10 +1020,17 @@ module Pipeline #(
             w_Cause             <= m_Cause;
             e_MEPC              <= d_PC;
             m_MEPC              <= e_MEPC;
-            e_ExcUser           <= ExcUser; // = ThrowD ?
+            e_ExcUser           <= ExcUser;
             m_ExcUser           <= e_ExcUser;
-            m_MemMisaligned     <= MemMisaligned;
-            e_InsnBit20         <= d_Insn[20];
+            w_ExcUser           <= m_ExcUser;
+            d_ExcJump           <= ExcJump;
+            e_ExcJump           <= d_ExcJump;
+            m_ExcMem            <= MemMisaligned;
+            w_ExcMem            <= m_ExcMem;
+            x_ExcMem            <= w_ExcMem;
+            e_EBREAKorECALL     <= d_Insn[20];
+            m_EBREAKorECALL     <= e_EBREAKorECALL;
+            w_EBREAKorECALL     <= m_EBREAKorECALL;
 
 
 
@@ -1062,9 +1096,21 @@ module Pipeline #(
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 
-        $display("X Throw d%be%bm%bw%b e_Cause=%d",
-            d_Throw, e_Throw, m_Throw, w_Throw, e_Cause);
+        $display("X Throw d%be%bm%bw%b e_Cause=%d e_MEPC=%h m_MEPC=%h",
+            d_Throw, e_Throw, m_Throw, w_Throw, e_Cause, e_MEPC, m_MEPC);
 
+
+        $display("X ExcUser %c%c%c ExcJump %c%c%c ExcMem %c%c WriteMEPC=%b",
+            ExcUser ? "d" : ".",
+            e_ExcUser ? "e" : ".",
+            m_ExcUser ? "m" : ".",
+            ExcJump ? "f" : ".",
+            d_ExcJump ? "d" : ".",
+            e_ExcJump ? "e" : ".",
+            MemMisaligned ? "e" : ".",
+            m_ExcMem ? "m" : ".",
+            WriteMEPC
+            );
 
 
         if (vJump || e_InsnJALR) $display("B jump %h", FetchPC);
