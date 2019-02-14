@@ -88,7 +88,6 @@ module Pipeline #(
     reg e_ReturnUI;
     reg e_LUIorAUIPC;
     reg e_UncondJump;
-//    reg e_SelJumpTarget;
 
     reg e_SetCond;
     reg e_LTU;
@@ -105,7 +104,6 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] e_B;
     reg [WORD_WIDTH-1:0] e_Imm;
     reg [WORD_WIDTH-1:0] e_PCImm;
-//    reg [WORD_WIDTH-1:0] e_Target;
 
 
     reg e_Carry;
@@ -128,46 +126,25 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] w_WrData;
 
 
-/*
     // exceptions
-    reg d_ExcBranch;
-    reg e_ExceptionDecode;
-    reg e_ExcJAL;
-    reg e_ExcIfBranchTaken;
-    reg m_ExcIfBranchTaken;
-    reg [3:0] e_Cause;
-    reg [3:0] m_Cause;
-    reg [3:0] w_Cause;
-    reg [WORD_WIDTH-1:0] e_MEPC;
-    reg [WORD_WIDTH-1:0] m_MEPC;
-    reg [WORD_WIDTH-1:0] w_MEPC;
-    reg [WORD_WIDTH-1:0] m_MEPCorMTVAL;
-    reg m_WriteMTVAL;
-    reg m_ThrowException;
-    reg w_ThrowException;
-    reg d_Throw;
-    reg e_Throw;
-    reg m_Throw;
-    reg w_Throw;
-*/
-    reg [WORD_WIDTH-1:0] e_MEPC;
-    reg [WORD_WIDTH-1:0] m_MEPC;
-    reg [WORD_WIDTH-1:0] m_AddrSum;
-    reg [WORD_WIDTH-1:0] w_AddrSum;
+//    reg [WORD_WIDTH-1:0] e_MEPC;
+//    reg [WORD_WIDTH-1:0] m_AddrSum;
+    reg [WORD_WIDTH-1:0] e_ExcWrData2;
+    reg [WORD_WIDTH-1:0] m_ExcWrData;
+
+    reg m_ExcWrEn;
     reg e_ExcUser;
     reg m_ExcUser;
-    reg w_ExcUser;
     reg d_ExcJump;
     reg e_ExcJump;
     reg m_ExcMem;
     reg w_ExcMem;
-    reg x_ExcMem;
     reg e_EBREAKorECALL;
-    reg m_EBREAKorECALL;
-    reg w_EBREAKorECALL;
     reg m_MemWr;
-    reg w_MemWr;
-    reg x_MemWr;
+    reg m_WriteMCAUSE;
+    reg [3:0] e_Cause;
+
+
 
 
     // CSR
@@ -462,7 +439,6 @@ module Pipeline #(
 
     // OPTIMIZE? vFastResult has one input left
     wire [WORD_WIDTH-1:0] vFastResultPre = vLogicResult | vPCResult | vUIResult;
-//    wire [WORD_WIDTH-1:0] vFastResult = w_ThrowException ? w_Cause : vFastResultPre;
     wire [WORD_WIDTH-1:0] vFastResult = vFastResultPre;
     wire [WORD_WIDTH-1:0] Sum = e_A + e_B + e_Carry;
     wire [WORD_WIDTH-1:0] vShiftAlternative = {
@@ -485,8 +461,6 @@ module Pipeline #(
     wire [32:0] vShift4 = e_EnShift ? (e_B[1] ? vShift3[34:2]  : vShift3[32:0]) : 0;
     wire [WORD_WIDTH-1:0] ALUResult = (e_B[0] ? vShift4[32:1]  : vShift4[31:0]) | vShiftAlternative;
 
-//    wire ExecuteWrEn = w_ThrowException | ((e_WrEn & ~(m_CsrCounter[1] | m_CsrCounter[2])) & ~ExecuteKill);
-//    wire [5:0] ExecuteWrNo = w_ThrowException ? REG_CSR_MCAUSE : e_WrNo;
     wire ExecuteWrEn = ((e_WrEn & ~(m_CsrCounter[1] | m_CsrCounter[2])) & ~ExecuteKill);
     wire [5:0] ExecuteWrNo = e_WrNo;
 
@@ -505,7 +479,6 @@ module Pipeline #(
 
 
     wire vLess    = ((Sum[31] & vLessAnd) ^ vLessXor);
-//    wire vUncondJump = e_UncondJump | (e_InsnJALR &  AddrOfs[1]);
     wire vUncondJump = e_UncondJump;
     wire vBEQ = vUnkilledBEQ & (e_InvertBranch ^ Equal);
 
@@ -525,10 +498,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~ExecuteKill)
 //        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
-//    wire [WORD_WIDTH-1:0] JumpTarget = e_SelJumpTarget ? e_Target : RdData2;
     wire [WORD_WIDTH-1:0] JumpTarget = e_PCImm;
-        // TRY: RdData1 instead of RdData2 would also be possible, if vCsrInsn is adjusted
-        // FIXME: ForwardBM instead of RdData2 due to data dependencies
 
     wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? JumpTarget : NextOrSum;
     wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~e_InsnJALR & ~m_Kill) ? f_PC       : NextOrSum;
@@ -596,9 +566,6 @@ module Pipeline #(
 
 
 
-//    wire ExcBranch = m_ExcIfBranchTaken & m_Kill;
-//    wire ReallyWriteMTVAL = m_WriteMTVAL | ExcBranch;
-
     wire [WORD_WIDTH-1:0] vCsrCYCLE   = m_CsrCounter[1] 
         ? (m_CsrCounter[0] ? e_CounterCYCLEH : e_CounterCYCLE) : 0;
     wire [WORD_WIDTH-1:0] vCsrINSTRET = m_CsrCounter[2] 
@@ -613,48 +580,68 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
 
 
+
+
+
+
+    // exception handling
+
+
+    wire ExcUser = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
+    wire ExcJump = m_Kill & f_PC[1];
+
     wire WriteMEPC =
         ExcJump |       // jump misaligned
         m_ExcMem |      // memory misaligned
         m_ExcUser;      // user trap
-//    wire [WORD_WIDTH-1:0] CsrResult = (w_ThrowException | ReallyWriteMTVAL) ? m_MEPCorMTVAL : vCsrOrALU;
-//    wire [WORD_WIDTH-1:0] CsrResult = vCsrOrALU;
-    wire [WORD_WIDTH-1:0] CsrResult =
-//        WriteMEPC       ? m_MEPC :
-        WriteMEPC       ? m_MEPC : // MEPC
-        (e_ExcJump      ? e_MEPC : // MTVAL
-        (d_ExcJump      ? 32'h0 : // MCAUSE=0 instruction address misaligned
-        (w_ExcMem       ? w_AddrSum : // MTVAL
-        (x_ExcMem       ? (x_MemWr ? 32'h6 : 32'h4) : // MCAUSE
-        (w_ExcUser      ? (w_EBREAKorECALL ? 32'h03 : 32'h0b)  // MCAUSE
-                        : vCsrOrALU)))));
-//        (w_Throw        ? w_Cause :
-//                          vCsrOrALU)));
 
+    wire WriteMCAUSE = 
+        ExcJump |
+        w_ExcMem |
+        m_ExcUser;
 
-/*
-    wire MemWrEn = m_WrEn | w_ThrowException | ReallyWriteMTVAL | (m_CsrCounter[3] && m_CsrWrNo!=0);
-    wire [5:0] MemWrNo = 
-        m_CsrCounter[3] ? m_CsrWrNo :
-        (ReallyWriteMTVAL ? REG_CSR_MTVAL : 
-        (w_ThrowException ? REG_CSR_MEPC : m_WrNo));
-*/
+    wire ExcWrEn = m_ExcMem | WriteMCAUSE;
+
     wire MemWrEn = m_WrEn | (m_CsrCounter[3] && m_CsrWrNo!=0)
         | WriteMEPC
+        | m_ExcWrEn
         | e_ExcJump
-        | d_ExcJump
-        | w_ExcUser
-        | w_ExcMem
-        | x_ExcMem
         ;
     wire [5:0] MemWrNo = 
         WriteMEPC       ? REG_CSR_MEPC :
         ((e_ExcJump | w_ExcMem) ? REG_CSR_MTVAL :
-        ((d_ExcJump | w_ExcUser | x_ExcMem) ? REG_CSR_MCAUSE :
+        (m_WriteMCAUSE ? REG_CSR_MCAUSE :
         (m_CsrCounter[3] ? m_CsrWrNo : m_WrNo)
         ));
 
 
+/*
+    wire [3:0] Cause = 
+         m_ExcMem  ? (m_MemWr         ? 6 : 4) :
+        (e_ExcUser ? (e_EBREAKorECALL ? 3 : 11)
+                   : 0);
+*/
+    wire [3:0] Cause = {
+        e_ExcUser & ~e_EBREAKorECALL,
+        m_ExcMem,
+        (m_ExcMem & m_MemWr) | e_ExcUser,
+        e_ExcUser};
+
+
+
+    wire [WORD_WIDTH-1:0] ExcWrData2 =
+        MemMisaligned           ? AddrSum       // MTVAL
+                                : d_PC;         // MEPC 
+        // MEPC is speculative, WriteMEPC is not valid before mem stage
+    wire [WORD_WIDTH-1:0] ExcWrData =
+        WriteMCAUSE             ? e_Cause       // MCAUSE
+                                : e_ExcWrData2;
+    wire [WORD_WIDTH-1:0] CsrResult =
+        e_ExcJump               ? e_ExcWrData2 : // MTVAL
+        ((WriteMEPC|m_ExcWrEn)  ? m_ExcWrData
+                                : vCsrOrALU);
+
+    wire ReturnPC      = JumpOpcode | ExcUser;
 
 
 
@@ -721,62 +708,12 @@ module Pipeline #(
 
 
 
-    // exception handling
-
-`ifdef ENABLE_EXCEPTIONS
-
-    // set the exception cause in the decode stage of the instruction that jumps to MTVEC
-/*
-    wire [3:0] Cause = 
-        e_ExcUser 
-            ? (e_EBREAKorECALL
-                ? 3             // EBREAK   breakpoint
-                : 11)           // ECALL    environment call from M-mode
-            : (e_MemAccess
-                ? (e_MemWr
-                    ? 6         // SW       store address misaligned
-                    : 4)        // LW       load address misaligned
-                : 0);           // jump     instruction address misaligned
-*/
-    wire ExcUser = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
-    wire ExcJump = m_Kill & f_PC[1];
-
-//    wire ThrowD = ExcUser;
-
-`endif
-    wire ReturnPC      = JumpOpcode | ExcUser;
 
 
-/*
-    wire [3:0] Cause = 
-        d_ExcBranch ? 0 : (     // B*       instruction address misaligned
-            d_Bubble 
-                ? (e_MemWr 
-                    ? 6         // SW       store address misaligned
-                    : 4)        // LW       load address misaligned
-                : (d_Insn[4] 
-                    ? (d_Insn[20] 
-                        ? 3     // EBREAK   breakpoint
-                        : 11)   // ECALL    environment call from M-mode
-                    : 0));      // JAL,JALR instruction address misaligned
-*/
 
-//    wire vFirstCsrCycle =  SysOpcode & CsrPart & ~vKillOrBubble & ~d_ExcBranch;
     wire vFirstCsrCycle =  SysOpcode & CsrPart & ~vKillOrBubble;
         // set only in the first of the two csr instruction cycles
 
-/*
-    wire [31:0] vCsrInsn =
-        {7'b0000000,
-//         vFirstCsrCycle ? vCsrTranslate[4:0] : (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
-         vCsrTranslate[4:0],
-                        // rs2
-         5'b00000,      // rs1=x0
-         3'b110,        // func3=OR
-         vFirstCsrCycle ? d_Insn[11:7]       : 5'b0,
-                        // rd
-         7'b0110011};   // opcode=RR
-*/
 
     reg [31:0] vCsrInsn;
     always @* begin
@@ -788,7 +725,6 @@ module Pipeline #(
         else
 `endif
         if (MemAccess) // memory bubble: or x0, x0, csr
-//            vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, 5'b00000,     7'b0110011};
             vCsrInsn <= {7'b0000000, 5'b00000, REG_CSR_MTVEC[4:0], 3'b000, 5'b00000,     7'b0110011};
         else /*if (vFirstCsrCycle)*/ begin // CSR bubble: or csr, x0, csr
             vCsrInsn <= {7'b0000000, vCsrTranslate[4:0], 5'b00000, 3'b110, d_Insn[11:7], 7'b0110011};
@@ -799,34 +735,6 @@ module Pipeline #(
 
     wire RdNo1Aux = ExcUser | ExcJump | ((InsnMRET | MemAccess) & ~m_Kill);
     wire RdNo2Aux = Bubble;
-
-
-
-    // In the case of a misaligned memory access, throw the exception in the mem
-    // stage of the bubble instruction, but write MTVAL in the mem stage of the
-    // actual instruction (one cycle earlier). Therefore ThrowException depends
-    // on the registered signal e_ExceptionDecode, while WriteMTVAL
-    // depends on the unregistered signal (MemMisaligned & vUnkilledMemAccess).
-
-/*
-    wire vExc = e_ExcJAL | (e_InsnJALR & AddrOfs[1]);
-    wire ThrowException = (e_ExceptionDecode | vExc) & ~ExecuteKill;
-        // true if there really is an exception (in mem stage)
-    wire WriteMTVAL = (MemMisaligned | vExc) & ~ExecuteKill;
-        // true for exceptions that set MTVAL (in mem stage)
-
-    wire ExcJAL = (d_Insn[6:2]==5'b11011) & d_Insn[21];
-        // JAL with unaligned target address
-
-    wire ExceptionDecode =
-        (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]) |
-            // throw in decode: EBREAK or ECALL
-        MemMisaligned |
-            // throw in execute: memory access misaligned
-            // forward to decode stage of following instruction bubble
-        d_ExcBranch;
-            // throw in memory: taken branch to misaligned address
-*/
 
     wire [31:0] Insn = (Bubble | ExcJump) ? vCsrInsn : (
         ((d_Bubble | d_SaveFetch) & ~m_Kill) ? d_DelayedInsn : mem_rdata);
@@ -886,34 +794,16 @@ module Pipeline #(
             m_CsrCounter <= 0;
 
             // fake a jump to address 0 on reset
-//            e_ExceptionDecode <= 0;
-//            e_ExcJAL <= 0;
             e_InsnJALR <= 0;
             e_InsnBEQ <= 0;
             e_InsnBLTorBLTU <= 0;
             e_InvertBranch <= 0;
-//            e_SelJumpTarget <= 1;
             m_Kill <= 0;
             w_Kill <= 0;
             e_PCImm <= START_PC;
-//            e_Target <= START_PC;
 
             m_WrEn <= 0;
             w_WrEn <= 0;
-//            m_WriteMTVAL <= 0;
-//            m_ThrowException <= 0;
-//            w_ThrowException <= 0;
-
-//            d_ExcBranch <= 0;
-//            e_ExcIfBranchTaken <= 0;
-//            m_ExcIfBranchTaken <= 0;
-
-/*
-            d_Throw <= 0;
-            e_Throw <= 0;
-            m_Throw <= 0;
-            w_Throw <= 0;
-*/
             e_ExcUser <= 0;
             m_ExcUser <= 0;
             d_ExcJump <= 0;
@@ -938,9 +828,6 @@ module Pipeline #(
         e_B <= ForwardBE;
         e_Imm <= ImmISU;
         e_PCImm <= PCImm;
-//        e_Target <= Target;
-//        e_SelJumpTarget <= SelJumpTarget;
-//        e_SelJumpTarget <= 0;
 
         e_WrEn <= DecodeWrEn;
         e_InsnJALR <= InsnJALR;
@@ -986,63 +873,22 @@ module Pipeline #(
         w_WrData <= MemResult;
 
 
-/*
             // exception handling
-            e_MEPC <= d_ExcBranch 
-                ? w_MEPC
-                : (d_Bubble ? e_MEPC : d_PC);
-            m_MEPC <= e_MEPC;
-            w_MEPC <= m_MEPC;
-
-            // CSR write (in memory stage)
-            m_MEPCorMTVAL <= m_ThrowException 
-                ? m_MEPC 
-                : ((e_ExcJAL | e_ExcIfBranchTaken) // TRY: e_MemAcces | e_InsnJALR
-                    ? e_PCImm
-                    : {AddrSum[WORD_WIDTH-1:1], AddrSum[0] & ~e_InsnJALR}); // TRY: AddrOfs[0]
-
-
-            e_ExceptionDecode   <= ExceptionDecode;
-            e_ExcJAL            <= ExcJAL;
-
-            // exception on unconditional branch
-            e_ExcIfBranchTaken  <= (d_Insn[6:2]==5'b11000) & d_Insn[8];
-                // detect a branch with unaligned offset in decode stage
-            m_ExcIfBranchTaken  <= e_ExcIfBranchTaken & ~ExecuteKill;
-                // kill on request in execute stage
-            d_ExcBranch         <= ExcBranch;
-                // throw in mem stage if branch was taken in execute stage
-
-            // potential exception cause (only one possible per instruction class)
-            e_Cause             <= Cause;
-            m_Cause             <= e_Cause;
-            w_Cause             <= m_Cause;
-            m_WriteMTVAL        <= WriteMTVAL;
-            m_ThrowException    <= ThrowException;
-            w_ThrowException    <= m_ThrowException;
-            d_Throw             <= ThrowD;
-            e_Throw             <= d_Throw;
-            m_Throw             <= e_Throw;
-            w_Throw             <= m_Throw;
-*/
-            e_MEPC              <= d_PC;
-            m_MEPC              <= e_MEPC;
-            m_AddrSum           <= AddrSum; // save it?
-            w_AddrSum           <= m_AddrSum; 
+//            e_MEPC              <= d_PC;
+//            m_AddrSum           <= AddrSum; // save it?
+            e_ExcWrData2        <= ExcWrData2;
+            m_ExcWrData         <= ExcWrData; 
+            m_ExcWrEn           <= ExcWrEn;
             e_ExcUser           <= ExcUser;
             m_ExcUser           <= e_ExcUser;
-            w_ExcUser           <= m_ExcUser;
             d_ExcJump           <= ExcJump;
             e_ExcJump           <= d_ExcJump;
             m_ExcMem            <= MemMisaligned;
             w_ExcMem            <= m_ExcMem;
-            x_ExcMem            <= w_ExcMem;
             e_EBREAKorECALL     <= d_Insn[20];
-            m_EBREAKorECALL     <= e_EBREAKorECALL;
-            w_EBREAKorECALL     <= m_EBREAKorECALL;
             m_MemWr             <= e_MemWr;
-            w_MemWr             <= m_MemWr;
-            x_MemWr             <= w_MemWr;
+            m_WriteMCAUSE       <= WriteMCAUSE;
+            e_Cause             <= Cause;
 
 
 
