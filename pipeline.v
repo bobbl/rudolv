@@ -284,7 +284,6 @@ module Pipeline #(
     wire LowPart        = (d_Insn[3:0]==4'b0011);
     wire CsrPart        = (d_Insn[5] & (d_Insn[13] | d_Insn[12]));
 
-    wire vKillOrBubble  = m_Kill | d_Bubble;
     wire vMemOrSys      = (d_Insn[6]==d_Insn[4]) & ~d_Insn[3] & ~d_Insn[2];
         // CAUTION: also true for opcode 1010011 (OP-FP, 32 bit floating point) 
 
@@ -445,10 +444,10 @@ module Pipeline #(
 //        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 
-    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)                   ? e_PCImm : NextOrSum;
-    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill & ~e_InsnJALR) ? f_PC    : NextOrSum;
-    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)                   ? e_PCImm : NoBranch;
-    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill)               ? d_PC    : f_PC;
+    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? e_PCImm : NextOrSum;
+    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum;
+    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)     ? e_PCImm : NoBranch;
+    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
 
 
 
@@ -578,7 +577,7 @@ module Pipeline #(
                                      : m_ExcWrData)
                         : vCsrOrALU;
 
-    wire ReturnPC = JumpOpcode | ExcUser;
+    wire ReturnPC = JumpOpcode;
 
 
 
@@ -623,9 +622,9 @@ module Pipeline #(
     wire vHiHalfSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[2] & HiRData[7]);
     wire vHiByteSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[1] & HiRData[7]);
 
-    wire [15:0] HiHalf = vHiHalfSigned ? 16'hFFFF : ((m_MemByte[4] ? mem_rdata[31:16] : 8'b0) | CsrResult[31:16]);
-    wire  [7:0] HiByte = vHiByteSigned ?  8'hFF   : ((m_MemByte[3] ? HiRData          : 8'b0) | CsrResult[15:8] );
-    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)    | CsrResult[7:0];
+    wire [15:0] HiHalf = vHiHalfSigned ? 16'hFFFF : ((m_MemByte[4] ? mem_rdata[31:16] : 16'b0) | CsrResult[31:16]);
+    wire  [7:0] HiByte = vHiByteSigned ?  8'hFF   : ((m_MemByte[3] ? HiRData          :  8'b0) | CsrResult[15:8] );
+    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)     | CsrResult[7:0];
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
 
@@ -643,48 +642,29 @@ module Pipeline #(
 
 
 
-
-
-
-
-
-    reg [31:0] vCsrInsn;
+    reg [31:0] Insn;
     always @* begin
-//        if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-        if (InsnCSR)
-            vCsrInsn <= {7'b0000000, vCsrTranslate[4:0],
+        if (Bubble | ExcJump) begin
+//            if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
+            if (InsnCSR)
+                Insn <= {7'b0000000, vCsrTranslate[4:0],
                          5'b00000,
                          3'b110, d_Insn[11:7], 7'b0110011};
-//            vCsrInsn <= {7'b0000000, 5'b00000, vCsrTranslate[4:0], 3'b110, d_Insn[11:7], 7'b0110011};
-        else
-            vCsrInsn <= {7'b0000000, 5'b00000, 
+            else
+                Insn <= {7'b0000000, 5'b00000, 
                          (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
                          3'b000, 5'b00000, 7'b1100111};
+        end else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
+            Insn <= d_DelayedInsn;
+        else
+            Insn <= mem_rdata;
     end
 
-
-/* TRY: much slower
-    wire vNotCSRBubble = ~vCsrInsn;
-    wire [31:0] vCsrInsn = {
-        7'b0000000,
-        InsnCSR ? vCsrTranslate[4:0] : 5'b00000 ,
-        InsnCSR ? 5'b00000 : (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
-        InsnCSR,
-        InsnCSR,
-        1'b0,
-        InsnCSR ? d_Insn[11:7] : 5'b00000,
-        InsnCSR ? 7'b0110011   : 7'b1100111};
-*/
-
-//    wire RdNo1Aux = ExcUser | ExcJump | ((InsnMRET | MemAccess) & ~m_Kill) | Bubble;
     wire RdNo1Aux = Bubble | ExcJump;
-////    wire RdNo1Aux = (Bubble & ~InsnJALR) | ExcUser;
-    wire RdNo2Aux = Bubble;
+    wire RdNo2Aux = InsnCSR;
 
 
 
-    wire [31:0] Insn = (Bubble | ExcJump) ? vCsrInsn : (
-        ((d_Bubble | d_SaveFetch) & ~m_Kill) ? d_DelayedInsn : mem_rdata);
 
 
 
