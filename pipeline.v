@@ -1,4 +1,6 @@
 `define ENABLE_EXCEPTIONS
+`define ENABLE_COUNTER
+
 
 module RegisterSet(
     input clk, 
@@ -95,7 +97,6 @@ module Pipeline #(
     reg e_MemAccess;
     reg e_MemWr;
     reg [1:0] e_MemWidth;
-    reg [3:0] e_CsrCounter;
 
 
     reg [WORD_WIDTH-1:0] d_PC;
@@ -118,7 +119,6 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_WrData;
     reg [6:0] m_MemByte;
     reg [7:0] m_MemSign;
-    reg [3:0] m_CsrCounter;
 
     // write back
     reg w_WrEn;
@@ -130,7 +130,6 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] e_ExcWrData2;
     reg [WORD_WIDTH-1:0] m_ExcWrData;
 
-//    reg m_ExcWrEn;
     reg e_ExcUser;
     reg m_ExcUser;
     reg d_ExcJump;
@@ -147,23 +146,35 @@ module Pipeline #(
 
 
     // CSR
+`ifdef ENABLE_COUNTER
     reg        e_CarryCYCLE;
     reg [32:0] e_CounterCYCLE;
     reg [31:0] e_CounterCYCLEH;
     reg        e_CarryINSTRET;
     reg [32:0] e_CounterINSTRET;
     reg [31:0] e_CounterINSTRETH;
+    reg [1:0]  e_CsrFromCounter;
+    reg [1:0]  m_CsrFromCounter;
+    reg        e_CsrSelHighWord;
+    reg        m_CsrSelHighWord;
+`endif
 
-    reg [1:0] e_CsrOp;
-    reg [1:0] m_CsrOp;
+    reg [5:0] e_CsrWrNo;
     reg [4:0] e_CsrImm;
     reg [WORD_WIDTH-1:0] m_CsrUpdate;
-    reg [5:0] e_CsrWrNo;
+    reg [1:0] e_CsrOp;
+    reg [1:0] m_CsrOp;
+
+    reg e_CsrFromReg;
+    reg m_CsrFromReg;
 
     reg  e_InsnBit14;
     wire e_ShiftRight      = e_InsnBit14;
     wire e_MemUnsignedLoad = e_InsnBit14;
     wire e_CsrSelImm       = e_InsnBit14;
+
+
+
 
 
 
@@ -211,43 +222,6 @@ module Pipeline #(
         1'b0};                                                          // 0
 
     wire [WORD_WIDTH-1:0] PCImm = d_PC + ImmBJU;
-
-
-
-
-
-// 30 14 13 12 6 5 4 3 2 Ki MB
-//             1 1 0 0 1  0  0  InsnJALR
-//     0  0    1 1 0 0 0  0  0  InsnBEQ
-//     1       1 1 0 0 0  0  0  InsnBLTorBLTU
-//     1  1    1 1 0 0 0  0  0  InsnBLTU
-//             1 1 0 1 1  0  0  (JAL)          \
-//           1 1 1 0 0 0  0  0  (BNE,BGE,BGEU)  InvertBranch
-//             0 0 0 1 1  0  0  (FENCE.I)      /
-//             1 1 0   1        ReturnPC = InsnJALorJALR 
-//             0 1 1 0 1        ReturnImm = InsnLUI
-//             0 0 1 0 1        ReturnPCImm = InsnAUIPC
-
-//     0  0  1 0   1 0 0        InsnSLL
-//  0  1  0  1 0   1 0 0        InsnSRL
-//  1  1  0  1 0   1 0 0        InsnSRA
-//     0  0  0 0   1 0 0        SelSum = InsnADDorSUB
-//             0 0 1 0 0        SelImm
-
-//     1  0  0 0   1 0 0        SelLogic
-//     1  0  1 0   1 0 0
-//     1  1  0 0   1 0 0
-//     1  1  1 0   1 0 0
-
-//             0   1 0 0
-//             0   1 0 0
-
-//             1 1 0 0 0        branch \
-//     0  0  1 0   1 0 0        SLL     \
-//     0  1  0 0   1 0 0        SLT      NegB
-//     0  1  1 0   1 0 0        SLTU    /
-//  1  0  0    0 1 1 0 0        SUB    /
-
 
 
 
@@ -336,6 +310,11 @@ module Pipeline #(
     wire DecodeWrEn = (EnableWrite | EnableWrite2) & ~DisableWrite;
 
     wire [5:0] DecodeWrNo = {1'b0, d_Insn[11:7]};
+//    wire [5:0] DecodeWrNo = CsrFromReg ? vCsrTranslate : {1'b0, d_Insn[11:7]};
+// If DecodeWrNo is set this early, the following second cycle of the CSR insn
+// gets the wrong value, because the forwarding condition for the execute bypass
+// is fulfilled.
+// TODO: check, if it would be better to set DecodeWrEn later for CSR insns
 
 
     // control signals for the ALU that are set in the decode stage
@@ -354,6 +333,7 @@ module Pipeline #(
 
     // forwarding
 
+    // 6*(4 + 32) LC = 216 LC
     wire FwdAE = e_WrEn & (d_RdNo1 == e_WrNo); // 4 LE
     wire FwdAM = m_WrEn & (d_RdNo1 == m_WrNo); // 4 LE
     wire FwdAW = w_WrEn & (d_RdNo1 == w_WrNo); // 4 LE
@@ -467,34 +447,34 @@ module Pipeline #(
 */
 
     reg [5:0] vCsrTranslate;
+    reg CsrFromReg;
     always @* begin
+        CsrFromReg <= InsnCSR;
         case (d_Insn[31:20])
             12'h305: vCsrTranslate <= REG_CSR_MTVEC;
             12'h340: vCsrTranslate <= REG_CSR_MSCRATCH;
             12'h341: vCsrTranslate <= REG_CSR_MEPC;
             12'h342: vCsrTranslate <= REG_CSR_MCAUSE;
             12'h343: vCsrTranslate <= REG_CSR_MTVAL;
-            default: vCsrTranslate <= 0; // cannot be written, always 0
+            default: begin
+                vCsrTranslate <= 0; // cannot be written, always 0
+                CsrFromReg <= 0;
+            end
         endcase
     end
 
-    reg [3:0] CsrCounter;
+
+`ifdef ENABLE_COUNTER
+    reg [1:0] CsrFromCounter;
     always @* begin
-        case (d_Insn[31:20])
-            12'hB00: CsrCounter <= CSR_COUNTER_MCYCLE;
-            12'hB80: CsrCounter <= CSR_COUNTER_MCYCLEH;
-            12'hC00: CsrCounter <= CSR_COUNTER_CYCLE;
-            12'hC01: CsrCounter <= CSR_COUNTER_TIME;
-            12'hC02: CsrCounter <= CSR_COUNTER_INSTRET;
-            12'hC80: CsrCounter <= CSR_COUNTER_CYCLEH;
-            12'hC81: CsrCounter <= CSR_COUNTER_TIMEH;
-            12'hC82: CsrCounter <= CSR_COUNTER_INSTRETH;
-            default: CsrCounter <= CSR_FROM_REGSET;
+        case ({d_Insn[31:28], 1'b0, d_Insn[26:20]}) // ignore bit 27 (low or high word)
+            12'hB00: CsrFromCounter <= 2'b01; // MCYCLE
+            12'hC00: CsrFromCounter <= 2'b01; // CYCLE;
+            12'hC01: CsrFromCounter <= 2'b01; // TIME;
+            12'hC02: CsrFromCounter <= 2'b10; // INSTRET;
+            default: CsrFromCounter <= 0;
         endcase
     end
-
-    wire [1:0] CsrOp    = ((SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00);
-    wire InsnCSR = SysOpcode & d_Insn[5] & (d_Insn[13:12]!=0);
 
     wire Retired = ~d_Bubble & ~m_Kill & ~w_Kill;
         // For the number of retired instructions, do not count bubbles or
@@ -504,33 +484,42 @@ module Pipeline #(
     wire [32:0] CounterINSTRET  = {1'b0, e_CounterINSTRET} + {62'b0, Retired};
     wire [31:0] CounterINSTRETH = e_CounterINSTRETH + e_CarryINSTRET;
 
+    wire [WORD_WIDTH-1:0] vCsrCYCLE   = m_CsrFromCounter[0] 
+        ? (m_CsrSelHighWord ? e_CounterCYCLEH : e_CounterCYCLE) : 0;
+    wire [WORD_WIDTH-1:0] vCsrINSTRET = m_CsrFromCounter[1] 
+        ? (m_CsrSelHighWord ? e_CounterINSTRETH : e_CounterINSTRET) : 0;
+
+`else
+    wire [WORD_WIDTH-1:0] vCsrCYCLE   = 0;
+    wire [WORD_WIDTH-1:0] vCsrINSTRET = 0;
+`endif
+
+
+    wire [1:0] CsrOp    = ((SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00);
+    wire InsnCSR = SysOpcode & d_Insn[5] & (d_Insn[13:12]!=0);
+
     wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_CsrImm} : e_A;
 
-    wire [WORD_WIDTH-1:0] vCsrCYCLE   = m_CsrCounter[1] 
-        ? (m_CsrCounter[0] ? e_CounterCYCLEH : e_CounterCYCLE) : 0;
-    wire [WORD_WIDTH-1:0] vCsrINSTRET = m_CsrCounter[2] 
-        ? (m_CsrCounter[0] ? e_CounterINSTRETH : e_CounterINSTRET) : 0;
     wire [WORD_WIDTH-1:0] vCsrRegSet = ~m_CsrOp[1]
         ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
         : (~m_CsrOp[0] ? (e_B | m_CsrUpdate) : (e_B & ~m_CsrUpdate));
             // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
             // e_B is a bypass from the execute stage of the next cycle
-    wire [WORD_WIDTH-1:0] vFromALU    = (m_CsrCounter[3:1]==0) ? m_WrData : 0;
+    wire [WORD_WIDTH-1:0] vFromALU    = (m_CsrFromReg==0 && m_CsrFromCounter==0) ? m_WrData : 0;
 
     wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
 
 
 
     wire ExecuteWrEn = ~m_Kill &
-        ((e_WrEn && m_CsrCounter[2:1]==2'b00) |
+        ((e_WrEn && m_CsrFromCounter==0)
             //      ~~~~~~~~~~~~~~~~~~~~~~~~
             // don't write in second cycle of a CSR insn, if readonly counter
-        (e_CsrCounter[3] && e_CsrWrNo!=0));
+        | e_CsrFromReg);
+            // In the first cycle, a regset CSR insn always writes the CSR
+            // part of the regset, even if rd=0 and therefore e_WrEn==0
 
-    wire [5:0] ExecuteWrNo = e_CsrCounter[3] ? e_CsrWrNo : e_WrNo;
-
-
-
+    wire [5:0] ExecuteWrNo = e_CsrFromReg ? e_CsrWrNo : e_WrNo;
 
 
 
@@ -671,10 +660,6 @@ module Pipeline #(
 
 
 
-
-
-
-
 // ---------------------------------------------------------------------
 // sequential logic
 // ---------------------------------------------------------------------
@@ -778,7 +763,7 @@ module Pipeline #(
 
             e_UncondJump        <= UncondJump;
 
-//`ifdef ENABLE_COUNTER
+`ifdef ENABLE_COUNTER
             // CSR decode
             e_CarryCYCLE        <= CounterCYCLE[32];
             e_CounterCYCLE      <= CounterCYCLE[31:0];
@@ -786,9 +771,11 @@ module Pipeline #(
             e_CarryINSTRET      <= CounterINSTRET[32];
             e_CounterINSTRET    <= CounterINSTRET[31:0];
             e_CounterINSTRETH   <= CounterINSTRETH;
-            e_CsrCounter        <= (CsrOp==0 || m_Kill) ? 0 : CsrCounter;
-            m_CsrCounter        <= (m_Kill) ? 0 : e_CsrCounter;
-//`endif
+            e_CsrFromCounter    <= InsnCSR ? CsrFromCounter : 0;
+            m_CsrFromCounter    <= e_CsrFromCounter;
+            e_CsrSelHighWord    <= d_Insn[27];
+            m_CsrSelHighWord    <= e_CsrSelHighWord;
+`endif
 
             e_CsrWrNo           <= vCsrTranslate;
             e_CsrImm            <= d_Insn[19:15];
@@ -797,7 +784,8 @@ module Pipeline #(
             e_CsrOp             <= CsrOp;
             m_CsrOp             <= e_CsrOp;
 
-
+            e_CsrFromReg        <= CsrFromReg;
+            m_CsrFromReg        <= e_CsrFromReg;
 
 
 
@@ -821,24 +809,12 @@ module Pipeline #(
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, RdData1, d_RdNo2, RdData2);
-
         $display("D Bubble=%b SaveFetch=%b",
             d_Bubble, d_SaveFetch);
-//        $display("Y InsnJALR=%b InsnMRET=%b vFirstCsrCycle=%b vCsrInsn=%h d_DelayedInsn=%h",
-//            InsnJALR, [1;5HInsnMRET, vFirstCsrCycle, vCsrInsn, d_DelayedInsn);
-//        $display("Y Bubble=%b SaveFetch=%b ExceptionDecode=%b MemMisaligned=%b d_ExcBranch=%b",
-//            Bubble, SaveFetch, ExceptionDecode, MemMisaligned, d_ExcBranch);
-
-
         $display("E a=%h b=%h i=%h -> %h -> x%d wren=%b",
             e_A, e_B, e_Imm, ALUResult, e_WrNo, e_WrEn);
-
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
-
-//        $display("X Throw d%be%bm%bw%b e_Cause=%d e_MEPC=%h m_MEPC=%h",
-//            d_Throw, e_Throw, m_Throw, w_Throw, e_Cause, e_MEPC, m_MEPC);
-
 
         $display("X ExcUser %c%c%c ExcJump %c%c%c ExcMem %c%c%c vWriteMEPC=%b",
             ExcUser ? "d" : ".",
@@ -869,46 +845,23 @@ module Pipeline #(
             RegSet.regs[REG_CSR_MEPC],
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
-/*
-        $display("C m_MEPC=%h vFastResult=%h vNotSh=%h m_ThrowE=%b",
-            m_MEPC, vFastResult, vNotShiftResult, m_ThrowException);
-        $display("C vLogicResult=%h vPCResult=%h vImmOrCsrResult=%h vCsrResult=%h e_CsrOp=%b",
-            vLogicResult, vPCResult, vImmOrCsrResult, vCsrResult, e_CsrOp);
-        $display("C vOverwriteByCsrRead=%h m_CsrOp=%b CsrResult=%h",
-            vOverwriteByCsrRead, m_CsrOp, CsrResult);
-*/
+
         $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h",
             AddrSum, NextOrSum, NoBranch);
 
 
-
-
-//        $display("C w_Kill=%b m_Kill=%b m_ThrowException=%b", 
-//            w_Kill, m_Kill, m_ThrowException); 
-
-        $display("C vCsrTranslate=%h RdNo2Aux=%b CsrOp=%b m_CsrCounter=%b",
-            vCsrTranslate, RdNo2Aux, CsrOp, m_CsrCounter);
+        $display("C vCsrTranslate=%h RdNo2Aux=%b CsrOp=%b m_CsrFromCounter=%b",
+            vCsrTranslate, RdNo2Aux, CsrOp, m_CsrFromCounter);
         $display("C vCsrOrALU=%h CsrResult=%h",
             vCsrOrALU, CsrResult);
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
 
-//        $display("M ExecuteWrEn=%b e_WrEn=%b m_CsrCounter[2:1]=%b DualKill=%b",
-//            ExecuteWrEn, e_WrEn, m_CsrCounter[2:1], DualKill);
 
-/*
-        $display("X d_ExcBranch=%b ExcBranch=%b m_ExcIfBranchTaken=%b m_MEPCorMTVAL=%h",
-            d_ExcBranch, ExcBranch, m_ExcIfBranchTaken, m_MEPCorMTVAL);
-        $display("X e_ExceptionDecode=%b ExceptionDecode=%b m_Kill=%b w_Kill=%b",
-            e_ExceptionDecode, ExceptionDecode, m_Kill, w_Kill);
-        $display("X e_MemWidth=%b AddrOfs=%b MemMisaligned=%b",
-            e_MemWidth, AddrOfs, MemMisaligned);
-*/
-
-
-        $display("  e_WrNo=%d e_CsrWrNo=%d e_CsrCounter=%b ExecuteWrNo=%d m_WrNo=%d",
-            e_WrNo, e_CsrWrNo, e_CsrCounter, ExecuteWrNo, m_WrNo);
-
+        $display("  e_WrNo=%d e_CsrWrNo=%d e_CsrFromCounter=%b ExecuteWrNo=%d m_WrNo=%d",
+            e_WrNo, e_CsrWrNo, e_CsrFromCounter, ExecuteWrNo, m_WrNo);
+        $display("  DestReg0=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
+            DestReg0, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
 
 
 //        if (e_WrEn) $display("E x%d", e_WrNo);
@@ -929,6 +882,7 @@ module Pipeline #(
             d_Bubble <= 0;
             d_DelayedInsn <= 0;
 
+`ifdef ENABLE_COUNTER
             // clear performance counters
             e_CarryCYCLE <= 0;
             e_CounterCYCLE <= 0;
@@ -936,6 +890,7 @@ module Pipeline #(
             e_CarryINSTRET <= 0;
             e_CounterINSTRET <= 0;
             e_CounterINSTRETH <= 0;
+`endif
 
             // fake a jump to address 0 on reset
             m_Kill <= 0;
