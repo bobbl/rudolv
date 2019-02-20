@@ -1,5 +1,5 @@
 `define ENABLE_EXCEPTIONS
-//`define ENABLE_COUNTER
+`define ENABLE_COUNTER
 
 
 module RegisterSet(
@@ -192,7 +192,8 @@ module Pipeline #(
     // ImmI for JALR  (opcode 11011) 31|  31  |31..25|24..20
     // ImmI for load  (opcode 00000) 31|  31  |31..25|24..20
     // ImmS for store (opcode 01000) 31|  31  |31..25|11..7
-    // ImmU for LUI   (opcode 01101) 31|30..12|   -  |   -
+    // ImmU for LUI   (opcode 01101) 31|30..12|   ?  |  ?
+    //      for CSR   (opcode 11100) ? |   ?  |21..15|  ?
 
     // Optimisation: For LUI the lowest 12 bits must not be set correctly to 0,
     // since ReturnImm clears them in the ALU.
@@ -201,7 +202,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ImmISU = { // 31 LE
         d_Insn[31],                                                     // 31
         (d_Insn[4] & d_Insn[2]) ? d_Insn[30:12] : {19{d_Insn[31]}},     // 30..12
-        d_Insn[31:25],                                                  // 11..5
+        d_Insn[4] ? d_Insn[21:15] : d_Insn[31:25],                      // 11..5
         (d_Insn[6:5]==2'b01) ? d_Insn[11:7] : d_Insn[24:20]};           // 4..0
 
     //                                31|30..20|19..13|12|11|10..5 | 4..1 |0
@@ -506,7 +507,7 @@ module Pipeline #(
     wire [1:0] CsrOp = ((SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00);
     wire InsnCSR = SysOpcode & d_Insn[5] & (d_Insn[13:12]!=0);
 
-    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_CsrImm} : e_A;
+    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_Imm[9:5]} : e_A;
 
     wire [WORD_WIDTH-1:0] vCsrRegSet = ~m_CsrOp[1]
         ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
@@ -771,6 +772,8 @@ module Pipeline #(
 `endif
 
             e_CsrImm            <= d_Insn[19:15];
+                // TRY: can be removed, but decreases clock rate by 2 MHz and PLBs by 17
+
             m_CsrUpdate         <= CsrUpdate;
             e_CsrOp             <= CsrOp;
             m_CsrOp             <= e_CsrOp;
