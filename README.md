@@ -82,12 +82,12 @@ The processor logic and the bootloader are written to the flash memory. Hence, t
 processor can be reset with switch SW2 of the MDP board. After switching it back and
 forth, `send_image.sh` can be used again to start a new program on the processor.
 
-| chip resources  | used | unit      |                             |
-|:--------------- | ----:| ---------:|:--------------------------- |
-| LCs             | 1864 |      LUT4 | 1638 without counters       |
-| BRAM            |    6 |   4 KiBit | registerset and boot loader |
-| SPRAM           |    2 | 256 KiBit | main memory                 |
-| clock frequency |   25 |       MHz |                             |
+| chip resources  | unit      | default | no counters | no exceptions | minimal |
+|:--------------- | ---------:| -------:| -----------:| -------------:| -------:|
+| LCs             |      LUT4 |    1829 |        1622 |          1619 |    1414 |
+| BRAM            |   4 KiBit |       6 |           6 |             6 |       6 |
+| SPRAM           | 256 KiBit |       2 |           2 |             2 |       2 |
+| clock frequency |       MHz |      25 |          23 |            22 |      26 |
 
 
 

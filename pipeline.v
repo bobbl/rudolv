@@ -1,5 +1,5 @@
 `define ENABLE_EXCEPTIONS
-`define ENABLE_COUNTER
+//`define ENABLE_COUNTER
 
 
 module RegisterSet(
@@ -27,6 +27,8 @@ module RegisterSet(
 endmodule
 
 
+
+
 module Pipeline #(
     parameter [31:0] START_PC = 0
 ) (
@@ -41,22 +43,12 @@ module Pipeline #(
 );
     localparam integer WORD_WIDTH = 32;
 
-    localparam integer REG_CSR_NONE     = 6'b100000; // used for any unknown CSR
+    localparam integer REG_CSR_MEPC     = 6'b100001;
+    localparam integer REG_CSR_MCAUSE   = 6'b100010;
+    localparam integer REG_CSR_MSCRATCH = 6'b100011;
+    localparam integer REG_CSR_MTVAL    = 6'b100100;
     localparam integer REG_CSR_MTVEC    = 6'b100101;
-    localparam integer REG_CSR_MSCRATCH = 6'b101000;
-    localparam integer REG_CSR_MEPC     = 6'b101001;
-    localparam integer REG_CSR_MCAUSE   = 6'b101010;
-    localparam integer REG_CSR_MTVAL    = 6'b101011;
 
-    localparam integer CSR_COUNTER_MCYCLE       = 4'b0010;
-    localparam integer CSR_COUNTER_MCYCLEH      = 4'b0011;
-    localparam integer CSR_COUNTER_CYCLE        = 4'b0010;
-    localparam integer CSR_COUNTER_CYCLEH       = 4'b0011;
-    localparam integer CSR_COUNTER_TIME         = 4'b0010;
-    localparam integer CSR_COUNTER_TIMEH        = 4'b0011;
-    localparam integer CSR_COUNTER_INSTRET      = 4'b0100;
-    localparam integer CSR_COUNTER_INSTRETH     = 4'b0101;
-    localparam integer CSR_FROM_REGSET          = 4'b1000;
 
 
 // ---------------------------------------------------------------------
@@ -73,6 +65,7 @@ module Pipeline #(
     reg [5:0] d_RdNo1;
     reg [5:0] d_RdNo2;
 
+    reg [WORD_WIDTH-1:0] d_PC;
     reg [31:0] d_DelayedInsn;
     reg d_SaveFetch;
     reg d_Bubble;
@@ -98,22 +91,23 @@ module Pipeline #(
     reg e_MemWr;
     reg [1:0] e_MemWidth;
 
-
-    reg [WORD_WIDTH-1:0] d_PC;
-
     reg [WORD_WIDTH-1:0] e_A;
     reg [WORD_WIDTH-1:0] e_B;
     reg [WORD_WIDTH-1:0] e_Imm;
     reg [WORD_WIDTH-1:0] e_PCImm;
 
-
     reg e_Carry;
     reg e_WrEn;
     reg [5:0] e_WrNo;
-    reg w_Kill;
+
+    reg  e_InsnBit14;
+    wire e_ShiftRight      = e_InsnBit14;
+    wire e_MemUnsignedLoad = e_InsnBit14;
+    wire e_CsrSelImm       = e_InsnBit14;
 
     // mem stage
     reg m_Kill; // to decode and execute stage
+    reg w_Kill;
     reg m_WrEn;
     reg [5:0] m_WrNo;
     reg [WORD_WIDTH-1:0] m_WrData;
@@ -126,10 +120,10 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] w_WrData;
 
 
+`ifdef ENABLE_EXCEPTIONS
     // exceptions
     reg [WORD_WIDTH-1:0] e_ExcWrData2;
     reg [WORD_WIDTH-1:0] m_ExcWrData;
-
     reg e_ExcUser;
     reg m_ExcUser;
     reg d_ExcJump;
@@ -142,11 +136,19 @@ module Pipeline #(
     reg m_WriteMTVAL;
     reg [3:0] e_Cause;
 
+    // CSRs for exceptions
+    reg [WORD_WIDTH-1:0] m_CsrUpdate;
+    reg [1:0] e_CsrOp;
+    reg [1:0] m_CsrOp;
+
+    reg e_CsrFromReg;
+    reg m_CsrFromReg;
+`endif
 
 
 
-    // CSR
 `ifdef ENABLE_COUNTER
+    // CSRs for counters
     reg        e_CarryCYCLE;
     reg [32:0] e_CounterCYCLE;
     reg [31:0] e_CounterCYCLEH;
@@ -159,19 +161,6 @@ module Pipeline #(
     reg        m_CsrSelHighWord;
 `endif
 
-    reg [4:0] e_CsrImm;
-    reg [WORD_WIDTH-1:0] m_CsrUpdate;
-    reg [1:0] e_CsrOp;
-    reg [1:0] m_CsrOp;
-
-    reg e_CsrFromReg;
-    reg m_CsrFromReg;
-
-    reg  e_InsnBit14;
-    wire e_ShiftRight      = e_InsnBit14;
-    wire e_MemUnsignedLoad = e_InsnBit14;
-    wire e_CsrSelImm       = e_InsnBit14;
-
 
 
 
@@ -180,6 +169,33 @@ module Pipeline #(
 // ---------------------------------------------------------------------
 // combinational circuits
 // ---------------------------------------------------------------------
+
+
+
+
+    // fetch
+
+    reg [31:0] Insn;
+    always @* begin
+        if (Bubble | ExcJump) begin
+            //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
+            if (InsnCSR)
+                Insn <= {7'b0000000, 5'b00000,
+                         vCsrTranslate[4:0],
+                         3'b110, d_Insn[11:7], 7'b0110011};
+            else
+                Insn <= {7'b0000000, 5'b00000, 
+                         (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
+                         3'b110, 5'b00000, 7'b1100111};
+        end else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
+            Insn <= d_DelayedInsn;
+        else
+            Insn <= mem_rdata;
+    end
+    wire RdNo1Aux = Bubble | ExcJump;
+
+
+
 
 
     // decode
@@ -217,7 +233,7 @@ module Pipeline #(
         d_Insn[2] ? ((d_Insn[4] | d_Insn[5]) & d_Insn[12]) : d_Insn[31], // 12
         ~d_Insn[4] & (d_Insn[2] ? d_Insn[20] : d_Insn[7]),              // 11
         d_Insn[4] ? 6'b000000 : d_Insn[30:25],                          // 10..5
-//        {4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
+        //{4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
         d_Insn[4] ? 4'b0000 : (d_Insn[2] ? (d_Insn[5] ? d_Insn[24:21] : 4'b0010) : d_Insn[11:8]),
         1'b0};                                                          // 0
 
@@ -269,9 +285,9 @@ module Pipeline #(
             // disable JALR, if it is the memory bubble and there is no memory exception
     wire InsnBEQ        =  BranchOpcode & ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
     wire InsnBLTorBLTU  =  BranchOpcode & ~d_Insn[2] &  d_Insn[14];
-//    wire InvertBranch   =  BranchOpcode & ~d_Insn[2] &  d_Insn[12]; // BNE or BGE or BGEU
     wire InsnJALorFENCEI= (d_Insn[6]==d_Insn[5]) && d_Insn[4:2]==3'b011;
     wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
+    wire InsnCSR        = SysOpcode & d_Insn[5] & (d_Insn[13:12]!=0);
 
     // control signals for the ALU that are set in the decode stage
     wire SelSum         = (ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]); // ADD or SUB
@@ -422,7 +438,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
     wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
     wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~DualKill)
-//        ? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
+        //? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 
     wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? e_PCImm : NextOrSum;
@@ -431,6 +447,95 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
 
 
+
+
+
+
+
+
+
+    // exception handling
+
+`ifdef ENABLE_EXCEPTIONS
+    wire ExcUser        = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
+    wire ExcJump        = m_Kill & f_PC[1];
+    wire vWriteMEPC     = ExcJump | m_ExcUser | m_ExcMem;
+    wire WriteMCAUSE    = ExcJump | m_ExcUser            | w_ExcMem;
+    wire WriteMTVAL     = d_ExcJump           | m_ExcMem;
+
+    wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
+    wire MemWrEn        = m_WrEn | vExcOverwrite;
+
+    wire [5:0] MemWrNo  =
+        vWriteMEPC      ? REG_CSR_MEPC :
+        (m_WriteMTVAL   ? REG_CSR_MTVAL :
+        (m_WriteMCAUSE  ? REG_CSR_MCAUSE :
+        m_WrNo));
+
+
+    //wire [3:0] Cause = m_ExcMem  ? (m_MemWr         ? 6 : 4) :
+    //                  (e_ExcUser ? (e_EBREAKorECALL ? 3 : 11) : 0);
+    wire [3:0] Cause = {
+        e_ExcUser & ~e_EBREAKorECALL,
+        m_ExcMem,
+        (m_ExcMem & m_MemWr) | e_ExcUser,
+        e_ExcUser};
+
+    wire [WORD_WIDTH-1:0] ExcWrData2 =
+        MemMisaligned   ? AddrSum       // MTVAL for mem access
+                        : d_PC;         // MEPC 
+    wire [WORD_WIDTH-1:0] ExcWrData =
+        WriteMCAUSE     ? e_Cause       // MCAUSE
+                        : e_ExcWrData2;
+
+    wire [WORD_WIDTH-1:0] CsrResult =
+        vExcOverwrite   ? (e_ExcJump ? e_ExcWrData2 // MTVAL for jump
+                                     : m_ExcWrData)
+                        : vCsrOrALU;
+
+    // CSRs
+    reg [5:0] vCsrTranslate;
+    reg CsrFromReg;
+    always @* begin
+        CsrFromReg <= InsnCSR;
+        case (d_Insn[31:20])
+            12'h305: vCsrTranslate <= REG_CSR_MTVEC;
+            12'h340: vCsrTranslate <= REG_CSR_MSCRATCH;
+            12'h341: vCsrTranslate <= REG_CSR_MEPC;
+            12'h342: vCsrTranslate <= REG_CSR_MCAUSE;
+            12'h343: vCsrTranslate <= REG_CSR_MTVAL;
+            default: begin
+                vCsrTranslate <= 0; // cannot be written, always 0
+                CsrFromReg <= 0;
+            end
+        endcase
+    end
+
+
+    wire [1:0] CsrOp = ((SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00);
+
+    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_Imm[9:5]} : e_A;
+
+    wire [WORD_WIDTH-1:0] vCsrRegSet = ~m_CsrOp[1]
+        ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
+        : (~m_CsrOp[0] ? (e_A | m_CsrUpdate) : (e_A & ~m_CsrUpdate));
+            // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
+            // e_B is a bypass from the execute stage of the next cycle
+    wire [WORD_WIDTH-1:0] vFromALU    = (m_CsrFromReg==0 && m_CsrFromCounter==0) ? m_WrData : 0;
+
+    wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
+
+`else
+    wire ExcJump = 0;
+    wire m_ExcMem = 0;
+    wire CsrFromReg = 0;
+    wire e_CsrFromReg = 0;
+    wire [5:0] vCsrTranslate = 0;
+
+    wire [WORD_WIDTH-1:0] CsrResult = vCsrCYCLE | vCsrINSTRET | m_WrData;
+    wire MemWrEn        = m_WrEn;
+    wire [5:0] MemWrNo  = m_WrNo;
+`endif
 
 
 
@@ -465,114 +570,20 @@ module Pipeline #(
 `else
     wire [WORD_WIDTH-1:0] vCsrCYCLE   = 0;
     wire [WORD_WIDTH-1:0] vCsrINSTRET = 0;
-    wire [1:0]  CsrFromCounter = 0;
-    wire [1:0]  m_CsrFromCounter = 0;
+    wire [1:0] CsrFromCounter = 0;
+    wire [1:0] m_CsrFromCounter = 0;
 `endif
 
 
 
 
 
-
-
-    // CSRs
-
-/*  Doesn't work because MSTATUS=300h may be modified by the CRT of riscv-tests
-    // 300h..307h -> x32..x39
-    // 340h..347h -> x40..x47
-    wire [5:0] vCsrTranslate =
-        (d_Insn[31:27]==5'b00110 && d_Insn[25:23]==3'b000)
-            ? {2'b10, d_Insn[26], d_Insn[22:20]}
-            : 0;
-*/
-
-    reg [5:0] vCsrTranslate;
-    reg CsrFromReg;
-    always @* begin
-        CsrFromReg <= InsnCSR;
-        case (d_Insn[31:20])
-            12'h305: vCsrTranslate <= REG_CSR_MTVEC;
-            12'h340: vCsrTranslate <= REG_CSR_MSCRATCH;
-            12'h341: vCsrTranslate <= REG_CSR_MEPC;
-            12'h342: vCsrTranslate <= REG_CSR_MCAUSE;
-            12'h343: vCsrTranslate <= REG_CSR_MTVAL;
-            default: begin
-                vCsrTranslate <= 0; // cannot be written, always 0
-                CsrFromReg <= 0;
-            end
-        endcase
-    end
-
-
-    wire [1:0] CsrOp = ((SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00);
-    wire InsnCSR = SysOpcode & d_Insn[5] & (d_Insn[13:12]!=0);
-
-    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_Imm[9:5]} : e_A;
-
-    wire [WORD_WIDTH-1:0] vCsrRegSet = ~m_CsrOp[1]
-        ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
-        : (~m_CsrOp[0] ? (e_B | m_CsrUpdate) : (e_B & ~m_CsrUpdate));
-            // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
-            // e_B is a bypass from the execute stage of the next cycle
-    wire [WORD_WIDTH-1:0] vFromALU    = (m_CsrFromReg==0 && m_CsrFromCounter==0) ? m_WrData : 0;
-
-    wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
-
-
-
-
-    // exception handling
-
-
-    wire ExcUser        = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
-    wire ExcJump        = m_Kill & f_PC[1];
-    wire vWriteMEPC     = ExcJump | m_ExcUser | m_ExcMem;
-    wire WriteMCAUSE    = ExcJump | m_ExcUser            | w_ExcMem;
-    wire WriteMTVAL     = d_ExcJump           | m_ExcMem;
-
-    wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
-//    wire vExcOverwrite  = m_Kill & f_PC[1] | m_ExcUser | m_ExcMem | m_WriteMTVAL | m_WriteMCAUSE;
-    wire MemWrEn        = m_WrEn | vExcOverwrite;
-
-    wire [5:0] MemWrNo  =
-        vWriteMEPC      ? REG_CSR_MEPC :
-        (m_WriteMTVAL   ? REG_CSR_MTVAL :
-        (m_WriteMCAUSE  ? REG_CSR_MCAUSE :
-        m_WrNo));
-
-
-//    wire [3:0] Cause = m_ExcMem  ? (m_MemWr         ? 6 : 4) :
-//                      (e_ExcUser ? (e_EBREAKorECALL ? 3 : 11) : 0);
-    wire [3:0] Cause = {
-        e_ExcUser & ~e_EBREAKorECALL,
-        m_ExcMem,
-        (m_ExcMem & m_MemWr) | e_ExcUser,
-        e_ExcUser};
-
-    wire [WORD_WIDTH-1:0] ExcWrData2 =
-        MemMisaligned   ? AddrSum       // MTVAL for mem access
-                        : d_PC;         // MEPC 
-    wire [WORD_WIDTH-1:0] ExcWrData =
-        WriteMCAUSE     ? e_Cause       // MCAUSE
-                        : e_ExcWrData2;
-
-    wire [WORD_WIDTH-1:0] CsrResult =
-        vExcOverwrite   ? (e_ExcJump ? e_ExcWrData2 // MTVAL for jump
-                                     : m_ExcWrData)
-                        : vCsrOrALU;
-
-
-
-
     // memory signals, generated in execute stage
 
-
-/*
-    wire [1:0] AddrOfs = {
-        e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
-        e_A[0] ^ e_Imm[0]};
-*/
     wire [1:0] AddrOfs = AddrSum[1:0];
+    //wire [1:0] AddrOfs = {
+    //    e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
+    //    e_A[0] ^ e_Imm[0]};
 
     reg [12:0] MemSignals;
     always @* case ({e_MemWidth, AddrOfs})
@@ -626,29 +637,6 @@ module Pipeline #(
 
 
 
-    reg [31:0] Insn;
-    always @* begin
-        if (Bubble | ExcJump) begin
-            //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-            if (InsnCSR)
-                Insn <= {7'b0000000, vCsrTranslate[4:0],
-                         5'b00000,
-                         3'b110, d_Insn[11:7], 7'b0110011};
-            else
-                Insn <= {7'b0000000, 5'b00000, 
-                         (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
-                         3'b000, 5'b00000, 7'b1100111};
-        end else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
-            Insn <= d_DelayedInsn;
-        else
-            Insn <= mem_rdata;
-    end
-
-    wire RdNo1Aux = Bubble | ExcJump;
-    wire RdNo2Aux = InsnCSR;
-
-
-
 
 
 
@@ -662,7 +650,7 @@ module Pipeline #(
 
 
     wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
-    wire [5:0] RdNo2 = {RdNo2Aux, Insn[24:20]};
+    wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
     wire [WORD_WIDTH-1:0] RdData1;
     wire [WORD_WIDTH-1:0] RdData2;
 
@@ -731,54 +719,53 @@ module Pipeline #(
         m_MemByte <= MemByte;
         f_PC <= FetchPC;
 
-
         // mem stage
         w_WrEn <= MemWrEn;
         w_WrNo <= MemWrNo;
         w_WrData <= MemResult;
 
 
-            // exception handling
-            e_ExcWrData2        <= ExcWrData2;
-            m_ExcWrData         <= ExcWrData; 
-            e_ExcUser           <= ExcUser;
-            m_ExcUser           <= e_ExcUser;
-            d_ExcJump           <= ExcJump;
-            e_ExcJump           <= d_ExcJump;
-            m_ExcMem            <= MemMisaligned;
-            w_ExcMem            <= m_ExcMem;
-            e_EBREAKorECALL     <= d_Insn[20];
-            m_MemWr             <= e_MemWr;
-            m_WriteMCAUSE       <= WriteMCAUSE;
-            m_WriteMTVAL        <= WriteMTVAL;
-            e_Cause             <= Cause;
 
+`ifdef ENABLE_EXCEPTIONS
+        // exception handling
+        e_ExcWrData2        <= ExcWrData2;
+        m_ExcWrData         <= ExcWrData; 
+        e_ExcUser           <= ExcUser;
+        m_ExcUser           <= e_ExcUser;
+        d_ExcJump           <= ExcJump;
+        e_ExcJump           <= d_ExcJump;
+        m_ExcMem            <= MemMisaligned;
+        w_ExcMem            <= m_ExcMem;
+        e_EBREAKorECALL     <= d_Insn[20];
+        m_MemWr             <= e_MemWr;
+        m_WriteMCAUSE       <= WriteMCAUSE;
+        m_WriteMTVAL        <= WriteMTVAL;
+        e_Cause             <= Cause;
 
+        m_CsrUpdate         <= CsrUpdate;
+        e_CsrOp             <= CsrOp;
+        m_CsrOp             <= e_CsrOp;
+        e_CsrFromReg        <= CsrFromReg;
+        m_CsrFromReg        <= e_CsrFromReg;
+`endif
 
 
 
 `ifdef ENABLE_COUNTER
-            // CSR decode
-            e_CarryCYCLE        <= CounterCYCLE[32];
-            e_CounterCYCLE      <= CounterCYCLE[31:0];
-            e_CounterCYCLEH     <= CounterCYCLEH;
-            e_CarryINSTRET      <= CounterINSTRET[32];
-            e_CounterINSTRET    <= CounterINSTRET[31:0];
-            e_CounterINSTRETH   <= CounterINSTRETH;
-            e_CsrSelHighWord    <= d_Insn[27];
-            m_CsrSelHighWord    <= e_CsrSelHighWord;
-            e_CsrFromCounter    <= InsnCSR ? CsrFromCounter : 0;
-            m_CsrFromCounter    <= e_CsrFromCounter;
+        // counters
+        e_CarryCYCLE        <= CounterCYCLE[32];
+        e_CounterCYCLE      <= CounterCYCLE[31:0];
+        e_CounterCYCLEH     <= CounterCYCLEH;
+        e_CarryINSTRET      <= CounterINSTRET[32];
+        e_CounterINSTRET    <= CounterINSTRET[31:0];
+        e_CounterINSTRETH   <= CounterINSTRETH;
+        e_CsrSelHighWord    <= d_Insn[27];
+        m_CsrSelHighWord    <= e_CsrSelHighWord;
+        e_CsrFromCounter    <= InsnCSR ? CsrFromCounter : 0;
+        m_CsrFromCounter    <= e_CsrFromCounter;
 `endif
 
-            e_CsrImm            <= d_Insn[19:15];
-                // TRY: can be removed, but decreases clock rate by 2 MHz and PLBs by 17
 
-            m_CsrUpdate         <= CsrUpdate;
-            e_CsrOp             <= CsrOp;
-            m_CsrOp             <= e_CsrOp;
-            e_CsrFromReg        <= CsrFromReg;
-            m_CsrFromReg        <= e_CsrFromReg;
 
 
 
@@ -857,11 +844,9 @@ module Pipeline #(
             DestReg0, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
 
 
-//        if (e_WrEn) $display("E x%d", e_WrNo);
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
         if (w_WrEn) $display("W x%d<-%h",w_WrNo, w_WrData);
 `endif
-
 
         if (!rstn) begin
             e_WrEn <= 0;
@@ -891,6 +876,7 @@ module Pipeline #(
             e_PCImm <= START_PC;
             e_InsnJALorFENCEI  <= 1;
         end
+
     end
 
 endmodule
