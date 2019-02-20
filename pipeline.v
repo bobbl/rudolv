@@ -1,5 +1,5 @@
 `define ENABLE_EXCEPTIONS
-`define ENABLE_COUNTER
+//`define ENABLE_COUNTER
 
 
 module RegisterSet(
@@ -601,20 +601,21 @@ module Pipeline #(
     wire [7:0] LoRData = (m_MemByte[0] ? mem_rdata[23:16] : mem_rdata[ 7:0]);
     wire [7:0] HiRData = (m_MemByte[0] ? mem_rdata[31:24] : mem_rdata[15:8]);
 
+    // OPTIMIZE: combine m_MemByte[0] and  m_MemSign[0]
     wire vHiHalfSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[2] & HiRData[7]);
     wire vHiByteSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[1] & HiRData[7]);
 
-    wire [15:0] HiHalf = vHiHalfSigned ? 16'hFFFF : ((m_MemByte[4] ? mem_rdata[31:16] : 16'b0) | CsrResult[31:16]);
-    wire  [7:0] HiByte = vHiByteSigned ?  8'hFF   : ((m_MemByte[3] ? HiRData          :  8'b0) | CsrResult[15:8] );
-    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)     | CsrResult[7:0];
+    wire [15:0] HiHalf = (m_MemByte[4] ? mem_rdata[31:16] : (vHiHalfSigned ? 16'hFFFF : 16'b0)) | CsrResult[31:16];
+    wire  [7:0] HiByte = (m_MemByte[3] ? HiRData          : (vHiByteSigned ?  8'hFF   :  8'b0)) | CsrResult[15:8];
+    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)      | CsrResult[7:0];
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
 
     wire [WORD_WIDTH-1:0] MemWriteData = {
-          e_MemWidth==0  ? e_B[7:0] : (e_MemWidth==1 ? e_B[15:8] : e_B[31:24]),
-        (~e_MemWidth[1]) ? e_B[7:0] : e_B[23:16],
-          e_MemWidth==0  ? e_B[7:0] : e_B[15:8],
-        e_B[7:0]};
+         e_MemWidth[1] ? e_B[31:24] : (e_MemWidth[0]  ? e_B[15:8] : e_B[7:0]),
+         e_MemWidth[1] ? e_B[23:16]                               : e_B[7:0],
+        (e_MemWidth[1] |               e_MemWidth[0]) ? e_B[15:8] : e_B[7:0],
+                                                                    e_B[7:0]};
 
     assign mem_wren  = e_MemWr & ~DualKill;
     assign mem_wmask = MemSignals[3:0];
