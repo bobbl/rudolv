@@ -1,5 +1,5 @@
 `define ENABLE_EXCEPTIONS
-//`define ENABLE_COUNTER
+`define ENABLE_COUNTER
 
 
 module RegisterSet(

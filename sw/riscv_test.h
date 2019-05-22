@@ -1,8 +1,7 @@
 #ifndef _ENV_DANZIG_TEST_H
 #define _ENV_DANZIG_TEST_H
 
-#define RVTEST_RV32M
-#define RVTEST_RV32U
+#define RVTEST_RV64U
 #define TESTNUM x28     // register where test number is stored
 
 
@@ -34,8 +33,6 @@ _start2:
         lui x11, 0x10001;       \
         sw x10, 0(x11);         \
 1:      j 1b;
-
-
 
 #define RVTEST_DATA_BEGIN .balign 4;
 #define RVTEST_DATA_END
