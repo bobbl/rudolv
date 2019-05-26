@@ -38,6 +38,16 @@
   __tmp; })
 
 
+
+// send an idle bit before any send for proper synchronization
+static void uart_sync()
+{
+    uart_tx = 1;
+    unsigned long wait = rdcycle();
+    while (rdcycle() - wait < uart_period);
+}
+
+
 static void uart_send(unsigned ch)
 {
     unsigned pattern = ((unsigned)ch<<1) | 0x200;
@@ -47,8 +57,8 @@ static void uart_send(unsigned ch)
     for (i=0; i<10; i++) {
         uart_tx = pattern & 1;
         pattern = pattern >> 1;
+        while (rdcycle() - timestamp < period);
         timestamp = timestamp + period;
-        while (rdcycle() < timestamp);
     }
 }
 
@@ -115,6 +125,8 @@ int main(int argc, char **argv)
     unsigned long wait;
     int ch;
 
+    uart_sync();
+
     print_str("Starting\r\n");
     leds = ff_leds = 0xaa;
     while (1) {
@@ -122,17 +134,10 @@ int main(int argc, char **argv)
         print_hex32(read_pc());
         print_str(" Hello2\r\n");
 
-        wait = rdcycle() + 12000000; // one second
-        while (rdcycle() < wait) {
+        wait = rdcycle();
+        while (rdcycle() - wait < 115200*uart_period) { // one second
             ch = uart_nonblocking_receive();
             if (ch>0) uart_send(ch+1);
         }
     }
-/*
-    unsigned i = 0;
-    while (1) {
-        leds = i >> 16;
-        i++;
-    }
-*/
 }

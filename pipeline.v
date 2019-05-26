@@ -179,14 +179,14 @@ module Pipeline #(
     always @* begin
         if (Bubble | ExcJump) begin
             //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-            if (InsnCSR)
+            if (CsrPart)
                 Insn <= {7'b0000000, 5'b00000,
                          vCsrTranslate[4:0],
-                         3'b110, d_Insn[11:7], 7'b0110011};
+                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
             else
                 Insn <= {7'b0000000, 5'b00000, 
                          (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
-                         3'b110, 5'b00000, 7'b1100111};
+                         3'b110, 5'b00000, 7'b1100111}; // JALR
         end else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
             Insn <= d_DelayedInsn;
         else
@@ -273,7 +273,7 @@ module Pipeline #(
     wire SUBandSLL      = ~d_Insn[14] & ~d_Insn[6] & d_Insn[4];
     wire PartBranch     = (d_Insn[6:4]==3'b110);
     wire LowPart        = (d_Insn[3:0]==4'b0011);
-    wire CsrPart        = (d_Insn[5] & (d_Insn[13] | d_Insn[12]));
+    wire CsrPart        = (d_Insn[6] & d_Insn[5] & (d_Insn[13] | d_Insn[12]));
 
     wire vMemOrSys      = (d_Insn[6]==d_Insn[4]) & ~d_Insn[3] & ~d_Insn[2];
         // CAUTION: also true for opcode 1010011 (OP-FP, 32 bit floating point) 
@@ -287,7 +287,7 @@ module Pipeline #(
     wire InsnBLTorBLTU  =  BranchOpcode & ~d_Insn[2] &  d_Insn[14];
     wire InsnJALorFENCEI= (d_Insn[6]==d_Insn[5]) && d_Insn[4:2]==3'b011;
     wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
-    wire InsnCSR        = SysOpcode & d_Insn[5] & (d_Insn[13:12]!=0);
+    wire InsnCSR        =  SysOpcode & CsrPart & ~m_Kill;
 
     // control signals for the ALU that are set in the decode stage
     wire SelSum         = (ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]); // ADD or SUB
@@ -322,7 +322,11 @@ module Pipeline #(
     // level 2
     wire EnableWrite    = ArithOrUpper | InsnJALorJALR | (MemAccess & ~d_Insn[5]);
     wire EnableWrite2   = (CsrFromCounter!=0);
-    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | m_Kill;
+
+    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | (e_CsrFromCounter!=0) | m_Kill;
+        //                                           ~~~~~~~~~~~~~~~~~~~
+        // don't write in second cycle of a CSR insn, if readonly counter
+
     // level 3
     wire DecodeWrEn     = (EnableWrite | EnableWrite2) & ~DisableWrite;
 
@@ -332,14 +336,9 @@ module Pipeline #(
         // get the wrong value, because the forwarding condition for the execute
         // bypass was fulfilled.
 
-
-    wire ExecuteWrEn = ~m_Kill &
-        ((e_WrEn && m_CsrFromCounter==2'b00)
-            //      ~~~~~~~~~~~~~~~~~~~
-            // don't write in second cycle of a CSR insn, if readonly counter
-        | e_CsrFromReg);
-            // In the first cycle, a regset CSR insn always writes the CSR
-            // part of the regset, even if rd=0 and therefore e_WrEn==0
+    wire ExecuteWrEn = ~m_Kill & (e_WrEn | e_CsrFromReg);
+        // In the first cycle, a regset CSR insn always writes the CSR
+        // part of the regset, even if rd=0 and therefore e_WrEn==0
 
     wire [5:0] ExecuteWrNo = e_WrNo;
 
@@ -543,16 +542,17 @@ module Pipeline #(
     // performance counters
 
 `ifdef ENABLE_COUNTER
-    reg [1:0] CsrFromCounter;
+    reg [1:0] DecodeCsrCounter;
     always @* begin
         case ({d_Insn[31:28], 1'b0, d_Insn[26:20]}) // ignore bit 27 (low or high word)
-            12'hB00: CsrFromCounter <= 2'b01; // MCYCLE
-            12'hC00: CsrFromCounter <= 2'b01; // CYCLE;
-            12'hC01: CsrFromCounter <= 2'b01; // TIME;
-            12'hC02: CsrFromCounter <= 2'b10; // INSTRET;
-            default: CsrFromCounter <= 0;
+            12'hB00: DecodeCsrCounter <= 2'b01; // MCYCLE
+            12'hC00: DecodeCsrCounter <= 2'b01; // CYCLE;
+            12'hC01: DecodeCsrCounter <= 2'b01; // TIME;
+            12'hC02: DecodeCsrCounter <= 2'b10; // INSTRET;
+            default: DecodeCsrCounter <= 0;
         endcase
     end
+    wire [1:0] CsrFromCounter = InsnCSR ? DecodeCsrCounter : 0;
 
     wire Retired = ~d_Bubble & ~m_Kill & ~w_Kill;
         // For the number of retired instructions, do not count bubbles or
@@ -570,7 +570,7 @@ module Pipeline #(
 `else
     wire [WORD_WIDTH-1:0] vCsrCYCLE   = 0;
     wire [WORD_WIDTH-1:0] vCsrINSTRET = 0;
-    wire [1:0] CsrFromCounter = 0;
+    wire [1:0] DecodeCsr = 0;
     wire [1:0] m_CsrFromCounter = 0;
 `endif
 
@@ -761,7 +761,7 @@ module Pipeline #(
         e_CounterINSTRETH   <= CounterINSTRETH;
         e_CsrSelHighWord    <= d_Insn[27];
         m_CsrSelHighWord    <= e_CsrSelHighWord;
-        e_CsrFromCounter    <= InsnCSR ? CsrFromCounter : 0;
+        e_CsrFromCounter    <= CsrFromCounter;
         m_CsrFromCounter    <= e_CsrFromCounter;
 `endif
 
@@ -796,6 +796,7 @@ module Pipeline #(
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 
+/*
         $display("X ExcUser %c%c%c ExcJump %c%c%c ExcMem %c%c%c vWriteMEPC=%b",
             ExcUser ? "d" : ".",
             e_ExcUser ? "e" : ".",
@@ -806,6 +807,19 @@ module Pipeline #(
             MemMisaligned ? "e" : ".",
             m_ExcMem ? "m" : ".",
             w_ExcMem ? "w" : ".",
+            vWriteMEPC
+            );
+*/
+        $display("X ExcUser %b%b%b ExcJump %b%b%b ExcMem %b%b%b vWriteMEPC=%b",
+            ExcUser,
+            e_ExcUser,
+            m_ExcUser,
+            ExcJump,
+            d_ExcJump,
+            e_ExcJump,
+            MemMisaligned,
+            m_ExcMem,
+            w_ExcMem,
             vWriteMEPC
             );
 
@@ -826,12 +840,12 @@ module Pipeline #(
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
 
-        $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h",
-            AddrSum, NextOrSum, NoBranch);
+//        $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h",
+//            AddrSum, NextOrSum, NoBranch);
 
 
-        $display("C vCsrTranslate=%h RdNo2Aux=%b CsrOp=%b m_CsrFromCounter=%b",
-            vCsrTranslate, RdNo2Aux, CsrOp, m_CsrFromCounter);
+        $display("C vCsrTranslate=%h CsrOp=%b m_CsrFromCounter=%b CYCLE=%h",
+            vCsrTranslate, CsrOp, m_CsrFromCounter, e_CounterCYCLE);
         $display("C vCsrOrALU=%h CsrResult=%h",
             vCsrOrALU, CsrResult);
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
@@ -842,6 +856,8 @@ module Pipeline #(
             e_WrNo, e_CsrFromCounter, ExecuteWrNo, m_WrNo);
         $display("  DestReg0=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
             DestReg0, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
+//        $display("  vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
+//            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);

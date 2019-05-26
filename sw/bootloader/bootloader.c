@@ -43,11 +43,11 @@ static int uart_nonblocking_receive()
     unsigned i;
     unsigned pattern = 0;
     unsigned long period = uart_period;
-    timestamp += period/2;
+    timestamp -= period/2;
 
     for (i=0; i<10; i++) {
         pattern = pattern | ((uart_rx & 1) << i);
-        while (rdcycle() < timestamp);
+        while (rdcycle() - timestamp < period);
         timestamp = timestamp + period;
     }
     return (pattern >> 2) & 0xff;
