@@ -734,8 +734,8 @@ module Pipeline #(
         m_ExcUser           <= e_ExcUser;
         d_ExcJump           <= ExcJump;
         e_ExcJump           <= d_ExcJump;
-        m_ExcMem            <= MemMisaligned;
-        w_ExcMem            <= m_ExcMem;
+        m_ExcMem            <= MemMisaligned & ~m_Kill;
+        w_ExcMem            <= m_ExcMem & ~m_Kill;
         e_EBREAKorECALL     <= d_Insn[20];
         m_MemWr             <= e_MemWr;
         m_WriteMCAUSE       <= WriteMCAUSE;

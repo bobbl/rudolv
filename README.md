@@ -55,7 +55,6 @@ Dhrystone results:
 
 
 
-
 Synthesis with IceStorm
 -----------------------
 
@@ -88,6 +87,27 @@ forth, `send_image.sh` can be used again to start a new program on the processor
 | BRAM            |   4 KiBit |       6 |           6 |             6 |       6 |
 | SPRAM           | 256 KiBit |       2 |           2 |             2 |       2 |
 | clock frequency |       MHz |      25 |          23 |            22 |      26 |
+
+
+
+CoreMark EEMBC benchmark scores
+-------------------------------
+
+Run one iteration of [EEMBC CoreMark](https://www.eembc.org/coremark/) with Icarus Verilog:
+
+    make -C sw/coremark/ run-icarus
+
+The results can be found in `sw/coremark/coremark/run1.log`. Since this is a
+simulation, the error message can be ignored and the computed iterations/sec
+corresponds to CoreMark/MHz.
+
+To get the CoreMark of an FPGA implementation, build an image with UART output
+and send it to the bootloader:
+
+    make -C sw/coremark/ build-uart
+    sw/bootloader/send_image.sh /dev/ttyUSB1 sw/coremark/coremark_uart.bin
+
+The CoreMark/MHz of Danzig is 0.892.
 
 
 
