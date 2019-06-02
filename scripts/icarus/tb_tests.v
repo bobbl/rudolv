@@ -40,6 +40,7 @@ module tb_tests;
     always #10 $monitor("  time %t", $time);
 `endif
 
+/*
     integer i;
     always @(posedge clk) begin
         if (mem_wren & mem_wmask[0] & (mem_addr==32'h10001000)) begin
@@ -47,6 +48,25 @@ module tb_tests;
                 $write("ok");
             end else begin
                 $write("FAILED");
+            end
+            $finish;
+        end
+    end
+*/
+
+    integer i;
+    always @(posedge clk) begin
+        if (mem_wren & mem_wmask[0] & (mem_addr==32'h10001000)) begin
+            if (mem_wdata[7:0]==8'h03) begin
+                for (i=0; i<64; i=i+4) begin
+                    $display("%h%h%h%h",
+                        mem.mem['h1FC0 + i+3],
+                        mem.mem['h1FC0 + i+2],
+                        mem.mem['h1FC0 + i+1],
+                        mem.mem['h1FC0 + i+0]);
+                end
+            end else begin
+                $display("***** Test FAILED");
             end
             $finish;
         end

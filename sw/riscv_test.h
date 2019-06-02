@@ -22,19 +22,29 @@ _start2:
 
 #define RVTEST_CODE_END
 
-#define RVTEST_PASS             \
+#define RVTEST_EXIT             \
         li x10, 0x03;           \
         lui x11, 0x10001;       \
         sw x10, 0(x11);         \
 1:      j 1b;
 
-#define RVTEST_FAIL             \
-        li x10, 0xfd;           \
-        lui x11, 0x10001;       \
+
+#define RVTEST_PASS             \
+        la x11, result_ok;      \
+        li x10, 0x6b6f;         \
         sw x10, 0(x11);         \
-1:      j 1b;
+        RVTEST_EXIT
+
+#define RVTEST_FAIL             \
+        la x11, result_ok;      \
+        li x10, 0x4c494146;     \
+        sw x10, 0(x11);         \
+        RVTEST_EXIT
 
 #define RVTEST_DATA_BEGIN .balign 4;
-#define RVTEST_DATA_END
+
+#define RVTEST_DATA_END         \
+        .section .signature;    \
+        result_ok: .word 0
 
 #endif
