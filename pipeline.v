@@ -1,5 +1,5 @@
 `define ENABLE_EXCEPTIONS
-`define ENABLE_COUNTER
+//`define ENABLE_COUNTER
 
 
 module RegisterSet(
@@ -155,11 +155,11 @@ module Pipeline #(
     reg        e_CarryINSTRET;
     reg [32:0] e_CounterINSTRET;
     reg [31:0] e_CounterINSTRETH;
-    reg [1:0]  e_CsrFromCounter;
     reg [1:0]  m_CsrFromCounter;
     reg        e_CsrSelHighWord;
     reg        m_CsrSelHighWord;
 `endif
+    reg [1:0]  e_CsrFromCounter;
 
 
 
@@ -568,6 +568,7 @@ module Pipeline #(
         ? (m_CsrSelHighWord ? e_CounterINSTRETH : e_CounterINSTRET) : 0;
 
 `else
+    wire [1:0] CsrFromCounter = 0;
     wire [WORD_WIDTH-1:0] vCsrCYCLE   = 0;
     wire [WORD_WIDTH-1:0] vCsrINSTRET = 0;
     wire [1:0] DecodeCsr = 0;
@@ -761,9 +762,9 @@ module Pipeline #(
         e_CounterINSTRETH   <= CounterINSTRETH;
         e_CsrSelHighWord    <= d_Insn[27];
         m_CsrSelHighWord    <= e_CsrSelHighWord;
-        e_CsrFromCounter    <= CsrFromCounter;
         m_CsrFromCounter    <= e_CsrFromCounter;
 `endif
+        e_CsrFromCounter    <= CsrFromCounter;
 
 
 
