@@ -35,7 +35,17 @@ module Pipeline #(
     input  clk,
     input  rstn,
 
-    output mem_wren,
+    output retired,
+
+    output csr_read,
+    output [1:0] csr_modify,
+    output [31:0] csr_wdata,
+    output [11:0] csr_addr,
+    input [31:0] csr_rdata,
+    input csr_valid,
+
+    output mem_valid,
+    output mem_write,
     output [3:0] mem_wmask,
     output [31:0] mem_wdata,
     output [31:0] mem_addr,
@@ -164,6 +174,10 @@ module Pipeline #(
 `endif
     reg [1:0]  e_CsrFromCounter;
 
+    reg        e_CsrRead;
+    reg        m_CsrRead;
+    reg        m_CsrValid;
+    reg [WORD_WIDTH-1:0] m_CsrRdData;
 
 
 
@@ -184,9 +198,9 @@ module Pipeline #(
             //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
             if (CsrPart)
                 Insn <= {7'b0000000, 5'b00000,
-                         vCsrTranslate[4:0],
+                         vCsrTranslate,
 //                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
-                         3'b110, vCsrTranslate[4:0], 7'b0110011}; // OR
+                         3'b110, vCsrTranslate, 7'b0110011}; // OR
             else
                 Insn <= {7'b0000000, 5'b00000, 
                          (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
@@ -301,6 +315,7 @@ module Pipeline #(
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14])
         ? d_Insn[13:12] 
         : {1'b0, ~InsnBEQ};
+    wire CsrRead        = (InsnCSR & ~DestReg0) & ~CsrFromReg;
 
     wire MemWr          = MemAccess & d_Insn[5];
     wire [1:0] MemWidth = (MemAccess & ~m_Kill & ~m_ExcMem) ? d_Insn[13:12] : 2'b11;  // = no mem access
@@ -312,6 +327,16 @@ module Pipeline #(
     wire NegB           = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
     wire SaveFetch      = (d_Bubble | (vMemOrSys & ~d_SaveFetch)) & ~m_Kill;
     wire Bubble         = ~m_Kill & vMemOrSys; 
+
+
+
+    // external CSR interface
+    assign retired    = ~d_Bubble & ~m_Kill & ~w_Kill;
+    assign csr_read   = CsrRead;
+    assign csr_modify = (InsnCSR & (d_Insn[19:15]!=0)) ? d_Insn[13:12] : 2'b00;
+    assign csr_wdata  = ForwardAE;
+    assign csr_addr   = d_Insn[31:20];
+
 
 
 
@@ -328,9 +353,11 @@ module Pipeline #(
 //    wire EnableWrite2   = (CsrFromCounter!=0);
     wire EnableWrite2   = (CsrFromCounter!=0) | CsrFromReg;
 
-    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | (e_CsrFromCounter!=0) | m_Kill;
+//    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | (e_CsrFromCounter!=0) | m_Kill;
         //                                           ~~~~~~~~~~~~~~~~~~~
         // don't write in second cycle of a CSR insn, if readonly counter
+//    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | (InsnCSR & ~CsrFromReg) | m_Kill;
+    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | CsrRead | e_CsrRead | m_Kill;
 
     // level 3
     wire DecodeWrEn     = (EnableWrite | EnableWrite2) & ~DisableWrite;
@@ -342,16 +369,15 @@ module Pipeline #(
         // get the wrong value, because the forwarding condition for the execute
         // bypass was fulfilled.
 
-//    wire ExecuteWrEn = ~m_Kill & (e_WrEn | e_CsrFromReg);
-    wire ExecuteWrEn = ~m_Kill & (e_WrEn);
-        // In the first cycle, a regset CSR insn always writes the CSR
+////    wire ExecuteWrEn = ~m_Kill & (e_WrEn | e_CsrFromReg);
+//    wire ExecuteWrEn = ~m_Kill & (e_WrEn);
+    wire ExecuteWrEn   = ~m_Kill & ((e_CsrRead & csr_valid) ? 1'b1 : e_WrEn); 
         // part of the regset, even if rd=0 and therefore e_WrEn==0
+
+
 
     wire [5:0] ExecuteWrNo = e_WrNo;
 ////    wire [5:0] ExecuteWrNo = e_CsrFromReg ? {1'b1, e_WrNo[4:0]} : e_WrNo;
-
-
-
 
 
 
@@ -375,6 +401,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ForwardBR = SelImm ?    0 : (FwdBW ? w_WrData : RdData2);
     wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBR | ForwardImm);
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}};
+
 
 
 
@@ -472,6 +499,7 @@ module Pipeline #(
 
     wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
     wire MemWrEn        = m_WrEn | vExcOverwrite;
+//    wire MemWrEn        = ((m_CsrRead & m_CsrValid) ? 1'b1 : m_WrEn) | vExcOverwrite;
 
     wire [5:0] MemWrNo  =
         vWriteMEPC      ? REG_CSR_MEPC :
@@ -520,7 +548,7 @@ module Pipeline #(
         vCsrTranslate <= {1'b1, d_Insn[26], d_Insn[23:20]};
     end
 */
-    wire [5:0] vCsrTranslate = {1'b1, d_Insn[26], d_Insn[23:20]};
+    wire [4:0] vCsrTranslate = {d_Insn[26], d_Insn[23:20]};
     wire CsrFromReg = InsnCSR && (d_Insn[31:27]==5'b00110) && 
         (d_Insn[25:23]==3'b0) &&
         (((~d_Insn[26]) && (d_Insn[22:20]==3'b101)) ||
@@ -537,15 +565,18 @@ module Pipeline #(
             // e_B is a bypass from the execute stage of the next cycle
 //    wire [WORD_WIDTH-1:0] vFromALU    = (m_CsrFromReg==0 && m_CsrFromCounter==0) ? m_WrData : 0;
 //    wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
-    wire [WORD_WIDTH-1:0] vCsrOrALU =  m_CsrFromReg ? e_A 
-        : (w_CsrFromReg ? m_vCsrRegSet : m_WrData);
+    wire [WORD_WIDTH-1:0] vCsrOrALU =  
+        m_CsrFromReg ? e_A 
+                     : (w_CsrFromReg ? m_vCsrRegSet 
+                                     : ((m_CsrRead & m_CsrValid) ? m_CsrRdData 
+                                                                 : m_WrData));
 
 `else
     wire ExcJump = 0;
     wire m_ExcMem = 0;
     wire CsrFromReg = 0;
     wire e_CsrFromReg = 0;
-    wire [5:0] vCsrTranslate = 0;
+    wire [4:0] vCsrTranslate = 0;
 
     wire [WORD_WIDTH-1:0] CsrResult = vCsrCYCLE | vCsrINSTRET | m_WrData;
     wire MemWrEn        = m_WrEn;
@@ -590,6 +621,7 @@ module Pipeline #(
     wire [1:0] DecodeCsr = 0;
     wire [1:0] m_CsrFromCounter = 0;
 `endif
+
 
 
 
@@ -646,11 +678,11 @@ module Pipeline #(
         (e_MemWidth[1] |               e_MemWidth[0]) ? e_B[15:8] : e_B[7:0],
                                                                     e_B[7:0]};
 
-    assign mem_wren  = e_MemWr & ~DualKill;
+    assign mem_valid = 1;
+    assign mem_write = e_MemWr & ~DualKill;
     assign mem_wmask = MemSignals[3:0];
     assign mem_wdata = MemWriteData;
     assign mem_addr  = MemAddr;
-
 
 
 
@@ -785,13 +817,17 @@ module Pipeline #(
 `endif
         e_CsrFromCounter    <= CsrFromCounter;
 
+        e_CsrRead           <= CsrRead;
+        m_CsrRead           <= e_CsrRead;
+        m_CsrValid          <= csr_valid;
+        m_CsrRdData         <= csr_rdata;
 
 
 
 
 `ifdef DEBUG
-        $display("F wren=%b wmask=%b wdata=%h addr=%h rdata=%h",
-            mem_wren, mem_wmask, mem_wdata, mem_addr, mem_rdata);
+        $display("F write=%b wmask=%b wdata=%h addr=%h rdata=%h",
+            mem_write, mem_wmask, mem_wdata, mem_addr, mem_rdata);
         $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h",
             d_PC, d_PC, d_Insn, Insn);
         $display("R  0 %h %h %h %h %h %h %h %h", 
@@ -871,10 +907,14 @@ module Pipeline #(
         $display("C CsrFromReg %b e_%b m_%b w_%b m_vCsrRegSet=%h m_WrData=%h", 
             CsrFromReg, e_CsrFromReg, m_CsrFromReg, w_CsrFromReg,
             m_vCsrRegSet, m_WrData);
+        $display("C m_CsrRead=%b m_CsrValid=%b m_CsrRdData=%h",
+            m_CsrRead, m_CsrValid, m_CsrRdData);
+        $display("C CSR addr=%h rdata=%h valid=%b",
+            csr_addr, csr_rdata, csr_valid);
+
+
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
-
-
         $display("  e_WrNo=%d e_CsrFromCounter=%b ExecuteWrNo=%d m_WrNo=%d",
             e_WrNo, e_CsrFromCounter, ExecuteWrNo, m_WrNo);
         $display("  DestReg0=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
@@ -919,3 +959,58 @@ module Pipeline #(
     end
 
 endmodule
+
+
+
+module CsrCounter (
+    input clk,
+    input rstn,
+    input retired,
+
+    input read,
+    input [1:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid
+);
+
+    reg Valid;
+    reg [31:0] RData;
+    reg [32:0] q_CounterCYCLE;
+    reg [31:0] q_CounterCYCLEH;
+    reg [32:0] q_CounterINSTRET;
+    reg [31:0] q_CounterINSTRETH;
+
+    always @(posedge clk) begin
+        Valid <= read;
+        case (addr)
+            12'hB00: RData <= q_CounterCYCLE;    // MCYCLE
+            12'hB80: RData <= q_CounterCYCLEH;   // MCYCLEH
+            12'hC00: RData <= q_CounterCYCLE;    // CYCLE
+            12'hC80: RData <= q_CounterCYCLEH;   // CYCLEH
+            12'hC01: RData <= q_CounterCYCLE;    // TIME
+            12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
+            12'hC02: RData <= q_CounterINSTRET;  // INSTRET
+            12'hC82: RData <= q_CounterINSTRETH; // INSRETH
+            default: Valid <= 0;
+        endcase
+
+        q_CounterCYCLE    <= {1'b0, q_CounterCYCLE} + 1;
+        q_CounterCYCLEH   <= q_CounterCYCLEH + q_CounterCYCLE[32];
+        q_CounterINSTRET  <= {1'b0, q_CounterINSTRET} + {62'b0, retired};
+        q_CounterINSTRETH <= q_CounterINSTRETH + q_CounterINSTRET[32];
+
+        if (!rstn) begin
+            Valid <= 0;
+            q_CounterCYCLE    <= 0;
+            q_CounterCYCLEH   <= 0;
+            q_CounterINSTRET  <= 0;
+            q_CounterINSTRETH <= 0;
+        end
+    end
+
+    assign valid = Valid;
+    assign rdata = RData;
+endmodule
+
