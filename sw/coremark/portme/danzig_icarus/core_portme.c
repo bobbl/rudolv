@@ -65,10 +65,6 @@ secs_ret time_in_secs(CORE_TICKS ticks)
     return (secs_ret)ticks / (secs_ret)CYCLES_PER_SEC;
 }
 
-void uart_sync()
-{
-}
-
 void uart_send_char(unsigned ch)
 {
     *(volatile char *)0x10000000 = ch;

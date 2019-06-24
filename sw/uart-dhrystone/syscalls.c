@@ -22,24 +22,7 @@ extern volatile uint64_t fromhost;
 #define uart_tx (*(volatile char *)0x10003000)
 #define uart_period (*(volatile uint32_t *)0x10004000)
 
-static void uart_send(unsigned ch);
-/*
-{
-    unsigned pattern = ((unsigned)ch<<1) | 0x200;
-    unsigned i;
-    unsigned long period    = uart_period;
-    unsigned long timestamp = rdcycle();
-    for (i=0; i<10; i++) {
-        uart_tx = pattern & 1;
-        pattern = pattern >> 1;
-        timestamp = timestamp + period;
-        while (rdcycle() < timestamp);
-    }
-}
-*/
-
-
-
+void uart_send(unsigned ch); // -> crt.S
 
 static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t arg2)
 {

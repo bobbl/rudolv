@@ -983,18 +983,22 @@ module CsrCounter (
     reg [31:0] q_CounterINSTRETH;
 
     always @(posedge clk) begin
-        Valid <= read;
-        case (addr)
-            12'hB00: RData <= q_CounterCYCLE;    // MCYCLE
-            12'hB80: RData <= q_CounterCYCLEH;   // MCYCLEH
-            12'hC00: RData <= q_CounterCYCLE;    // CYCLE
-            12'hC80: RData <= q_CounterCYCLEH;   // CYCLEH
-            12'hC01: RData <= q_CounterCYCLE;    // TIME
-            12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
-            12'hC02: RData <= q_CounterINSTRET;  // INSTRET
-            12'hC82: RData <= q_CounterINSTRETH; // INSRETH
-            default: Valid <= 0;
-        endcase
+        Valid <= 0;
+        RData <= 0;
+        if (read) begin
+            Valid <= 1;
+            case (addr)
+                12'hB00: RData <= q_CounterCYCLE;    // MCYCLE
+                12'hB80: RData <= q_CounterCYCLEH;   // MCYCLEH
+                12'hC00: RData <= q_CounterCYCLE;    // CYCLE
+                12'hC80: RData <= q_CounterCYCLEH;   // CYCLEH
+                12'hC01: RData <= q_CounterCYCLE;    // TIME
+                12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
+                12'hC02: RData <= q_CounterINSTRET;  // INSTRET
+                12'hC82: RData <= q_CounterINSTRETH; // INSRETH
+                default: Valid <= 0;
+            endcase
+        end
 
         q_CounterCYCLE    <= {1'b0, q_CounterCYCLE} + 1;
         q_CounterCYCLEH   <= q_CounterCYCLEH + q_CounterCYCLE[32];
@@ -1014,3 +1018,52 @@ module CsrCounter (
     assign rdata = RData;
 endmodule
 
+
+
+module CsrUart #(
+    parameter [11:0]  BASE_ADDR  = 12'h7c0,    // CSR address
+    parameter integer CLOCK_RATE = 12_000_000,
+    parameter integer BAUD_RATE  = 115200
+) (
+    input clk,
+    input rstn,
+
+    input read,
+    input [1:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    input rx,
+    output tx
+);
+
+    reg q_TX;
+    reg Valid;
+    reg [31:0] RData;
+
+    wire [30:0] PERIOD = CLOCK_RATE / BAUD_RATE;
+
+    always @(posedge clk) begin
+        Valid <= 0;
+        RData <= 0;
+        if (addr==BASE_ADDR) begin
+            if (read) begin
+                Valid <= 1;
+                RData <= {PERIOD, rx};
+            end
+            case ({modify, wdata[0]})
+                3'b010: q_TX <= 0; // write 0
+                3'b011: q_TX <= 1; // write 1
+                3'b101: q_TX <= 1; // set
+                3'b111: q_TX <= 0; // clear
+            endcase
+        end
+        if (~rstn) q_TX <= 1;
+    end
+
+    assign valid = Valid;
+    assign rdata = RData;
+    assign tx = q_TX;
+endmodule

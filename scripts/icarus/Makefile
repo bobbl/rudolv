@@ -38,6 +38,3 @@ clean:
 
 .SECONDARY:
 .PHONY: all test-all compliance riscv-dhrystone dhrystone clean
-
-
-

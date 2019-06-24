@@ -236,12 +236,15 @@ _clear_bss:
 uart_send:
         sll     a0, a0, 1
         or      a0, a0, 0x200   # pattern = (ch<<1) | 0x200
-        lui     a1, 0x10004
-        lw      a1, (a1)        # period
-        lui     a2, 0x10003     # tx
+#        lui     a1, 0x10004
+#        lw      a1, (a1)        # period
+        csrr    a1, 0x7c0
+        srl     a1, a1, 1       # period
+#        lui     a2, 0x10003     # tx
         rdcycle a3              # timstamp
 
-1:      sb      a0, (a2)
+# 1:      sb      a0, (a2)
+1:      csrw    0x7c0, a0
         srl     a0, a0, 1
 2:      rdcycle a4
         sub     a4, a4, a3

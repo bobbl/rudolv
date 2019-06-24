@@ -1,14 +1,11 @@
 /* wrapper for iCE40 UP5K MDP board
 
 Memory map
-0000'0000h main memory (SPRAM)
+0000'0000h 64KiB main memory (SPRAM)
+0002'0000h  1KiB boot loader (BRAM)
 
-0002'0000h boot loader (BRAM)
-
-1000'1000h LEDs (each bit), lowest bit indicates program termination
-1000'2000h UART RX
-1000'3000h UART TX
-1000'4000h UART signal width of one bit in clock cycles
+CSR
+7c0h       UART
 */
 
 module top (
@@ -35,81 +32,64 @@ module top (
         reset_counter <= reset_counter + !rstn;
     end
 
-
-    reg  [7:0] ff_Leds;
-    reg        ff_TX;
-    reg        ff_MemWrite;
-    reg [31:0] ff_MemAddr;
-    reg [31:0] ff_MemWData;
-
-    wire mem_valid;
-    wire MemWrite;
-    wire mem_write_main = MemWrite & ~mem_addr[28] & ~mem_addr[17];
-    wire mem_write_boot = 1'b1; // MemWrite & ~mem_addr[28] & mem_addr[17];
+    wire        mem_valid;
+    wire        mem_write;
+    wire        mem_write_main =  mem_write & ~mem_addr[17];
+    wire        mem_write_boot = 1'b1; // mem_write & mem_addr[17];
     wire  [3:0] mem_wmask;
-    wire  [3:0] mem_wmask_main = (MemWrite & ~mem_addr[28] & ~mem_addr[17]) ? mem_wmask : 0;
-    wire  [3:0] mem_wmask_boot = (MemWrite & ~mem_addr[28] &  mem_addr[17]) ? mem_wmask : 0;
+    wire  [3:0] mem_wmask_main = (mem_write & ~mem_addr[17]) ? mem_wmask : 0;
+    wire  [3:0] mem_wmask_boot = (mem_write &  mem_addr[17]) ? mem_wmask : 0;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
+    wire [31:0] mem_rdata = q_SelBootMem ? mem_rdata_boot : mem_rdata_main;
 
-    reg [31:0] MappedRData;
-    always @* begin
-        MappedRData <= 32'h0000006f; // avoid that code is executed
-        case (ff_MemAddr[15:12])
-            4'h2: MappedRData <= {31'b0, uart_rx};
-            4'h4: MappedRData <= CLOCK_RATE / BAUD_RATE;
-        endcase
-    end
-
-    wire [31:0] MemRData = ff_MemAddr[28]
-        ? MappedRData
-        : (ff_MemAddr[17]
-            ? mem_rdata_boot
-            : mem_rdata_main);
-
+    reg q_SelBootMem;
     always @(posedge clk) begin
-        if (~rstn) begin
-            ff_MemWrite <= 0;
-            ff_MemAddr <= 0;
-            ff_Leds <= 0;
-            ff_TX <= 1;
-        end else begin
-            if (ff_MemWrite & ff_MemAddr[28]) begin
-                case (ff_MemAddr[15:12])
-                    4'h0: ; // char output: ignored
-                    4'h1: ff_Leds <= ff_MemWData[7:0];
-                    4'h2: ;
-                    4'h3: ff_TX <= ff_MemWData[0];
-                endcase
-            end
-
-            ff_MemWrite <= MemWrite;
-            ff_MemAddr  <= mem_addr;
-            ff_MemWData <= mem_wdata;
-        end
+        q_SelBootMem <= rstn ? mem_addr[17] : 0;
     end
 
-    wire retired;
-    wire csr_read;
-    wire [1:0] csr_modify;
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+    wire        UartValid;
+    wire [31:0] UartRData;
+
+    wire        retired;
+    wire        csr_read;
+    wire [1:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata;
-    wire csr_valid;
+    wire [31:0] csr_rdata = CounterRData | UartRData;
+    wire        csr_valid = CounterValid | UartValid;
 
     CsrCounter counter (
         .clk    (clk),
         .rstn   (rstn),
-        .retired(retired),
 
         .read   (csr_read),
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (csr_rdata),
-        .valid  (csr_valid)
+        .rdata  (CounterRData),
+        .valid  (CounterValid),
+
+        .retired(retired)
+    );
+
+    CsrUart uart (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (UartRData),
+        .valid  (UartValid),
+
+        .rx     (uart_rx),
+        .tx     (uart_tx)
     );
 
     Pipeline #(
@@ -127,11 +107,11 @@ module top (
         .csr_valid      (csr_valid),
 
         .mem_valid      (mem_valid),
-        .mem_write      (MemWrite),
+        .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
         .mem_addr       (mem_addr),
-        .mem_rdata      (MemRData)
+        .mem_rdata      (mem_rdata)
     );
 
     SPRAMMemory mainmem (
@@ -152,17 +132,12 @@ module top (
         .rdata  (mem_rdata_boot)
     );
 
-
-
-//    assign leds = ff_Leds;
-    assign uart_tx = ff_TX;
-//    assign flash_ss = 1;
 endmodule
 
 
 
 module SPRAMMemory (
-    input clk, 
+    input clk,
     input write,
     input [3:0] wmask,
     input [31:0] wdata,
@@ -207,8 +182,7 @@ module BRAMMemory (
     input [7:0] addr,
     output reg [31:0] rdata
 );
-//    reg [31:0] mem [0:255];
-    reg [31:0] mem [0:8195];
+    reg [31:0] mem [0:255];
 
     initial begin
         $readmemh("../../sw/bootloader/bootloader.hex", mem);

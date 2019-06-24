@@ -1,6 +1,5 @@
 module tb_dhrystone;
 
-
     reg clk = 1;
     always #5 clk = !clk;
 
@@ -70,7 +69,7 @@ module tb_dhrystone;
     );
 
 
-    always #1000000 $monitor("  time %t", $time);
+    always #1_000_000 $monitor("  time %t", $time);
 
     integer i;
     always @(posedge clk) begin
@@ -81,10 +80,10 @@ module tb_dhrystone;
         end
         if (mem_valid & mem_write) begin
             case (mem_addr)
-                'h10000000: begin
+                'h1000_0000: begin
                     if (mem_wmask[0]) $write("\033[1;37m%c\033[0m", mem_wdata[7:0]);
                 end
-                'h10001000: begin
+                'h1000_1000: begin
                     if (mem_wmask[0] & mem_wdata[0]) begin
                         $display("tohost (at 0x10001000) exit");
                         $finish;
@@ -95,38 +94,7 @@ module tb_dhrystone;
     end
 
     initial begin
-        #5000001 $display("***** TIMEOUT"); $stop;
+        #5_000_001 $display("***** TIMEOUT"); $stop;
     end
-
 
 endmodule
-
-
-
-// instruction memory
-module Memory (
-    input clk,
-    input valid,
-    input wren,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [12:0] addr,
-    output reg [31:0] rdata
-);
-    reg [31:0] mem [0:8191];
-
-    initial begin
-        $readmemh(`CODE, mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (valid & wren) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
-endmodule
-

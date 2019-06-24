@@ -1,6 +1,5 @@
 #include <stdarg.h>
 
-void uart_sync();
 void uart_send_char(unsigned ch);
 
 
@@ -25,8 +24,6 @@ int ee_printf(const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-
-    uart_sync();
 
     char ch = *fmt++;
     while (ch) {

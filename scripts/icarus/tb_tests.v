@@ -111,40 +111,8 @@ module tb_tests;
     end
 
     initial begin
-//        #200000 $write("TIMEOUT"); $stop;
-        #5000_000 $write("TIMEOUT"); $stop;
+        #200000 $write("TIMEOUT"); $stop;
     end
 
 
-endmodule // testbench
-
-
-
-
-// instruction memory
-module Memory (
-    input clk,
-    input valid,
-    input wren,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [12:0] addr,
-    output reg [31:0] rdata
-);
-    reg [31:0] mem [0:8191];
-
-    initial begin
-        $readmemh(`CODE, mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (valid & wren) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
 endmodule
-
