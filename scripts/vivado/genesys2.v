@@ -41,6 +41,7 @@ module top (
     reg [31:0] ff_MemWData;
 
     wire MemWrEn;
+    wire mem_valid;
     wire mem_wren = MemWrEn & ~mem_addr[28];
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
@@ -63,7 +64,7 @@ module top (
             ff_MemWrEn <= 0;
             ff_MemAddr <= 0;
             ff_Leds <= 0;
-            ff_TX <= 0;
+            ff_TX <= 1;
         end else begin
             if (ff_MemWrEn & ff_MemAddr[28]) begin
                 case (ff_MemAddr[15:12])
@@ -80,13 +81,42 @@ module top (
         end
     end
 
+    wire csr_read;
+    wire [1:0] csr_modify;
+    wire [31:0] csr_wdata;
+    wire [11:0] csr_addr;
+    wire [31:0] csr_rdata;
+    wire csr_valid;
+
+    CsrCounter counter (
+        .clk    (clk),
+        .rstn   (rstn),
+        .retired(retired),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (csr_rdata),
+        .valid  (csr_valid)
+    );
+
     Pipeline #(
         .START_PC       (32'h_0000_fe00)
     ) pipe (
         .clk            (clk),
         .rstn           (rstn),
 
-        .mem_wren       (MemWrEn),
+        .retired        (retired),
+        .csr_read       (csr_read),
+        .csr_modify     (csr_modify),
+        .csr_wdata      (csr_wdata),
+        .csr_addr       (csr_addr),
+        .csr_rdata      (csr_rdata),
+        .csr_valid      (csr_valid),
+
+        .mem_valid      (mem_valid),
+        .mem_write      (MemWrEn),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
         .mem_addr       (mem_addr),

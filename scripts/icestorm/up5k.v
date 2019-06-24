@@ -15,7 +15,8 @@ module top (
     input uart_rx,
     output uart_tx
 );
-    localparam integer CLOCK_RATE = 24_000_000;
+//    localparam integer CLOCK_RATE = 24_000_000;
+    localparam integer CLOCK_RATE = 12_000_000;
     localparam integer BAUD_RATE = 115200;
 
 
@@ -25,7 +26,8 @@ module top (
         .CLKHFEN(1'b1),
         .CLKHFPU(1'b1),
         .CLKHF(clk)   );
-    defparam OSCInst0.CLKHF_DIV = "0b01"; // 48 MHz / 2
+//    defparam OSCInst0.CLKHF_DIV = "0b01"; // 48 MHz / 2
+    defparam OSCInst0.CLKHF_DIV = "0b10"; // 48 MHz / 4
 
     reg [5:0] reset_counter = 0;
     wire rstn = &reset_counter;
@@ -36,16 +38,17 @@ module top (
 
     reg  [7:0] ff_Leds;
     reg        ff_TX;
-    reg        ff_MemWrEn;
+    reg        ff_MemWrite;
     reg [31:0] ff_MemAddr;
     reg [31:0] ff_MemWData;
 
-    wire MemWrEn;
-    wire mem_wren_main = 1; //MemWrEn & ~mem_addr[28] & ~mem_addr[17];
-    wire mem_wren_boot = 1; //MemWrEn & ~mem_addr[28] & mem_addr[17];
+    wire mem_valid;
+    wire MemWrite;
+    wire mem_write_main = MemWrite & ~mem_addr[28] & ~mem_addr[17];
+    wire mem_write_boot = 1'b1; // MemWrite & ~mem_addr[28] & mem_addr[17];
     wire  [3:0] mem_wmask;
-    wire  [3:0] mem_wmask_main = (MemWrEn & ~mem_addr[28] & ~mem_addr[17]) ? mem_wmask : 0;
-    wire  [3:0] mem_wmask_boot = (MemWrEn & ~mem_addr[28] &  mem_addr[17]) ? mem_wmask : 0;
+    wire  [3:0] mem_wmask_main = (MemWrite & ~mem_addr[28] & ~mem_addr[17]) ? mem_wmask : 0;
+    wire  [3:0] mem_wmask_boot = (MemWrite & ~mem_addr[28] &  mem_addr[17]) ? mem_wmask : 0;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
@@ -68,12 +71,12 @@ module top (
 
     always @(posedge clk) begin
         if (~rstn) begin
-            ff_MemWrEn <= 0;
+            ff_MemWrite <= 0;
             ff_MemAddr <= 0;
             ff_Leds <= 0;
-            ff_TX <= 0;
+            ff_TX <= 1;
         end else begin
-            if (ff_MemWrEn & ff_MemAddr[28]) begin
+            if (ff_MemWrite & ff_MemAddr[28]) begin
                 case (ff_MemAddr[15:12])
                     4'h0: ; // char output: ignored
                     4'h1: ff_Leds <= ff_MemWData[7:0];
@@ -82,11 +85,32 @@ module top (
                 endcase
             end
 
-            ff_MemWrEn  <= MemWrEn;
+            ff_MemWrite <= MemWrite;
             ff_MemAddr  <= mem_addr;
             ff_MemWData <= mem_wdata;
         end
     end
+
+    wire retired;
+    wire csr_read;
+    wire [1:0] csr_modify;
+    wire [31:0] csr_wdata;
+    wire [11:0] csr_addr;
+    wire [31:0] csr_rdata;
+    wire csr_valid;
+
+    CsrCounter counter (
+        .clk    (clk),
+        .rstn   (rstn),
+        .retired(retired),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (csr_rdata),
+        .valid  (csr_valid)
+    );
 
     Pipeline #(
         .START_PC       (32'h_0002_0000)
@@ -94,7 +118,16 @@ module top (
         .clk            (clk),
         .rstn           (rstn),
 
-        .mem_wren       (MemWrEn),
+        .retired        (retired),
+        .csr_read       (csr_read),
+        .csr_modify     (csr_modify),
+        .csr_wdata      (csr_wdata),
+        .csr_addr       (csr_addr),
+        .csr_rdata      (csr_rdata),
+        .csr_valid      (csr_valid),
+
+        .mem_valid      (mem_valid),
+        .mem_write      (MemWrite),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
         .mem_addr       (mem_addr),
@@ -103,7 +136,7 @@ module top (
 
     SPRAMMemory mainmem (
         .clk    (clk),
-        .wren   (mem_wren_main),
+        .write  (mem_write_main),
         .wmask  (mem_wmask_main),
         .wdata  (mem_wdata),
         .addr   (mem_addr[15:2]),
@@ -112,7 +145,7 @@ module top (
 
     BRAMMemory bootmem (
         .clk    (clk),
-        .wren   (mem_wren_boot),
+        .write  (mem_write_boot),
         .wmask  (mem_wmask_boot),
         .wdata  (mem_wdata),
         .addr   (mem_addr[9:2]),
@@ -130,7 +163,7 @@ endmodule
 
 module SPRAMMemory (
     input clk, 
-    input wren,
+    input write,
     input [3:0] wmask,
     input [31:0] wdata,
     input [13:0] addr,
@@ -141,7 +174,7 @@ SB_SPRAM256KA spram_lo(
     .DATAIN     (wdata[15:0]),
     .ADDRESS    (addr),
     .MASKWREN   ({wmask[1], wmask[1], wmask[0], wmask[0]}),
-    .WREN       (wren),
+    .WREN       (write),
     .CHIPSELECT (1'b1),
     .CLOCK      (clk),
     .STANDBY    (1'b0),
@@ -154,7 +187,7 @@ SB_SPRAM256KA spram_hi(
     .DATAIN     (wdata[31:16]),
     .ADDRESS    (addr),
     .MASKWREN   ({wmask[3], wmask[3], wmask[2], wmask[2]}),
-    .WREN       (wren),
+    .WREN       (write),
     .CHIPSELECT (1'b1),
     .CLOCK      (clk),
     .STANDBY    (1'b0),
@@ -168,21 +201,23 @@ endmodule
 
 module BRAMMemory (
     input clk, 
-    input wren,
+    input write,
     input [3:0] wmask,
     input [31:0] wdata,
     input [7:0] addr,
     output reg [31:0] rdata
 );
-    reg [31:0] mem [0:255];
+//    reg [31:0] mem [0:255];
+    reg [31:0] mem [0:8195];
 
     initial begin
         $readmemh("../../sw/bootloader/bootloader.hex", mem);
+//        $readmemh("../../sw/bootloader/tiny.hex", mem);
     end
 
     always @(posedge clk) begin
         rdata <= mem[addr];
-        if (wren) begin
+        if (write) begin
             if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
             if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
             if (wmask[2]) mem[addr][23:16] <= wdata[23:16];

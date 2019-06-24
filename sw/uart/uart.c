@@ -125,8 +125,6 @@ int main(int argc, char **argv)
     unsigned long wait;
     int ch;
 
-    uart_sync();
-
     print_str("Starting\r\n");
     leds = ff_leds = 0xaa;
     while (1) {
