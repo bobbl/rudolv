@@ -4,6 +4,11 @@
   asm volatile ("auipc %0, 0" : "=r"(__tmp)); \
   __tmp; })
 
+static inline void set_leds(unsigned leds)
+{
+    write_csr(0x7c1, leds);
+}
+
 static void print_str(char *s)
 {
     char ch;
@@ -47,10 +52,11 @@ int main(int argc, char **argv)
     unsigned long wait;
     int ch;
 
+    set_leds(1);
     print_str("Starting\r\n");
-    leds = ff_leds = 0xaa;
+    set_leds(ff_leds = 0xaa);
     while (1) {
-        leds = ff_leds = ff_leds ^ 0xa4;
+        set_leds(ff_leds = ff_leds ^ 0xa4);
         print_hex32(read_pc());
         print_str(" Hello2\r\n");
 

@@ -37,12 +37,12 @@ module Pipeline #(
 
     output retired,
 
-    output csr_read,
-    output [1:0] csr_modify,
+    output csr_read,            // can be ignored if there are no side-effects
+    output [1:0] csr_modify,    // 01=write 10=set 11=clear
     output [31:0] csr_wdata,
     output [11:0] csr_addr,
     input [31:0] csr_rdata,
-    input csr_valid,
+    input csr_valid,            // CSR addr is valid, not necessarily rdata
 
     output mem_valid,
     output mem_write,
@@ -983,30 +983,26 @@ module CsrCounter (
     reg [31:0] q_CounterINSTRETH;
 
     always @(posedge clk) begin
-        Valid <= 0;
+        Valid <= 1;
         RData <= 0;
-        if (read) begin
-            Valid <= 1;
-            case (addr)
-                12'hB00: RData <= q_CounterCYCLE;    // MCYCLE
-                12'hB80: RData <= q_CounterCYCLEH;   // MCYCLEH
-                12'hC00: RData <= q_CounterCYCLE;    // CYCLE
-                12'hC80: RData <= q_CounterCYCLEH;   // CYCLEH
-                12'hC01: RData <= q_CounterCYCLE;    // TIME
-                12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
-                12'hC02: RData <= q_CounterINSTRET;  // INSTRET
-                12'hC82: RData <= q_CounterINSTRETH; // INSRETH
-                default: Valid <= 0;
-            endcase
-        end
+        case (addr)
+            12'hB00: RData <= q_CounterCYCLE;    // MCYCLE
+            12'hB80: RData <= q_CounterCYCLEH;   // MCYCLEH
+            12'hC00: RData <= q_CounterCYCLE;    // CYCLE
+            12'hC80: RData <= q_CounterCYCLEH;   // CYCLEH
+            12'hC01: RData <= q_CounterCYCLE;    // TIME
+            12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
+            12'hC02: RData <= q_CounterINSTRET;  // INSTRET
+            12'hC82: RData <= q_CounterINSTRETH; // INSRETH
+            default: Valid <= 0;
+        endcase
 
         q_CounterCYCLE    <= {1'b0, q_CounterCYCLE} + 1;
         q_CounterCYCLEH   <= q_CounterCYCLEH + q_CounterCYCLE[32];
         q_CounterINSTRET  <= {1'b0, q_CounterINSTRET} + {62'b0, retired};
         q_CounterINSTRETH <= q_CounterINSTRETH + q_CounterINSTRET[32];
 
-        if (!rstn) begin
-            Valid <= 0;
+        if (~rstn) begin
             q_CounterCYCLE    <= 0;
             q_CounterCYCLEH   <= 0;
             q_CounterINSTRET  <= 0;
@@ -1049,10 +1045,8 @@ module CsrUart #(
         Valid <= 0;
         RData <= 0;
         if (addr==BASE_ADDR) begin
-            if (read) begin
-                Valid <= 1;
-                RData <= {PERIOD, rx};
-            end
+            Valid <= 1;
+            RData <= {PERIOD, rx};
             case ({modify, wdata[0]})
                 3'b010: q_TX <= 0; // write 0
                 3'b011: q_TX <= 1; // write 1
