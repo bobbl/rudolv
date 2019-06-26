@@ -18,7 +18,6 @@ set Device [lindex [get_hw_devices] 0]
 current_hw_device $Device
 refresh_hw_device -update_hw_probes false $Device
 set_property PROGRAM.FILE "design.bit" $Device
-#set_property PROBES.FILE "design.ltx" $Device
 program_hw_devices $Device
 refresh_hw_device $Device
 disconnect_hw_server

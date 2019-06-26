@@ -24,8 +24,6 @@ module top (
         reset_counter <= reset_counter + !rstn;
     end
 
-    reg  [7:0] ff_Leds;
-
     wire mem_valid;
     wire mem_write;
     wire  [3:0] mem_wmask;
@@ -63,7 +61,10 @@ module top (
         .retired(retired)
     );
 
-    CsrUart uart (
+    CsrUart #(
+        .CLOCK_RATE(CLOCK_RATE),
+        .BAUD_RATE(BAUD_RATE)
+    ) uart (
         .clk    (clk),
         .rstn   (rstn),
 

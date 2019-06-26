@@ -155,7 +155,7 @@ module Pipeline #(
     reg m_CsrFromReg;
 
     reg w_CsrFromReg;
-    reg [WORD_WIDTH-1:0] m_vCsrRegSet;
+    reg [WORD_WIDTH-1:0] m_CsrModified;
 `endif
 
 
@@ -174,6 +174,7 @@ module Pipeline #(
 `endif
     reg [1:0]  e_CsrFromCounter;
 
+    reg        e_CsrFromExt;
     reg        e_CsrRead;
     reg        m_CsrRead;
     reg        m_CsrValid;
@@ -315,7 +316,8 @@ module Pipeline #(
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14])
         ? d_Insn[13:12] 
         : {1'b0, ~InsnBEQ};
-    wire CsrRead        = (InsnCSR & ~DestReg0) & ~CsrFromReg;
+    wire CsrFromExt     = InsnCSR & ~CsrFromReg;
+    wire CsrRead        = CsrFromExt & ~(DestReg0Part & ~d_Insn[7]);
 
     wire MemWr          = MemAccess & d_Insn[5];
     wire [1:0] MemWidth = (MemAccess & ~m_Kill & ~m_ExcMem) ? d_Insn[13:12] : 2'b11;  // = no mem access
@@ -347,17 +349,19 @@ module Pipeline #(
 
     // level 1
     wire ArithOrUpper   = ~d_Insn[6] & d_Insn[4] & ~d_Insn[3];
-    wire DestReg0       = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
+    wire DestReg0Part   = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
     wire EnableWrite    = ArithOrUpper | InsnJALorJALR | (MemAccess & ~d_Insn[5]);
 //    wire EnableWrite2   = (CsrFromCounter!=0);
     wire EnableWrite2   = (CsrFromCounter!=0) | CsrFromReg;
 
-//    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | (e_CsrFromCounter!=0) | m_Kill;
+//    wire DisableWrite   = (DestReg0Part & ~d_Insn[7]) | (e_CsrFromCounter!=0) | m_Kill;
         //                                           ~~~~~~~~~~~~~~~~~~~
         // don't write in second cycle of a CSR insn, if readonly counter
-//    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | (InsnCSR & ~CsrFromReg) | m_Kill;
-    wire DisableWrite   = (DestReg0 & ~d_Insn[7]) | CsrRead | e_CsrRead | m_Kill;
+//    wire DisableWrite   = (DestReg0Part & ~d_Insn[7]) | (InsnCSR & ~CsrFromReg) | m_Kill;
+    wire DisableWrite   = (DestReg0Part & ~d_Insn[7]) | CsrFromExt | e_CsrFromExt | m_Kill;
+
+
 
     // level 3
     wire DecodeWrEn     = (EnableWrite | EnableWrite2) & ~DisableWrite;
@@ -558,18 +562,25 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_Imm[9:5]} : e_A;
 
-    wire [WORD_WIDTH-1:0] vCsrRegSet = ~m_CsrOp[1]
+    wire [WORD_WIDTH-1:0] CsrModified = ~m_CsrOp[1]
         ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
         : (~m_CsrOp[0] ? (e_A | m_CsrUpdate) : (e_A & ~m_CsrUpdate));
             // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
-            // e_B is a bypass from the execute stage of the next cycle
-//    wire [WORD_WIDTH-1:0] vFromALU    = (m_CsrFromReg==0 && m_CsrFromCounter==0) ? m_WrData : 0;
-//    wire [WORD_WIDTH-1:0] vCsrOrALU = vCsrCYCLE | vCsrINSTRET | vCsrRegSet | vFromALU;
+            // e_A is a bypass from the execute stage of the next cycle
+
+
+/*
     wire [WORD_WIDTH-1:0] vCsrOrALU =  
         m_CsrFromReg ? e_A 
-                     : (w_CsrFromReg ? m_vCsrRegSet 
+                     : (w_CsrFromReg ? m_CsrModified 
                                      : ((m_CsrRead & m_CsrValid) ? m_CsrRdData 
                                                                  : m_WrData));
+*/
+    wire [WORD_WIDTH-1:0] vCsrOrALU =
+        (m_CsrFromReg             ? e_A           : 0) |
+        (w_CsrFromReg             ? m_CsrModified : 0) |
+        ((m_CsrRead & m_CsrValid) ? m_CsrRdData   : 0) |
+        ((m_CsrFromReg | w_CsrFromReg | (m_CsrRead & m_CsrValid)) ? 0 : m_WrData);
 
 `else
     wire ExcJump = 0;
@@ -798,7 +809,7 @@ module Pipeline #(
         m_CsrFromReg        <= e_CsrFromReg;
 
         w_CsrFromReg        <= m_CsrFromReg;
-        m_vCsrRegSet        <= vCsrRegSet;
+        m_CsrModified       <= CsrModified;
 `endif
 
 
@@ -817,6 +828,7 @@ module Pipeline #(
 `endif
         e_CsrFromCounter    <= CsrFromCounter;
 
+        e_CsrFromExt        <= CsrFromExt;
         e_CsrRead           <= CsrRead;
         m_CsrRead           <= e_CsrRead;
         m_CsrValid          <= csr_valid;
@@ -904,9 +916,9 @@ module Pipeline #(
             vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp, m_CsrFromCounter);
         $display("C vCsrOrALU=%h CsrResult=%h",
             vCsrOrALU, CsrResult);
-        $display("C CsrFromReg %b e_%b m_%b w_%b m_vCsrRegSet=%h m_WrData=%h", 
+        $display("C CsrFromReg %b e_%b m_%b w_%b m_CsrModified=%h m_WrData=%h", 
             CsrFromReg, e_CsrFromReg, m_CsrFromReg, w_CsrFromReg,
-            m_vCsrRegSet, m_WrData);
+            m_CsrModified, m_WrData);
         $display("C m_CsrRead=%b m_CsrValid=%b m_CsrRdData=%h",
             m_CsrRead, m_CsrValid, m_CsrRdData);
         $display("C CSR addr=%h rdata=%h valid=%b",
@@ -917,8 +929,8 @@ module Pipeline #(
             MemResult, m_MemSign, m_MemByte);
         $display("  e_WrNo=%d e_CsrFromCounter=%b ExecuteWrNo=%d m_WrNo=%d",
             e_WrNo, e_CsrFromCounter, ExecuteWrNo, m_WrNo);
-        $display("  DestReg0=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
-            DestReg0, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
+        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
+            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
 //        $display("  vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
 //            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE);
 

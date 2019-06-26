@@ -15,6 +15,11 @@ test: $(CODE) tb_tests.v $(VERILOG_FILES)
 	    tb_tests.v memory32.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
+test-nodebug: $(CODE) tb_tests.v $(VERILOG_FILES)
+	$(IVERILOG) -o tmp.vvp -DCODE=\"$(CODE)\" \
+	    tb_tests.v memory32.v $(VERILOG_FILES)
+	$(VVP) -N tmp.vvp
+
 picorv32-dhrystone:
 	$(MAKE) -C ../../sw/picorv32-dhrystone
 	$(IVERILOG) -o tmp.vvp -DCODE=\"../../sw/picorv32-dhrystone/dhrystone.hex\" \

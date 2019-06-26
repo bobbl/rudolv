@@ -23,10 +23,10 @@ _start:
 # return char in a0
 # clobber a1-a6
 uart_receive:
-        lui     a0, 0x10004
-        lw      a1, 0(a0)       # a1 = UART period
-        lui     a0, 0x10002     # a0 = addr UART RX
-1:      lb      a2, 0(a0)       # wait for low
+        csrr    a1, 0x7c0
+        srl     a1, a1, 1       # a1 = UART period
+1:      csrr    a2, 0x7c0       # a2 = UART RX
+        and     a2, a2, 1       # wait for low
         bne     a2, zero, 1b
 
         rdcycle a3
@@ -36,7 +36,8 @@ uart_receive:
         li      a2, 0           # a2 = bit position
         li      a4, 0           # a4 = bit pattern
 bit_loop:
-        lb      a5, 0(a0)
+        csrr    a5, 0x7c0
+        and     a5, a5, 1
         sll     a5, a5, a2
         or      a4, a4, a5
 

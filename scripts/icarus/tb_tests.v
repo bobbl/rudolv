@@ -108,6 +108,13 @@ module tb_tests;
             $display("tohost (at 0x1000) exit");
             $finish;
         end
+        if (mem_write & mem_wmask[0] & (mem_addr==32'h10000000)) begin
+`ifdef DEBUG
+            $display("\033[1;37mputchar '%c'\033[0m", mem_wdata[7:0]);
+`else
+            $write("\033[1;37m%c\033[0m", mem_wdata[7:0]);
+`endif
+        end
     end
 
     initial begin

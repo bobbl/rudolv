@@ -77,7 +77,10 @@ module top (
         .retired(retired)
     );
 
-    CsrUart uart (
+    CsrUart #(
+        .CLOCK_RATE(CLOCK_RATE),
+        .BAUD_RATE(BAUD_RATE)
+    ) uart (
         .clk    (clk),
         .rstn   (rstn),
 

@@ -1,13 +1,12 @@
 /* wrapper for Digilent Genesys 2 board
 
 Memory map
-0000'0000h main memory (BRAM, 8 KiByte)
-0000'1E00h start address of boot loader
+0001'0000h main memory (BRAM, 64 KiByte)
+0000'FE00h start address of boot loader
 
-1000'1000h LEDs (each bit), lowest bit indicates program termination
-1000'2000h UART RX
-1000'3000h UART TX
-1000'4000h UART signal width of one bit in clock cycles
+CSR
+7c0h       UART
+7c1h       LEDs
 */
 
 
@@ -34,71 +33,73 @@ module top (
         reset_counter <= reset_counter + !rstn;
     end
 
-    reg  [7:0] ff_Leds;
-    reg        ff_TX;
-    reg        ff_MemWrEn;
-    reg [31:0] ff_MemAddr;
-    reg [31:0] ff_MemWData;
-
-    wire MemWrEn;
     wire mem_valid;
-    wire mem_wren = MemWrEn & ~mem_addr[28];
+    wire mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
 
-    reg [31:0] MappedRData;
-    always @* begin
-        MappedRData <= 32'h0000006f; // avoid that code is executed
-        case (ff_MemAddr[15:12])
-            4'h2: MappedRData <= {31'b0, uart_rx};
-            4'h4: MappedRData <= CLOCK_RATE / BAUD_RATE;
-        endcase
-    end
 
-    wire [31:0] MemRData = ff_MemAddr[28] ? MappedRData : mem_rdata;
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+    wire        UartValid;
+    wire [31:0] UartRData;
+    wire        LedsValid;
+    wire [31:0] LedsRData;
 
-    always @(posedge clk) begin
-        if (~rstn) begin
-            ff_MemWrEn <= 0;
-            ff_MemAddr <= 0;
-            ff_Leds <= 0;
-            ff_TX <= 1;
-        end else begin
-            if (ff_MemWrEn & ff_MemAddr[28]) begin
-                case (ff_MemAddr[15:12])
-                    4'h0: ; // char output: ignored
-                    4'h1: ff_Leds <= ff_MemWData[7:0];
-                    4'h2: ;
-                    4'h3: ff_TX <= ff_MemWData[0];
-                endcase
-            end
-
-            ff_MemWrEn  <= MemWrEn;
-            ff_MemAddr  <= mem_addr;
-            ff_MemWData <= mem_wdata;
-        end
-    end
-
-    wire csr_read;
-    wire [1:0] csr_modify;
+    wire        retired;
+    wire        csr_read;
+    wire [1:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata;
-    wire csr_valid;
+    wire [31:0] csr_rdata = CounterRData | UartRData;
+    wire        csr_valid = CounterValid | UartValid;
 
     CsrCounter counter (
         .clk    (clk),
         .rstn   (rstn),
-        .retired(retired),
 
         .read   (csr_read),
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (csr_rdata),
-        .valid  (csr_valid)
+        .rdata  (CounterRData),
+        .valid  (CounterValid),
+
+        .retired(retired)
+    );
+
+    CsrUart #(
+        .CLOCK_RATE(CLOCK_RATE),
+        .BAUD_RATE(BAUD_RATE)
+    ) uart (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (UartRData),
+        .valid  (UartValid),
+
+        .rx     (uart_rx),
+        .tx     (uart_tx)
+    );
+
+    CsrLeds csr_leds (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (LedsRData),
+        .valid  (LedsValid),
+
+        .leds   (leds)
     );
 
     Pipeline #(
@@ -116,31 +117,27 @@ module top (
         .csr_valid      (csr_valid),
 
         .mem_valid      (mem_valid),
-        .mem_write      (MemWrEn),
+        .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
         .mem_addr       (mem_addr),
-        .mem_rdata      (MemRData)
+        .mem_rdata      (mem_rdata)
     );
 
     BRAMMemory mem (
         .clk    (clk),
-        .wren   (mem_wren),
+        .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata)
     );
-
-    assign leds = ff_Leds;
-    assign uart_tx = ff_TX;
 endmodule
 
 
-// instruction memory
 module BRAMMemory (
     input clk, 
-    input wren,
+    input write,
     input [3:0] wmask,
     input [31:0] wdata,
     input [13:0] addr,
@@ -151,13 +148,13 @@ module BRAMMemory (
     initial begin
         $readmemh("bootloader.hex", mem);
             // bootloader code is the same as on other platforms, but at the
-            // beginning there must be '@1e00' to load the code at the correct
+            // beginning there must be '@3f80' to load the code at the correct
             // start adress
     end
 
     always @(posedge clk) begin
         rdata <= mem[addr];
-        if (wren) begin
+        if (write) begin
             if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
             if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
             if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
@@ -166,3 +163,44 @@ module BRAMMemory (
     end
 endmodule
 
+
+module CsrLeds #(
+    parameter [11:0]  BASE_ADDR  = 12'h7c1 // CSR address
+) (
+    input clk,
+    input rstn,
+
+    input read,
+    input [1:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    output [7:0] leds
+);
+
+    reg [7:0] q_Leds;
+    reg Valid;
+    reg [31:0] RData;
+
+    always @(posedge clk) begin
+        Valid <= 0;
+        RData <= 0;
+        if (addr==BASE_ADDR) begin
+            Valid <= 1;
+            RData <= q_Leds;
+            case (modify)
+                2'b01: q_Leds <= wdata[7:0]; // write 0
+                2'b10: q_Leds <= q_Leds | wdata[7:0]; // set
+                2'b11: q_Leds <= q_Leds &~ wdata[7:0]; // clear
+                default: ;
+            endcase
+        end
+        if (~rstn) q_Leds <= 'h81;
+    end
+
+    assign valid = Valid;
+    assign rdata = RData;
+    assign leds = q_Leds;
+endmodule

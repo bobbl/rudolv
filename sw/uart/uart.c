@@ -9,7 +9,7 @@ static inline void set_leds(unsigned leds)
     write_csr(0x7c1, leds);
 }
 
-static void print_str(char *s)
+void print_str(char *s)
 {
     char ch;
     while (ch=*s++) uart_send(ch);
@@ -33,8 +33,7 @@ static void print_int32(int32_t l)
     uart_send((l % 10) + '0');
 }
 
-
-static void print_hex32(uint32_t l)
+void print_hex32(uint32_t l)
 {
     int i;
     for (i=28; i>=0; i-=4) {
@@ -42,7 +41,6 @@ static void print_hex32(uint32_t l)
         uart_send(digit + ((digit>9) ? ('A'-10) : ('0')));
     }
 }
-
 
 extern unsigned long _entrypc;
 
