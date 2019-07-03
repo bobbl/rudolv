@@ -1,5 +1,5 @@
 `define ENABLE_EXCEPTIONS
-//`define ENABLE_COUNTER
+//`define ENABLE_IDS
 
 
 module RegisterSet(
@@ -974,7 +974,12 @@ endmodule
 
 
 
-module CsrCounter (
+module CsrCounter #(
+    parameter [31:0] VENDORID = 0,
+    parameter [31:0] ARCHID = 0,
+    parameter [31:0] IMPID = 0,
+    parameter [31:0] HARTID = 0
+)(
     input clk,
     input rstn,
     input retired,
@@ -1006,6 +1011,13 @@ module CsrCounter (
             12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
             12'hC02: RData <= q_CounterINSTRET;  // INSTRET
             12'hC82: RData <= q_CounterINSTRETH; // INSRETH
+
+`ifdef ENABLE_IDS
+            12'hF11: RData <= VENDORID;
+            12'hF12: RData <= ARCHID;
+            12'hF13: RData <= IMPID;
+            12'hF14: RData <= HARTID;
+`endif
             default: Valid <= 0;
         endcase
 
