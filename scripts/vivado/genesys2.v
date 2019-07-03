@@ -67,7 +67,9 @@ module top (
         .rdata  (CounterRData),
         .valid  (CounterValid),
 
-        .retired(retired)
+        .retired(retired),
+
+        .AVOID_WARNING()
     );
 
     CsrUart #(
@@ -85,7 +87,9 @@ module top (
         .valid  (UartValid),
 
         .rx     (uart_rx),
-        .tx     (uart_tx)
+        .tx     (uart_tx),
+
+        .AVOID_WARNING()
     );
 
     CsrLeds csr_leds (
@@ -99,7 +103,9 @@ module top (
         .rdata  (LedsRData),
         .valid  (LedsValid),
 
-        .leds   (leds)
+        .leds   (leds),
+
+        .AVOID_WARNING()
     );
 
     Pipeline #(
@@ -177,8 +183,11 @@ module CsrLeds #(
     output [31:0] rdata,
     output valid,
 
-    output [7:0] leds
+    output [7:0] leds,
+
+    output AVOID_WARNING
 );
+    assign AVOID_WARNING = read | |wdata;
 
     reg [7:0] q_Leds;
     reg Valid;

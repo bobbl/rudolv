@@ -1,3 +1,6 @@
+set_property CONFIG_VOLTAGE 3.3 [current_design]
+set_property CFGBVS VCCO [current_design]
+
 ## Clock Signal
 create_clock -period 5.0 -name clk -waveform {0.0 2.5} [get_nets clk]
 set_property -dict { PACKAGE_PIN AD11  IOSTANDARD LVDS     } [get_ports { clk_n }]; #IO_L12N_T1_MRCC_33 Sch=sysclk_n

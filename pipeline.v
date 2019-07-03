@@ -168,11 +168,11 @@ module Pipeline #(
     reg        e_CarryINSTRET;
     reg [32:0] e_CounterINSTRET;
     reg [31:0] e_CounterINSTRETH;
+    reg [1:0]  e_CsrFromCounter;
     reg [1:0]  m_CsrFromCounter;
     reg        e_CsrSelHighWord;
     reg        m_CsrSelHighWord;
 `endif
-    reg [1:0]  e_CsrFromCounter;
 
     reg        e_CsrFromExt;
     reg        e_CsrRead;
@@ -824,9 +824,9 @@ module Pipeline #(
         e_CounterINSTRETH   <= CounterINSTRETH;
         e_CsrSelHighWord    <= d_Insn[27];
         m_CsrSelHighWord    <= e_CsrSelHighWord;
+        e_CsrFromCounter    <= CsrFromCounter;
         m_CsrFromCounter    <= e_CsrFromCounter;
 `endif
-        e_CsrFromCounter    <= CsrFromCounter;
 
         e_CsrFromExt        <= CsrFromExt;
         e_CsrRead           <= CsrRead;
@@ -927,8 +927,8 @@ module Pipeline #(
 
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
-        $display("  e_WrNo=%d e_CsrFromCounter=%b ExecuteWrNo=%d m_WrNo=%d",
-            e_WrNo, e_CsrFromCounter, ExecuteWrNo, m_WrNo);
+        $display("  e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
+            e_WrNo, ExecuteWrNo, m_WrNo);
         $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
             DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
 //        $display("  vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
@@ -989,8 +989,11 @@ module CsrCounter #(
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
-    output valid
+    output valid,
+
+    output AVOID_WARNING
 );
+    assign AVOID_WARNING = read | |modify | |wdata;
 
     reg Valid;
     reg [31:0] RData;
@@ -1056,8 +1059,11 @@ module CsrUart #(
     output valid,
 
     input rx,
-    output tx
+    output tx,
+
+    output AVOID_WARNING
 );
+    assign AVOID_WARNING = read | |wdata;
 
     reg q_TX;
     reg Valid;
