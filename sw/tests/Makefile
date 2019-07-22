@@ -5,10 +5,10 @@ FILES_HEX = $(FILES_S:src/%.S=build/%.hex)
 
 
 build/%.elf: src/%.S ../riscv_test.h ../test_macros.h ../danzig.ld
-	$(RV32_PREFIX)gcc -march=rv32i -mabi=ilp32 -I.. -nostdlib -T../danzig.ld -o $@ $<
+	$(RV32I_PREFIX)gcc -march=rv32i -mabi=ilp32 -I.. -nostdlib -T../danzig.ld -o $@ $<
 
 %.bin: %.elf
-	$(RV32_PREFIX)objcopy -O binary $< $@
+	$(RV32I_PREFIX)objcopy -O binary $< $@
 
 %.hex: %.bin
 	printf "@0 " > $@

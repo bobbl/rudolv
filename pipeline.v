@@ -53,11 +53,11 @@ module Pipeline #(
 );
     localparam integer WORD_WIDTH = 32;
 
-    localparam integer REG_CSR_MTVEC    = 6'b100101;
-    localparam integer REG_CSR_MSCRATCH = 6'b110000;
-    localparam integer REG_CSR_MEPC     = 6'b110001;
-    localparam integer REG_CSR_MCAUSE   = 6'b110010;
-    localparam integer REG_CSR_MTVAL    = 6'b110011;
+    localparam [5:0] REG_CSR_MTVEC    = 6'b100101;
+    localparam [5:0] REG_CSR_MSCRATCH = 6'b110000;
+    localparam [5:0] REG_CSR_MEPC     = 6'b110001;
+    localparam [5:0] REG_CSR_MCAUSE   = 6'b110010;
+    localparam [5:0] REG_CSR_MTVAL    = 6'b110011;
 
 
 
@@ -168,8 +168,6 @@ module Pipeline #(
     reg        e_CarryINSTRET;
     reg [32:0] e_CounterINSTRET;
     reg [31:0] e_CounterINSTRETH;
-    reg [1:0]  e_CsrFromCounter;
-    reg [1:0]  m_CsrFromCounter;
     reg        e_CsrSelHighWord;
     reg        m_CsrSelHighWord;
 `endif
@@ -352,8 +350,7 @@ module Pipeline #(
     wire DestReg0Part   = (d_Insn[11:8] == 4'b0000); // x0 as well as unknown CSR (aka x32)
     // level 2
     wire EnableWrite    = ArithOrUpper | InsnJALorJALR | (MemAccess & ~d_Insn[5]);
-//    wire EnableWrite2   = (CsrFromCounter!=0);
-    wire EnableWrite2   = (CsrFromCounter!=0) | CsrFromReg;
+    wire EnableWrite2   = CsrFromReg;
 
 //    wire DisableWrite   = (DestReg0Part & ~d_Insn[7]) | (e_CsrFromCounter!=0) | m_Kill;
         //                                           ~~~~~~~~~~~~~~~~~~~
@@ -467,8 +464,6 @@ module Pipeline #(
     wire vNotBEQ = ((e_InsnBLTorBLTU & vLess) | e_InsnJALorFENCEI) & ~DualKill;
     wire vCondResultBit = e_SetCond & vLess;
 
-    wire vJump = vBEQ | vNotBEQ;
-        // taken conditional branch or direct jump or exception
     wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & ~DualKill);
         // any jump or exception
 
@@ -589,48 +584,9 @@ module Pipeline #(
     wire e_CsrFromReg = 0;
     wire [4:0] vCsrTranslate = 0;
 
-    wire [WORD_WIDTH-1:0] CsrResult = vCsrCYCLE | vCsrINSTRET | m_WrData;
+    wire [WORD_WIDTH-1:0] CsrResult = m_WrData;
     wire MemWrEn        = m_WrEn;
     wire [5:0] MemWrNo  = m_WrNo;
-`endif
-
-
-
-
-    // performance counters
-
-`ifdef ENABLE_COUNTER
-    reg [1:0] DecodeCsrCounter;
-    always @* begin
-        case ({d_Insn[31:28], 1'b0, d_Insn[26:20]}) // ignore bit 27 (low or high word)
-            12'hB00: DecodeCsrCounter <= 2'b01; // MCYCLE
-            12'hC00: DecodeCsrCounter <= 2'b01; // CYCLE;
-            12'hC01: DecodeCsrCounter <= 2'b01; // TIME;
-            12'hC02: DecodeCsrCounter <= 2'b10; // INSTRET;
-            default: DecodeCsrCounter <= 0;
-        endcase
-    end
-    wire [1:0] CsrFromCounter = InsnCSR ? DecodeCsrCounter : 0;
-
-    wire Retired = ~d_Bubble & ~m_Kill & ~w_Kill;
-        // For the number of retired instructions, do not count bubbles or
-        // killed instructions. In the execute stage that can be decided.
-    wire [32:0] CounterCYCLE    = {1'b0, e_CounterCYCLE} + 1;
-    wire [31:0] CounterCYCLEH   = e_CounterCYCLEH + e_CarryCYCLE;
-    wire [32:0] CounterINSTRET  = {1'b0, e_CounterINSTRET} + {62'b0, Retired};
-    wire [31:0] CounterINSTRETH = e_CounterINSTRETH + e_CarryINSTRET;
-
-    wire [WORD_WIDTH-1:0] vCsrCYCLE   = m_CsrFromCounter[0] 
-        ? (m_CsrSelHighWord ? e_CounterCYCLEH : e_CounterCYCLE) : 0;
-    wire [WORD_WIDTH-1:0] vCsrINSTRET = m_CsrFromCounter[1] 
-        ? (m_CsrSelHighWord ? e_CounterINSTRETH : e_CounterINSTRET) : 0;
-
-`else
-    wire [1:0] CsrFromCounter = 0;
-    wire [WORD_WIDTH-1:0] vCsrCYCLE   = 0;
-    wire [WORD_WIDTH-1:0] vCsrINSTRET = 0;
-    wire [1:0] DecodeCsr = 0;
-    wire [1:0] m_CsrFromCounter = 0;
 `endif
 
 
@@ -824,8 +780,6 @@ module Pipeline #(
         e_CounterINSTRETH   <= CounterINSTRETH;
         e_CsrSelHighWord    <= d_Insn[27];
         m_CsrSelHighWord    <= e_CsrSelHighWord;
-        e_CsrFromCounter    <= CsrFromCounter;
-        m_CsrFromCounter    <= e_CsrFromCounter;
 `endif
 
         e_CsrFromExt        <= CsrFromExt;
@@ -892,7 +846,7 @@ module Pipeline #(
             );
 
 
-        if (vJump || e_InsnJALR) $display("B jump %h", FetchPC);
+        if (Kill) $display("B jump %h", FetchPC);
 
 
         $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
@@ -912,8 +866,8 @@ module Pipeline #(
 //            AddrSum, NextOrSum, NoBranch);
 
 
-        $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b m_CsrFromCounter=%b",
-            vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp, m_CsrFromCounter);
+        $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b",
+            vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp);
         $display("C vCsrOrALU=%h CsrResult=%h",
             vCsrOrALU, CsrResult);
         $display("C CsrFromReg %b e_%b m_%b w_%b m_CsrModified=%h m_WrData=%h", 
@@ -1006,14 +960,14 @@ module CsrCounter #(
         Valid <= 1;
         RData <= 0;
         case (addr)
-            12'hB00: RData <= q_CounterCYCLE;    // MCYCLE
-            12'hB80: RData <= q_CounterCYCLEH;   // MCYCLEH
-            12'hC00: RData <= q_CounterCYCLE;    // CYCLE
-            12'hC80: RData <= q_CounterCYCLEH;   // CYCLEH
-            12'hC01: RData <= q_CounterCYCLE;    // TIME
-            12'hC81: RData <= q_CounterCYCLEH;   // TIMEH
-            12'hC02: RData <= q_CounterINSTRET;  // INSTRET
-            12'hC82: RData <= q_CounterINSTRETH; // INSRETH
+            12'hB00: RData <= q_CounterCYCLE[31:0];     // MCYCLE
+            12'hB80: RData <= q_CounterCYCLEH;          // MCYCLEH
+            12'hC00: RData <= q_CounterCYCLE[31:0];     // CYCLE
+            12'hC80: RData <= q_CounterCYCLEH;          // CYCLEH
+            12'hC01: RData <= q_CounterCYCLE[31:0];     // TIME
+            12'hC81: RData <= q_CounterCYCLEH;          // TIMEH
+            12'hC02: RData <= q_CounterINSTRET[31:0];   // INSTRET
+            12'hC82: RData <= q_CounterINSTRETH;        // INSRETH
 
 `ifdef ENABLE_IDS
             12'hF11: RData <= VENDORID;
@@ -1024,9 +978,9 @@ module CsrCounter #(
             default: Valid <= 0;
         endcase
 
-        q_CounterCYCLE    <= {1'b0, q_CounterCYCLE} + 1;
+        q_CounterCYCLE    <= {1'b0, q_CounterCYCLE[31:0]} + 1;
         q_CounterCYCLEH   <= q_CounterCYCLEH + q_CounterCYCLE[32];
-        q_CounterINSTRET  <= {1'b0, q_CounterINSTRET} + {62'b0, retired};
+        q_CounterINSTRET  <= {1'b0, q_CounterINSTRET[31:0]} + {32'b0, retired};
         q_CounterINSTRETH <= q_CounterINSTRETH + q_CounterINSTRET[32];
 
         if (~rstn) begin

@@ -8,7 +8,11 @@ VERILOG_FILES = ../../pipeline.v
 FILES_S = $(wildcard $(PATH_TO_TESTS)/*.S)
 FILES_HEX = $(FILES_S:%.S=%.hex)
 
-all: test-all
+help:
+	@echo "  make CODE=foo.hex test  Simulate with extensive logging"
+	@echo "  make CODE=foo.hex test  Simulate without logging"
+	@echo "  make picorv-dhrystone   Benchmark from picorrv32 repo"
+	@echo "  make riscv-dhrystone    Benchmark from RISC-V repo"
 
 test: $(CODE) tb_tests.v $(VERILOG_FILES)
 	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
