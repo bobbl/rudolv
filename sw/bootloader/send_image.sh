@@ -2,7 +2,7 @@
 
 if [ $# -ne 2 ] 
 then
-    echo "Send file to Danzig booloader"
+    echo "Send file to the RudolV bootloader"
     echo "Usage: $0 <tty> <image>"
     echo "Example: $0 /dev/ttyUSB0 example.bin"
     exit

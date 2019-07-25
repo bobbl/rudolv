@@ -1,5 +1,5 @@
-#ifndef _ENV_DANZIG_TEST_H
-#define _ENV_DANZIG_TEST_H
+#ifndef _ENV_RUDOLV_TEST_H
+#define _ENV_RUDOLV_TEST_H
 
 #define RVTEST_RV64U
 #define TESTNUM x28     // register where test number is stored

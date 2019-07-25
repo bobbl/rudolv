@@ -1,8 +1,23 @@
-# Danzig
+# RudolV
 
-A 32 bit RISC-V processor with 5 pipeline stages for the
-[RISC-V SoftCPU Contest](https://riscv.org/2018contest/).
-Only open source software is used for testing and synthesis.
+A 32 bit RISC-V processor with 5 pipeline stages and in-order execution.
+The architecture avoids speculative components to provide a predictable timing
+as required by hard real-time systems. It is based on a submission to the 
+[RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
+
+Edit `config.mk` if the tools are not in the search path.
+
+
+
+Instruction timing
+------------------
+
+Data hatzards ar avoided by operand forwarding, therefore most instructions 
+are executed in one cycle. Since the memory is single ported, memory accesses
+take two cycles. The jump target is computed in the execute stage, resulting in
+a two cycle latency. There is no dynamic branch prediction but subsequent
+instructions are only killed in the case of a taken branch. This behaviour can
+be consideres as a static always not taken prediction.
 
 | instruction class  | examples        | cycles |
 | ------------------ | --------------- | ------ |
@@ -15,10 +30,6 @@ Only open source software is used for testing and synthesis.
 | not taken branch   | BEQ, ...        | 1      |
 | barrel shifter     | SLL, SRL, SRA   | 1      |
 | arithmetic         | ADD, ...        | 1      |
-
-
-
-Edit `config.mk` if the tools are not in the search path.
 
 
 
@@ -107,7 +118,7 @@ and send it to the bootloader:
     make -C sw/coremark/ build-uart
     sw/bootloader/send_image.sh /dev/ttyUSB1 sw/coremark/coremark_uart.bin
 
-The CoreMark/MHz of Danzig is 0.892.
+The CoreMark/MHz of RudolV is 0.892.
 
 
 

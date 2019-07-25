@@ -1,7 +1,7 @@
 UART Bootloader
 ===============
 
-Simple bootloader that can be used as firmware for Danzig. It reads bytes from
+Simple bootloader that can be used as firmware for RudolV. It reads bytes from
 a UART and writes them to the main memory, starting at address 0. When the
 transmission of the memory image is finished, execution continues at address 0.
 The actual data is preceeded by the length of the memory image in bytes, encoded

@@ -1,5 +1,5 @@
 As far as possible the original files from riscv-tests. 
-The HZ macro is set to 24 MHz, the clock rate of Danzig.
+The HZ macro is set to 24 MHz, the clock rate of RudolV.
 
 Modifications:
   * test.ld:
