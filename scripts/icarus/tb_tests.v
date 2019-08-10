@@ -30,7 +30,7 @@ module tb_tests;
     );
 
     wire csr_read;
-    wire [1:0] csr_modify;
+    wire [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata;

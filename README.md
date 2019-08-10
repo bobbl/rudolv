@@ -12,12 +12,12 @@ Edit `config.mk` if the tools are not in the search path.
 Instruction timing
 ------------------
 
-Data hatzards ar avoided by operand forwarding, therefore most instructions 
+Data hatzards are avoided by operand forwarding, therefore most instructions 
 are executed in one cycle. Since the memory is single ported, memory accesses
 take two cycles. The jump target is computed in the execute stage, resulting in
 a two cycle latency. There is no dynamic branch prediction but subsequent
 instructions are only killed in the case of a taken branch. This behaviour can
-be consideres as a static always not taken prediction.
+be considered as a static always not taken prediction.
 
 | instruction class  | examples        | cycles |
 | ------------------ | --------------- | ------ |

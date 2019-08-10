@@ -38,7 +38,7 @@ module Pipeline #(
     output retired,
 
     output csr_read,            // can be ignored if there are no side-effects
-    output [1:0] csr_modify,    // 01=write 10=set 11=clear
+    output [2:0] csr_modify,    // 01=write 10=set 11=clear
     output [31:0] csr_wdata,
     output [11:0] csr_addr,
     input [31:0] csr_rdata,
@@ -333,8 +333,8 @@ module Pipeline #(
     // external CSR interface
     assign retired    = ~d_Bubble & ~m_Kill & ~w_Kill;
     assign csr_read   = CsrRead;
-    assign csr_modify = (InsnCSR & (d_Insn[19:15]!=0)) ? d_Insn[13:12] : 2'b00;
-    assign csr_wdata  = ForwardAE;
+    assign csr_modify = {Kill, (InsnCSR & (~d_Insn[13] | (d_Insn[19:15]!=0))) ? d_Insn[13:12] : 2'b00};
+    assign csr_wdata  = d_Insn[14] ? d_Insn[19:15] : ForwardAE;
     assign csr_addr   = d_Insn[31:20];
 
 
@@ -939,7 +939,7 @@ module CsrCounter #(
     input retired,
 
     input read,
-    input [1:0] modify,
+    input [2:0] modify,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -1006,7 +1006,7 @@ module CsrUart #(
     input rstn,
 
     input read,
-    input [1:0] modify,
+    input [2:0] modify,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -1032,10 +1032,10 @@ module CsrUart #(
             Valid <= 1;
             RData <= {PERIOD, rx};
             case ({modify, wdata[0]})
-                3'b010: q_TX <= 0; // write 0
-                3'b011: q_TX <= 1; // write 1
-                3'b101: q_TX <= 1; // set
-                3'b111: q_TX <= 0; // clear
+                4'b0010: q_TX <= 0; // write 0
+                4'b0011: q_TX <= 1; // write 1
+                4'b0101: q_TX <= 1; // set
+                4'b0111: q_TX <= 0; // clear
             endcase
         end
         if (~rstn) q_TX <= 1;
