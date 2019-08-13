@@ -22,13 +22,23 @@ west_build() {
 
     rm -rf build
 
-#    export ZEPHYR_TOOLCHAIN_VARIANT=cross-compile
-    export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
-#    export ZEPHYR_BASE=/home/bobbl/git/github/contest2/zephyrproject/zephyr
+
+    # the recommended patch has no effect, therefore use unpatched zephyr
     export ZEPHYR_BASE=${zephyr_base}
 
+
+    # When building for rv32i, the SDK gcc cannot be used, because its libgcc
+    # contains rv32ima instructions and is linked to the executable. Therefore
+    # use special cross compiler.
+    export ZEPHYR_TOOLCHAIN_VARIANT=cross-compile
     west build -p -b m2gl025_miv
-    cp build/zephyr/zephyr.elf ../../build/$1.unp_rv32imc.elf
+    cp build/zephyr/zephyr.elf ../../build/$1.a.elf
+
+    # For rv32ima the zephyr SDK can be used
+    # To change the ISA, CONFIG_COMPILER_OPT in prj.conf must be modified, too.
+#    export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+#    west build -p -b m2gl025_miv
+#    cp build/zephyr/zephyr.elf ../../build/$1.b.elf
 
     cd ../..
 }
