@@ -1,0 +1,7 @@
+
+&uart0 {
+        status = "okay";
+        current-speed = <115200>;
+        clock-frequency = <50000000>;
+	reg = <0x70000000 0x1000>;
+};

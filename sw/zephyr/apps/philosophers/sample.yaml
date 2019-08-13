@@ -1,0 +1,42 @@
+sample:
+  name: Dining Philosophers
+common:
+  extra_args: "-DDEBUG_PRINTF=1"
+  tags: introduction
+  harness: console
+  harness_config:
+    type: multi_line
+    ordered: false
+    regex:
+      - ".*STARVING.*"
+      - ".*DROPPED ONE FORK.*"
+      - ".*THINKING.*"
+      - ".*EATING.*"
+tests:
+  sample.philosopher:
+    tags: introduction
+  sample.philosopher.tracing:
+    min_ram: 32
+    extra_configs:
+      - CONFIG_SEGGER_SYSTEMVIEW=y
+  sample.philosopher.same_prio:
+    extra_args: "-DSAME_PRIO=1"
+  sample.philosopher.static:
+    extra_args: "-DSTATIC_OBJS=1"
+  sample.philosopher.semaphores:
+    extra_args: "-DFORKS=SEMAPHORES"
+  sample.philosopher.stacks:
+    extra_args: "-DFORKS=STACKS"
+  sample.philosopher.fifos:
+    extra_args: "-DFORKS=FIFOS"
+  sample.philosopher.lifos:
+    extra_args: "-DFORKS=LIFOS"
+  sample.philosopher.preempt_only:
+    extra_configs:
+      - CONFIG_NUM_PREEMPT_PRIORITIES=6
+      - CONFIG_NUM_COOP_PRIORITIES=0
+      - CONFIG_BT=n
+  sample.philosopher.coop_only:
+    extra_configs:
+      - CONFIG_NUM_PREEMPT_PRIORITIES=0
+      - CONFIG_NUM_COOP_PRIORITIES=6

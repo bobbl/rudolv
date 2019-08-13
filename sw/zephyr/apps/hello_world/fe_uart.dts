@@ -1,0 +1,37 @@
+/* UART for the Future Electronics Microsemi Creative Board is different from
+ * other Microsemi MiV boards */
+
+/ {
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 {
+			clock-frequency = <0>;
+			compatible = "sifive,rocket0", "riscv";
+			device_type = "cpu";
+			i-cache-block-size = <64>;
+			i-cache-sets = <128>;
+			i-cache-size = <16384>;
+/*			next-level-cache = <&modeselect &maskrom &otp &spi0>;*/
+			reg = <0>;
+/*			riscv,isa = "rv32imac";*/
+			riscv,isa = "rv32i";
+/*			sifive,dtim = <&dtim>;*/
+/*			sifive,itim = <&itim>;*/
+			status = "okay";
+			timebase-frequency = <32768>;
+			hlic: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+	};
+};
+
+&uart0 {
+        status = "okay";
+        current-speed = <115200>;
+        clock-frequency = <50000000>;
+	reg = <0x70000000 0x1000>;
+};
