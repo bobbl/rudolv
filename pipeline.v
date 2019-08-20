@@ -1,5 +1,6 @@
 `define ENABLE_EXCEPTIONS
 //`define ENABLE_IDS
+`define ENABLE_TIMER
 
 
 module RegisterSet(
@@ -35,6 +36,7 @@ module Pipeline #(
     input  clk,
     input  rstn,
 
+    input  irq_timer,
     output retired,
 
     output csr_read,            // can be ignored if there are no side-effects
@@ -140,11 +142,12 @@ module Pipeline #(
     reg e_ExcJump;
     reg m_ExcMem;
     reg w_ExcMem;
-    reg e_EBREAKorECALL;
+//    reg e_EBREAKorECALL;
     reg m_MemWr;
     reg m_WriteMCAUSE;
     reg m_WriteMTVAL;
-    reg [3:0] e_Cause;
+    reg [4:0] e_Cause1;
+    reg [4:0] m_Cause;
 
     // CSRs for exceptions
     reg [WORD_WIDTH-1:0] m_CsrUpdate;
@@ -180,6 +183,16 @@ module Pipeline #(
 
 
 
+`ifdef ENABLE_TIMER
+    reg        f_MModeIntEnable;
+    reg        d_TimerInt;
+    reg        e_TimerInt;
+
+    reg [2:0]  e_CsrModify;
+    reg [31:0] e_CsrWData;
+    reg [11:0] e_CsrAddr;
+`endif
+
 
 
 // ---------------------------------------------------------------------
@@ -191,8 +204,27 @@ module Pipeline #(
 
     // fetch
 
+`ifdef ENABLE_TIMER
+    reg MModeIntEnable;
+    reg TimerInt;
+`endif
+
+
     reg [31:0] Insn;
     always @* begin
+`ifdef ENABLE_TIMER
+        TimerInt <= 0;
+        MModeIntEnable <= f_MModeIntEnable;
+        if (e_CsrAddr==12'h300) begin  // mstatus
+            case ({e_CsrModify, e_CsrWData[3]})
+                4'b0010: MModeIntEnable <= 0; // write 0
+                4'b0011: MModeIntEnable <= 1; // write 1
+                4'b0101: MModeIntEnable <= 1; // set
+                4'b0111: MModeIntEnable <= 0; // clear
+                default: MModeIntEnable <= f_MModeIntEnable;
+            endcase
+        end
+`endif
         if (Bubble | ExcJump) begin
             //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
             if (CsrPart)
@@ -204,12 +236,23 @@ module Pipeline #(
                 Insn <= {7'b0000000, 5'b00000, 
                          (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
                          3'b110, 5'b00000, 7'b1100111}; // JALR
-        end else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
+        end
+`ifdef ENABLE_TIMER
+        else if (irq_timer & f_MModeIntEnable) begin
+            // not the absoultely correct priority, but works
+            TimerInt <= 1;
+            MModeIntEnable <= 0;
+            Insn <= {7'b0000000, 5'b00000,
+                     REG_CSR_MTVEC[4:0],
+                     3'b110, 5'b00000, 7'b1100111}; // JALR
+        end
+`endif
+        else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
             Insn <= d_DelayedInsn;
         else
             Insn <= mem_rdata;
     end
-    wire RdNo1Aux = Bubble | ExcJump;
+    wire RdNo1Aux = Bubble | ExcJump | (irq_timer & f_MModeIntEnable);
 
 
 
@@ -338,6 +381,24 @@ module Pipeline #(
     assign csr_addr   = d_Insn[31:20];
 
 
+    // internal CSRs
+
+    reg CsrValidInternal;
+    reg [31:0] CsrRDataInternal;
+    always @* case (e_CsrAddr)
+        12'h300: begin // mstatus
+            CsrValidInternal = 1;
+            CsrRDataInternal = {28'b0, f_MModeIntEnable, 3'b0};
+        end
+        default: begin
+            CsrValidInternal = 0;
+            CsrRDataInternal = 0;
+        end
+    endcase
+
+
+
+
 
 
 
@@ -372,7 +433,8 @@ module Pipeline #(
 
 ////    wire ExecuteWrEn = ~m_Kill & (e_WrEn | e_CsrFromReg);
 //    wire ExecuteWrEn = ~m_Kill & (e_WrEn);
-    wire ExecuteWrEn   = ~m_Kill & ((e_CsrRead & csr_valid) ? 1'b1 : e_WrEn); 
+    wire ExecuteWrEn   = ~m_Kill & 
+        ((e_CsrRead & (csr_valid | CsrValidInternal)) ? 1'b1 : e_WrEn); 
         // part of the regset, even if rd=0 and therefore e_WrEn==0
 
 
@@ -490,7 +552,10 @@ module Pipeline #(
     // exception handling
 
 `ifdef ENABLE_EXCEPTIONS
-    wire ExcUser        = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21]);
+    wire ExcUser        = ((SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21])
+                            & ~m_Kill);
+// REVERT m_Kill?
+
     wire ExcJump        = m_Kill & f_PC[1];
     wire vWriteMEPC     = ExcJump | m_ExcUser | m_ExcMem;
     wire WriteMCAUSE    = ExcJump | m_ExcUser            | w_ExcMem;
@@ -507,6 +572,7 @@ module Pipeline #(
         m_WrNo));
 
 
+/*
     //wire [3:0] Cause = m_ExcMem  ? (m_MemWr         ? 6 : 4) :
     //                  (e_ExcUser ? (e_EBREAKorECALL ? 3 : 11) : 0);
     wire [3:0] Cause = {
@@ -514,12 +580,20 @@ module Pipeline #(
         m_ExcMem,
         (m_ExcMem & m_MemWr) | e_ExcUser,
         e_ExcUser};
+*/
+//    wire [4:0] Cause = m_ExcMem  ? (m_MemWr ? 6 : 4) :
+//                      (e_ExcUser ? e_Cause1 : 0); // -> m_Cause
+//    wire [4:0] Cause1 = d_TimerInt ? 5'b10111: (d_Insn[20] ? 3 : 11); // -> e_Cause1
+    wire [4:0] Cause = m_ExcMem  ? (m_MemWr ? 6 : 4) :
+                      (e_TimerInt ? 5'b10111 : (e_ExcUser ? e_Cause1 : 0)); // -> m_Cause
+    wire [4:0] Cause1 = d_Insn[20] ? 3 : 11; // -> e_Cause1
+
 
     wire [WORD_WIDTH-1:0] ExcWrData2 =
         MemMisaligned   ? AddrSum       // MTVAL for mem access
                         : d_PC;         // MEPC 
     wire [WORD_WIDTH-1:0] ExcWrData =
-        WriteMCAUSE     ? e_Cause       // MCAUSE
+        WriteMCAUSE     ? {m_Cause[4], {(WORD_WIDTH-5){1'b0}}, m_Cause[3:0]}  // MCAUSE
                         : e_ExcWrData2;
 
     wire [WORD_WIDTH-1:0] CsrResult =
@@ -550,8 +624,10 @@ module Pipeline #(
     wire [4:0] vCsrTranslate = {d_Insn[26], d_Insn[23:20]};
     wire CsrFromReg = InsnCSR && (d_Insn[31:27]==5'b00110) && 
         (d_Insn[25:23]==3'b0) &&
-        (((~d_Insn[26]) && (d_Insn[22:20]==3'b101)) ||
-         ((d_Insn[26]) && (~d_Insn[22])));
+        (
+         (d_Insn[22:20]==3'b100) || // mie, mip
+         ((~d_Insn[26]) && (d_Insn[22:20]==3'b101)) || // mtvec
+         ((d_Insn[26]) && (~d_Insn[22]))); // mscratch, mepc, mcause, mtval
 
     wire [1:0] CsrOp = ((SysOpcode & d_Insn[5]) ? d_Insn[13:12] : 2'b00);
 
@@ -747,16 +823,17 @@ module Pipeline #(
         e_ExcWrData2        <= ExcWrData2;
         m_ExcWrData         <= ExcWrData; 
         e_ExcUser           <= ExcUser;
-        m_ExcUser           <= e_ExcUser;
+        m_ExcUser           <= (e_ExcUser & ~m_Kill) | e_TimerInt;
         d_ExcJump           <= ExcJump;
         e_ExcJump           <= d_ExcJump;
         m_ExcMem            <= MemMisaligned & ~m_Kill;
         w_ExcMem            <= m_ExcMem & ~m_Kill;
-        e_EBREAKorECALL     <= d_Insn[20];
+//        e_EBREAKorECALL     <= d_Insn[20];
         m_MemWr             <= e_MemWr;
         m_WriteMCAUSE       <= WriteMCAUSE;
         m_WriteMTVAL        <= WriteMTVAL;
-        e_Cause             <= Cause;
+        e_Cause1            <= Cause1;
+        m_Cause             <= Cause;
 
         m_CsrUpdate         <= CsrUpdate;
         e_CsrOp             <= CsrOp;
@@ -768,6 +845,16 @@ module Pipeline #(
         m_CsrModified       <= CsrModified;
 `endif
 
+
+`ifdef ENABLE_TIMER
+        f_MModeIntEnable    <= MModeIntEnable;
+        d_TimerInt          <= TimerInt;
+        e_TimerInt          <= d_TimerInt;
+
+        e_CsrModify         <= csr_modify;
+        e_CsrWData          <= csr_wdata;
+        e_CsrAddr           <= csr_addr;
+`endif
 
 
 `ifdef ENABLE_COUNTER
@@ -785,8 +872,10 @@ module Pipeline #(
         e_CsrFromExt        <= CsrFromExt;
         e_CsrRead           <= CsrRead;
         m_CsrRead           <= e_CsrRead;
-        m_CsrValid          <= csr_valid;
+        m_CsrValid          <= csr_valid | CsrValidInternal;
         m_CsrRdData         <= csr_rdata;
+
+
 
 
 
@@ -832,7 +921,7 @@ module Pipeline #(
             vWriteMEPC
             );
 */
-        $display("X ExcUser %b%b%b ExcJump %b%b%b ExcMem %b%b%b vWriteMEPC=%b",
+        $display("X ExcUserDEM %b%b%b ExcJumpFDE %b%b%b ExcMemEMW %b%b%b vWriteMEPC=%b",
             ExcUser,
             e_ExcUser,
             m_ExcUser,
@@ -846,8 +935,14 @@ module Pipeline #(
             );
 
 
-        if (Kill) $display("B jump %h", FetchPC);
+        if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchPC);
 
+        $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
+            vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
+        $display("  e_InsnBLTorBLTU=%b vLess=%b e_InsnJALorFENCEI=%b",
+            e_InsnBLTorBLTU, vLess, e_InsnJALorFENCEI);
+        $display("  e_InsnBEQ=%b e_InvertBranch=%b vEqual=%b",
+            e_InsnBEQ, e_InvertBranch, vEqual);
 
         $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
             FwdAE, FwdAM, FwdAW, ForwardAR, ForwardAM, ForwardAE);
@@ -881,12 +976,35 @@ module Pipeline #(
 
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
-        $display("  e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
-            e_WrNo, ExecuteWrNo, m_WrNo);
-        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b DecodeWrEn=%b ExecuteWrEn=%b MemWrEn=%b",
+        $display("  DecodeWrNo=%b e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
+            DecodeWrNo, e_WrNo, ExecuteWrNo, m_WrNo);
+        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
             DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
 //        $display("  vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
 //            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE);
+
+
+
+
+        $display("  m_WrEn=%b ExcJump=%b m_ExcUser=%b m_ExcMem=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
+            m_WrEn, ExcJump, m_ExcUser, m_ExcMem, m_WriteMTVAL, m_WriteMCAUSE);
+/*
+    wire ExcUser        = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21])
+                            | d_TimerInt;
+    wire ExcJump        = m_Kill & f_PC[1];
+    wire vWriteMEPC     = ExcJump | m_ExcUser | m_ExcMem;
+    wire WriteMCAUSE    = ExcJump | m_ExcUser            | w_ExcMem;
+    wire WriteMTVAL     = d_ExcJump           | m_ExcMem;
+
+    wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
+    wire MemWrEn        = m_WrEn | vExcOverwrite;
+*/
+
+
+
+        $display("I MIE=%b d_TimerInt=%b irq_timer=%b e_InsnJALR=%b",
+            f_MModeIntEnable, d_TimerInt, irq_timer, e_InsnJALR);
+
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -920,6 +1038,12 @@ module Pipeline #(
             w_Kill <= 0;
             e_PCImm <= START_PC;
             e_InsnJALorFENCEI  <= 1;
+
+`ifdef ENABLE_TIMER
+            f_MModeIntEnable <= 0;
+            d_TimerInt <= 0;
+`endif
+
         end
 
     end

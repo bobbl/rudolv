@@ -9,6 +9,8 @@ module tb_tests;
         #40 rstn = 1;
     end
 
+    wire irq_timer = 1;
+
     wire mem_valid;
     wire mem_write;
     wire [3:0] mem_wmask;
@@ -53,7 +55,9 @@ module tb_tests;
         .clk            (clk),
         .rstn           (rstn),
 
+        .irq_timer      (irq_timer),
         .retired        (retired),
+
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
         .csr_wdata      (csr_wdata),
