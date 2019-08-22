@@ -184,7 +184,8 @@ module Pipeline #(
 
 
 `ifdef ENABLE_TIMER
-    reg        f_MModeIntEnable;
+    reg        f_MModeIntEnable;        // mstatus.mie
+    reg        f_MModePriorIntEnable;   // mstatus.mpie
     reg        d_TimerInt;
     reg        e_TimerInt;
 
@@ -206,6 +207,7 @@ module Pipeline #(
 
 `ifdef ENABLE_TIMER
     reg MModeIntEnable;
+    reg MModePriorIntEnable;
     reg TimerInt;
 `endif
 
@@ -215,13 +217,21 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
         TimerInt <= 0;
         MModeIntEnable <= f_MModeIntEnable;
+        MModePriorIntEnable <= f_MModePriorIntEnable;
         if (e_CsrAddr==12'h300) begin  // mstatus
-            case ({e_CsrModify, e_CsrWData[3]})
-                4'b0010: MModeIntEnable <= 0; // write 0
-                4'b0011: MModeIntEnable <= 1; // write 1
-                4'b0101: MModeIntEnable <= 1; // set
-                4'b0111: MModeIntEnable <= 0; // clear
-                default: MModeIntEnable <= f_MModeIntEnable;
+            case (e_CsrModify)
+                3'b001: begin // write
+                    MModeIntEnable      <= e_CsrWData[3];
+                    MModePriorIntEnable <= e_CsrWData[7];
+                end
+                3'b010: begin // set
+                    MModeIntEnable      <= f_MModeIntEnable      | e_CsrWData[3];
+                    MModePriorIntEnable <= f_MModePriorIntEnable | e_CsrWData[7];
+                end
+                3'b011: begin // clear
+                    MModeIntEnable      <= f_MModeIntEnable      & ~e_CsrWData[3];
+                    MModePriorIntEnable <= f_MModePriorIntEnable & ~e_CsrWData[7];
+                end
             endcase
         end
 `endif
@@ -232,16 +242,37 @@ module Pipeline #(
                          vCsrTranslate,
 //                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
                          3'b110, vCsrTranslate, 7'b0110011}; // OR
-            else
+            else if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET) begin // WFI
+//                Insn <= {7'b0000000, 5'b00000, 5'b00000,
+//                         3'b110, 5'b00000, 7'b0110011}; // OR X0, X0, X0
+
+                Insn <= {12'hbff, 5'b00001, 3'b101, 5'b00000, 7'b1110011}; 
+                    // CSRWI 0xbff, 1 to signal simulation end
+                //Insn <= 32'hbff0d073
+
+            end else begin
                 Insn <= {7'b0000000, 5'b00000, 
                          (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
                          3'b110, 5'b00000, 7'b1100111}; // JALR
+                if (InsnMRET) begin
+                    MModeIntEnable <= f_MModePriorIntEnable;
+                    MModePriorIntEnable <= 1;
+                end else begin // exception
+                    MModeIntEnable <= 0;
+                    MModePriorIntEnable <= f_MModeIntEnable;
+                end
+                // KNOWN BUG:
+                // If irq_timer ist still 1 when the MRET restores MIE to 1,
+                // d_TimerInt will be killed because it is in the delay slots
+                // of the MRET instructions.
+            end
         end
 `ifdef ENABLE_TIMER
         else if (irq_timer & f_MModeIntEnable) begin
             // not the absoultely correct priority, but works
             TimerInt <= 1;
             MModeIntEnable <= 0;
+            MModePriorIntEnable <= f_MModeIntEnable;
             Insn <= {7'b0000000, 5'b00000,
                      REG_CSR_MTVEC[4:0],
                      3'b110, 5'b00000, 7'b1100111}; // JALR
@@ -848,6 +879,7 @@ module Pipeline #(
 
 `ifdef ENABLE_TIMER
         f_MModeIntEnable    <= MModeIntEnable;
+        f_MModePriorIntEnable <= MModePriorIntEnable;
         d_TimerInt          <= TimerInt;
         e_TimerInt          <= d_TimerInt;
 
@@ -1002,8 +1034,9 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b d_TimerInt=%b irq_timer=%b e_InsnJALR=%b",
-            f_MModeIntEnable, d_TimerInt, irq_timer, e_InsnJALR);
+        $display("I MIE=%b MPIE=%b d_TimerInt=%b irq_timer=%b e_InsnJALR=%b",
+            f_MModeIntEnable, f_MModePriorIntEnable, 
+            d_TimerInt, irq_timer, e_InsnJALR);
 
 
 
@@ -1016,7 +1049,7 @@ module Pipeline #(
             e_MemAccess <= 0;
             e_MemWr <= 0;
             e_MemWidth <= 2'b11; // remove?
-            f_PC <= 32'h80000000;
+            f_PC <= 32'hf0000000;
 
             d_Insn <= 32'h13;
             d_SaveFetch <= 0;
@@ -1041,6 +1074,7 @@ module Pipeline #(
 
 `ifdef ENABLE_TIMER
             f_MModeIntEnable <= 0;
+            f_MModePriorIntEnable <= 0;
             d_TimerInt <= 0;
 `endif
 

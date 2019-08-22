@@ -9,10 +9,11 @@ FILES_S = $(wildcard $(PATH_TO_TESTS)/*.S)
 FILES_HEX = $(FILES_S:%.S=%.hex)
 
 help:
-	@echo "  make CODE=foo.hex test  Simulate with extensive logging"
-	@echo "  make CODE=foo.hex test  Simulate without logging"
-	@echo "  make picorv-dhrystone   Benchmark from picorrv32 repo"
-	@echo "  make riscv-dhrystone    Benchmark from RISC-V repo"
+	@echo "  make CODE=foo.hex test          Simulate with extensive logging"
+	@echo "  make CODE=foo.hex test-nodebug  Simulate without logging"
+	@echo "  make CODE=foo.hex femcb         Simulate Future Electronics Microsemi Creative Board"
+	@echo "  make picorv-dhrystone           Benchmark from picorrv32 repo"
+	@echo "  make riscv-dhrystone            Benchmark from RISC-V repo"
 
 test: $(CODE) tb_tests.v $(VERILOG_FILES)
 	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
@@ -40,6 +41,17 @@ uart:
 	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"../../sw/uart/uart.hex\" \
 	    tb_uart.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
+
+femcb:
+	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
+	    tb_femcb.v memory32.v $(VERILOG_FILES)
+	$(VVP) -N tmp.vvp
+
+femcb-nodebug:
+	$(IVERILOG) -o tmp.vvp -DCODE=\"$(CODE)\" \
+	    tb_femcb.v memory32.v $(VERILOG_FILES)
+	$(VVP) -N tmp.vvp
+
 
 
 clean:
