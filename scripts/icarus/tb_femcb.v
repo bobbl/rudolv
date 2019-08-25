@@ -51,8 +51,7 @@ module tb_femcb;
     );
 
     Memory32 #(
-        .WIDTH(14), // 64K
-        .CONTENT(`CODE) // don't care
+        .WIDTH(14) // 64K
     ) ram (
         .clk    (clk),
         .valid  (mem_valid),
@@ -158,7 +157,8 @@ module tb_femcb;
     end
 
     initial begin
-        #5_000_001 $display("***** TIMEOUT"); $stop;
+//        #1_200_001 $display("***** TIMEOUT"); $stop; // enough for ripe 1,2,5
+        #2_900_001 $display("***** TIMEOUT"); $stop; // enough for ripe 3,4
     end
 
 endmodule

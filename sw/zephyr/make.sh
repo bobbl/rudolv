@@ -64,7 +64,13 @@ zephyr_base=$(pwd)/zephyrproject/zephyr
 while [ $# -ne 0 ]
 do
     case $1 in
-        ripe)                   west_build $1 ;;
+        ripe)
+            west_build ripe1
+            west_build ripe2
+            west_build ripe3
+            west_build ripe4
+            west_build ripe5
+            ;;
         hello_world)            west_build $1 ;;
         synchronization)        west_build $1 ;;
         philosophers)           west_build $1 ;;

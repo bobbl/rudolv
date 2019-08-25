@@ -1,7 +1,7 @@
 // 32 bit single ported zero latency memory
 module Memory32 #(
     parameter WIDTH = 13,
-    parameter CONTENT = "memory.hex"
+    parameter CONTENT = ""
 ) (
     input clk, 
     input valid,
@@ -16,7 +16,7 @@ module Memory32 #(
     reg [31:0] mem [0:SIZE-1];
 
     initial begin
-        $readmemh(CONTENT, mem);
+        if (CONTENT != "") $readmemh(CONTENT, mem);
     end
 
     always @(posedge clk) begin
