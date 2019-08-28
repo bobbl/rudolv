@@ -82,6 +82,17 @@ module Pipeline #(
     reg d_SaveFetch;
     reg d_Bubble;
 
+    reg [5:0] d_MultiCycleCounter;
+    reg d_LastMultiCycle;
+    reg e_LastMultiCycle;
+    reg e_StartMul;
+    reg [WORD_WIDTH-1:0] q_MulA;
+    reg [WORD_WIDTH:0] q_MulB;
+    reg [2*WORD_WIDTH-1:0] q_MulC;
+    reg e_FromMul;
+    reg e_FromMulH;
+    reg e_MulASigned;
+    reg e_MulBSigned;
 
     // execute
     reg e_InsnJALR;
@@ -280,6 +291,11 @@ module Pipeline #(
 `endif
         else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
             Insn <= d_DelayedInsn;
+        else if (MULDIVOpcode & ~MultiCycle) 
+            // start of multicycle execution
+            // the next instruction is currently beeing fetched and must
+            // be overwritten.
+            Insn <= 32'h13; // NOP
         else
             Insn <= mem_rdata;
     end
@@ -365,29 +381,39 @@ module Pipeline #(
     wire PartBranch     = (d_Insn[6:4]==3'b110);
     wire LowPart        = (d_Insn[3:0]==4'b0011);
     wire CsrPart        = (d_Insn[6] & d_Insn[5] & (d_Insn[13] | d_Insn[12]));
+    wire MULDIVPart     = d_Insn[5] & (d_Insn[31:25]==7'b0000001);
 
     wire vMemOrSys      = (d_Insn[6]==d_Insn[4]) & ~d_Insn[3] & ~d_Insn[2];
         // CAUTION: also true for opcode 1010011 (OP-FP, 32 bit floating point) 
 
     // LUT4 at level 2
 
+
+
+    // possible jumps
     wire InsnJALR       = (BranchOpcode &  d_Insn[2])
         & (~e_MemAccess | MemMisaligned); 
             // disable JALR, if it is the memory bubble and there is no memory exception
     wire InsnBEQ        =  BranchOpcode & ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
     wire InsnBLTorBLTU  =  BranchOpcode & ~d_Insn[2] &  d_Insn[14];
     wire InsnJALorFENCEI= (d_Insn[6]==d_Insn[5]) && d_Insn[4:2]==3'b011;
+
     wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
     wire InsnCSR        =  SysOpcode & CsrPart & ~m_Kill;
 
     // control signals for the ALU that are set in the decode stage
-    wire SelSum         = (ArithOpcode & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]); // ADD or SUB
-    wire SetCond        =  ArithOpcode & ~d_Insn[14] &  d_Insn[13]; // SLT or SLTU
-    wire SelImm         =  ArithOpcode & ~d_Insn[5]; // arith imm, only for forwarding
-    wire EnShift        = (ArithOpcode               & ~d_Insn[13] &  d_Insn[12]);
+    wire SelSum         = ArithOpcode & ~MULDIVPart
+                            & ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD/SUB
+    wire SetCond        = ArithOpcode & ~MULDIVPart
+                            & ~d_Insn[14] &  d_Insn[13]; // SLT or SLTU
+    wire SelImm         = ArithOpcode & ~MULDIVPart
+                            & ~d_Insn[5]; // arith imm, only for forwarding
+    wire EnShift        = ArithOpcode & ~MULDIVPart
+                            & ~d_Insn[13] &  d_Insn[12];
     wire [1:0] SelLogic = (ArithOpcode & d_Insn[14])
-        ? d_Insn[13:12] 
+        ? (MULDIVPart ? 2'b00 : d_Insn[13:12])
         : {1'b0, ~InsnBEQ};
+
     wire CsrFromExt     = InsnCSR & ~CsrFromReg;
     wire CsrRead        = CsrFromExt & ~(DestReg0Part & ~d_Insn[7]);
 
@@ -398,9 +424,16 @@ module Pipeline #(
         //  to allow the writing of MTVAL
 
     wire ShiftArith     = d_Insn[30];
-    wire NegB           = ((SUBorSLL & SUBandSLL) | PartBranch) & LowPart;
+    wire NegB           = ((SUBorSLL & SUBandSLL & ~MULDIVPart) | PartBranch) & LowPart;
     wire SaveFetch      = (d_Bubble | (vMemOrSys & ~d_SaveFetch)) & ~m_Kill;
     wire Bubble         = ~m_Kill & vMemOrSys; 
+
+
+
+
+
+
+
 
 
 
@@ -506,11 +539,17 @@ module Pipeline #(
 
     // ALU
 
+    wire [WORD_WIDTH-1:0] vMulResult =
+          (e_FromMul ? q_MulC[WORD_WIDTH-1:0] : 0)
+          | (e_FromMulH ? q_MulC[2*WORD_WIDTH-1:WORD_WIDTH] : 0);
+    
+
     wire [WORD_WIDTH-1:0] vLogicResult = ~e_SelLogic[1]
         ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
         : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
     wire [WORD_WIDTH-1:0] vPCResult =
-          (e_ReturnPC ? d_PC : 0);
+          (e_ReturnPC ? d_PC : 0)
+          | vMulResult;
     wire [WORD_WIDTH-1:0] vUIResult =
         e_ReturnUI ? (e_LUIorAUIPC ? {e_Imm[31:12], 12'b0} : e_PCImm) : 0;
 
@@ -567,12 +606,55 @@ module Pipeline #(
         //? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 
+/*
     wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? e_PCImm : NextOrSum;
     wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum;
     wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)     ? e_PCImm : NoBranch;
     wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
+*/
+
+    wire NotLastMultiCycle = 
+     (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2));
+
+    wire [WORD_WIDTH-1:0] NextOrSum_2 = NotLastMultiCycle ? d_PC : NextOrSum;
+
+    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? e_PCImm : NextOrSum_2;
+    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum_2;
+    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)     ? e_PCImm : NoBranch;
+//    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
+    wire [WORD_WIDTH-1:0] DecodePC  = 
+        ( (d_Bubble|NotLastMultiCycle) & ~m_Kill) ? d_PC    : f_PC;
 
 
+
+
+
+
+
+    // multi cycle instructions
+
+    wire MULDIVOpcode = ArithOpcode & MULDIVPart; // & ~m_Kill;
+    wire FromMul = MULDIVOpcode & (d_Insn[14:12]==3'b000);
+    wire FromMulH = MULDIVOpcode & ~d_Insn[14] & (d_Insn[13] | d_Insn[12]);
+    wire MulASigned = (d_Insn[13:12] != 2'b11);
+    wire MulBSigned = ~d_Insn[13];
+
+    wire MultiCycle = (d_MultiCycleCounter != 0);
+
+    wire StartMul       = MULDIVOpcode & ~MultiCycle;
+
+    wire LastMultiCycle = (d_MultiCycleCounter == 1);
+    wire [5:0] MultiCycleCounter = 
+        MultiCycle ? (d_MultiCycleCounter-1)
+                   : ((MULDIVOpcode & ~m_Kill & ~d_LastMultiCycle & ~e_LastMultiCycle) 
+                        ? 32 : 0);
+
+
+
+    wire [2*WORD_WIDTH-1:0] MulInitC = e_A[31]
+        ? (e_MulASigned ? ({ {32{~(e_MulBSigned & e_B[31])}}, ~e_B[31:0]} + 1)
+                        : {32'b0, e_B})
+        : 0;
 
 
 
@@ -678,11 +760,15 @@ module Pipeline #(
                                      : ((m_CsrRead & m_CsrValid) ? m_CsrRdData 
                                                                  : m_WrData));
 */
-    wire [WORD_WIDTH-1:0] vCsrOrALU =
+    wire [WORD_WIDTH-1:0] vCsrOrALU_2 =
         (m_CsrFromReg             ? e_A           : 0) |
         (w_CsrFromReg             ? m_CsrModified : 0) |
         ((m_CsrRead & m_CsrValid) ? m_CsrRdData   : 0) |
         ((m_CsrFromReg | w_CsrFromReg | (m_CsrRead & m_CsrValid)) ? 0 : m_WrData);
+    wire [WORD_WIDTH-1:0] vCsrOrALU = 
+        vCsrOrALU_2;
+//        m_FromMul ? q_MulC[WORD_WIDTH-1:0] : vCsrOrALU_2;
+
 
 `else
     wire ExcJump = 0;
@@ -797,6 +883,28 @@ module Pipeline #(
         if (SaveFetch) d_DelayedInsn <= mem_rdata;
         d_SaveFetch <= SaveFetch;
         d_Bubble <= Bubble;
+
+
+
+
+        d_MultiCycleCounter <= MultiCycleCounter;
+        d_LastMultiCycle <= LastMultiCycle;
+        e_LastMultiCycle <= d_LastMultiCycle;
+        e_StartMul <= StartMul;
+
+        q_MulA <= e_StartMul ? e_A : {q_MulA, 1'b0};
+        q_MulB <= e_StartMul ? {e_MulBSigned & e_B[31], e_B}
+                             : q_MulB;
+        q_MulC <= e_StartMul 
+            ? MulInitC
+            : ({q_MulC, 1'b0} + (q_MulA[30] ? {{32{q_MulB[32]}}, q_MulB[31:0]} : 0));
+
+        e_FromMul  <= FromMul;
+        e_FromMulH <= FromMulH;
+        e_MulASigned <= MulASigned;
+        e_MulBSigned <= MulBSigned;
+
+
 
         // decode
         d_PC <= DecodePC;
@@ -932,27 +1040,17 @@ module Pipeline #(
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, RdData1, d_RdNo2, RdData2);
-        $display("D Bubble=%b SaveFetch=%b",
-            d_Bubble, d_SaveFetch);
+        $display("D Bubble=%b SaveFetch=%b f_PC=%h",
+            d_Bubble, d_SaveFetch, f_PC);
         $display("E a=%h b=%h i=%h -> %h -> x%d wren=%b",
             e_A, e_B, e_Imm, ALUResult, e_WrNo, e_WrEn);
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 
-/*
-        $display("X ExcUser %c%c%c ExcJump %c%c%c ExcMem %c%c%c vWriteMEPC=%b",
-            ExcUser ? "d" : ".",
-            e_ExcUser ? "e" : ".",
-            m_ExcUser ? "m" : ".",
-            ExcJump ? "f" : ".",
-            d_ExcJump ? "d" : ".",
-            e_ExcJump ? "e" : ".",
-            MemMisaligned ? "e" : ".",
-            m_ExcMem ? "m" : ".",
-            w_ExcMem ? "w" : ".",
-            vWriteMEPC
-            );
-*/
+        $display("E MCCounter=%h %h*%h=%h e_FromMul=%b d_LastMC=%b e_StartMul=%b",
+            d_MultiCycleCounter, q_MulA, q_MulB, q_MulC, e_FromMul, 
+            d_LastMultiCycle, e_StartMul);
+
         $display("X ExcUserDEM %b%b%b ExcJumpFDE %b%b%b ExcMemEMW %b%b%b vWriteMEPC=%b",
             ExcUser,
             e_ExcUser,
@@ -1055,6 +1153,11 @@ module Pipeline #(
             d_SaveFetch <= 0;
             d_Bubble <= 0;
             d_DelayedInsn <= 0;
+
+            d_MultiCycleCounter <= 0;
+            e_StartMul <= 0;
+            e_FromMul <= 0;
+            e_FromMulH <= 0;
 
 `ifdef ENABLE_COUNTER
             // clear performance counters

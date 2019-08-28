@@ -40,11 +40,11 @@ RV_COMPLIANCE_RV32M
 RV_COMPLIANCE_CODE_BEGIN
 
     RVTEST_IO_INIT
-    RVTEST_IO_ASSERT_GPR_EQ(x0, 0x00000000)
-    RVTEST_IO_WRITE_STR("# Test Begin Reserved regs ra(x1) a0(x10) t0(x5)\n")
+    RVTEST_IO_ASSERT_GPR_EQ(x31, x0, 0x00000000)
+    RVTEST_IO_WRITE_STR(x31, "# Test Begin\n")
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A1 - general test of JALR\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A1 - general test of JALR\n");
 
     # Address for test results
     la      x1, test_A1_res
@@ -67,13 +67,13 @@ RV_COMPLIANCE_CODE_BEGIN
     // Assert
     //
     RVTEST_IO_CHECK()
-    RVTEST_IO_ASSERT_GPR_EQ(x0, 0x00000000)
-    RVTEST_IO_ASSERT_GPR_EQ(x2, 0x12345678)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x0, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x2, 0x12345678)
 
-    RVTEST_IO_WRITE_STR("# Test part A1  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A1  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A2 - test of JALR - jumps forward, backward\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A2 - test of JALR - jumps forward, backward\n");
 
     # Address for test results
     la      x1, test_A2_res
@@ -114,15 +114,15 @@ RV_COMPLIANCE_CODE_BEGIN
     sw      x3, 8(x1)
     sw      x4, 12(x1)
 
-    RVTEST_IO_ASSERT_GPR_EQ(x0, 0x00000000)
-    RVTEST_IO_ASSERT_GPR_EQ(x2, 0x9ABCDEF0)
-    RVTEST_IO_ASSERT_GPR_EQ(x3, 0x87654321)
-    RVTEST_IO_ASSERT_GPR_EQ(x4, 0x0FEDCBA9)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x0, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x2, 0x9ABCDEF0)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x3, 0x87654321)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x4, 0x0FEDCBA9)
 
-    RVTEST_IO_WRITE_STR("# Test part A2  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A2  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part B1 - test of JALR - linking\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part B1 - test of JALR - linking\n");
 
     # Addresses for test data and results
     la      x9, test_B1_data
@@ -185,18 +185,18 @@ B1b_link:
     sw      x7, 20(x10)
     sw      x8, 24(x10)
 
-    RVTEST_IO_ASSERT_GPR_EQ(x2, 0x11111111)
-    RVTEST_IO_ASSERT_GPR_EQ(x3, 0x22222222)
-    RVTEST_IO_ASSERT_GPR_EQ(x4, 0x33333333)
-    RVTEST_IO_ASSERT_GPR_EQ(x5, 0x00000000)
-    RVTEST_IO_ASSERT_GPR_EQ(x6, 0x55555555)
-    RVTEST_IO_ASSERT_GPR_EQ(x7, 0x00000000)
-    RVTEST_IO_ASSERT_GPR_EQ(x8, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x2, 0x11111111)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x3, 0x22222222)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x4, 0x33333333)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x5, 0x44444444)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x6, 0x55555555)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x7, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x8, 0x00000000)
 
-    RVTEST_IO_WRITE_STR("# Test part A3  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A3  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part B2 - test of JALR - linking, low bit of address is cleared\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part B2 - test of JALR - linking, low bit of address is cleared\n");
 
     # Addresses for test data and results
     la      x9, test_B2_data
@@ -263,18 +263,18 @@ B2c_link:
     sw      x7, 20(x10)
     sw      x8, 24(x10)
 
-    RVTEST_IO_ASSERT_GPR_EQ(x2, 0x66666666)
-    RVTEST_IO_ASSERT_GPR_EQ(x3, 0x77777777)
-    RVTEST_IO_ASSERT_GPR_EQ(x4, 0x88888888)
-    RVTEST_IO_ASSERT_GPR_EQ(x5, 0x00000000)
-    RVTEST_IO_ASSERT_GPR_EQ(x6, 0xAAAAAAAA)
-    RVTEST_IO_ASSERT_GPR_EQ(x7, 0x00000000)
-    RVTEST_IO_ASSERT_GPR_EQ(x8, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x2, 0x66666666)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x3, 0x77777777)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x4, 0x88888888)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x5, 0x99999999)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x6, 0xAAAAAAAA)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x7, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x10, x8, 0x00000000)
 
-    RVTEST_IO_WRITE_STR("# Test part A4  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A4  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part C - JALR using immediate\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part C - JALR using immediate\n");
 
     # Address for test results
     la      x1, test_C_res
@@ -310,14 +310,14 @@ B2c_link:
     sw      x6, 8(x1)
     sw      x7, 12(x1)
 
-    RVTEST_IO_ASSERT_GPR_EQ(x4, 0x11111111)
-    RVTEST_IO_ASSERT_GPR_EQ(x5, 0x22222222)
-    RVTEST_IO_ASSERT_GPR_EQ(x6, 0x33333333)
-    RVTEST_IO_ASSERT_GPR_EQ(x7, 0x44444444)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x4, 0x11111111)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x5, 0x22222222)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x6, 0x33333333)
+    RVTEST_IO_ASSERT_GPR_EQ(x1, x7, 0x44444444)
 
-    RVTEST_IO_WRITE_STR("# Test part A5  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A5  - Complete\n");
 
-    RVTEST_IO_WRITE_STR("# Test End\n")
+    RVTEST_IO_WRITE_STR(x31, "# Test End\n")
 
  # ---------------------------------------------------------------------------------------------
     # HALT

@@ -40,11 +40,11 @@ RV_COMPLIANCE_RV32M
 RV_COMPLIANCE_CODE_BEGIN
 
     RVTEST_IO_INIT
-    RVTEST_IO_ASSERT_GPR_EQ(x0, 0x00000000)
-    RVTEST_IO_WRITE_STR("# Test Begin Reserved regs ra(x1) a0(x10) t0(x5)\n")
+    RVTEST_IO_ASSERT_GPR_EQ(x31, x0, 0x00000000)
+    RVTEST_IO_WRITE_STR(x31, "# Test Begin\n")
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A1 - test computational instructions - register-immediate\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A1 - test computational instructions - register-immediate\n");
 
     # Address for test results
     la      x31, test_A1_res
@@ -66,12 +66,12 @@ RV_COMPLIANCE_CODE_BEGIN
     // Assert
     //
     RVTEST_IO_CHECK()
-    RVTEST_IO_ASSERT_GPR_EQ(x0, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x31, x0, 0x00000000)
 
-    RVTEST_IO_WRITE_STR("# Test part A1  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A1  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A2 - test computational instructions - register-register\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A2 - test computational instructions - register-register\n");
 
     # Address for test results
     la      x31, test_A2_res
@@ -100,12 +100,12 @@ RV_COMPLIANCE_CODE_BEGIN
     # Store results
     sw      x0, 0(x31)
 
-    RVTEST_IO_ASSERT_GPR_EQ(x0, 0x00000000)
+    RVTEST_IO_ASSERT_GPR_EQ(x31, x0, 0x00000000)
 
-    RVTEST_IO_WRITE_STR("# Test part A2  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A2  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A3 - test compare instructions\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A3 - test compare instructions\n");
 
     # Address for test results
     la      x31, test_A3_res
@@ -127,10 +127,10 @@ RV_COMPLIANCE_CODE_BEGIN
     sltiu   x0, x1, 2
     sw      x0, 12(x31)
 
-    RVTEST_IO_WRITE_STR("# Test part A3  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A3  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A4 - test jump and link instructions\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A4 - test jump and link instructions\n");
 
     # Address for test results
     la      x31, test_A4_res
@@ -145,10 +145,10 @@ RV_COMPLIANCE_CODE_BEGIN
 1:
     sw      x0, 4(x31)
 
-    RVTEST_IO_WRITE_STR("# Test part A4  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A4  - Complete\n");
 
     # ---------------------------------------------------------------------------------------------
-    RVTEST_IO_WRITE_STR("# Test part A5 - test load instructions\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A5 - test load instructions\n");
 
     # Addresses for test data and results
     la      x1, test_A5_data
@@ -167,9 +167,9 @@ RV_COMPLIANCE_CODE_BEGIN
     lbu     x0, 0(x1)
     sw      x0, 12(x31)
 
-    RVTEST_IO_WRITE_STR("# Test part A5  - Complete\n");
+    RVTEST_IO_WRITE_STR(x31, "# Test part A5  - Complete\n");
 
-    RVTEST_IO_WRITE_STR("# Test End\n")
+    RVTEST_IO_WRITE_STR(x31, "# Test End\n")
 
  # ---------------------------------------------------------------------------------------------
     # HALT
