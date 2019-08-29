@@ -56,8 +56,10 @@ module top (
     wire [31:0] UartRData;
 
     wire        retired;
+    wire        irq_timer=0;
+
     wire        csr_read;
-    wire [1:0]  csr_modify;
+    wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata = CounterRData | UartRData;
@@ -102,6 +104,8 @@ module top (
         .rstn           (rstn),
 
         .retired        (retired),
+        .irq_timer      (irq_timer),
+
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
         .csr_wdata      (csr_wdata),
