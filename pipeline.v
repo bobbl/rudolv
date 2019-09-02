@@ -97,8 +97,8 @@ module Pipeline #(
     reg [2*WORD_WIDTH-1:0] q_DivDivisor;
     reg [WORD_WIDTH-1:0] q_DivQuot;
     reg [WORD_WIDTH-1:0] q_DivRem;
-    reg e_FromDiv;
-    reg e_FromRem;
+    reg e_FromDivOrRem;
+    reg e_SelRem;
     reg e_DivSigned;
     reg e_DivResultSign;
 
@@ -550,26 +550,17 @@ module Pipeline #(
 
 
 
-    wire [WORD_WIDTH-1:0] vMulResult =
-//          (e_FromMul ? q_MulC[WORD_WIDTH-1:0] : 0)
-//          | (e_FromMulH ? q_MulC[2*WORD_WIDTH-1:WORD_WIDTH] : 0)
-          (e_FromMul ? vMulResLo : 0)
-          | (e_FromMulH ? vMulResHi : 0)
-          | (e_FromDiv ? (e_DivResultSign ? (-q_DivQuot) : q_DivQuot) : 0)
-          | (e_FromRem ? (e_DivResultSign ? (-q_DivRem) : q_DivRem) : 0);
-    
-
     wire [WORD_WIDTH-1:0] vLogicResult = ~e_SelLogic[1]
         ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
         : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
     wire [WORD_WIDTH-1:0] vPCResult =
-          (e_ReturnPC ? d_PC : 0)
-          | vMulResult;
+          (e_ReturnPC ? d_PC : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
         e_ReturnUI ? (e_LUIorAUIPC ? {e_Imm[31:12], 12'b0} : e_PCImm) : 0;
 
     // OPTIMIZE? vFastResult has one input left
-    wire [WORD_WIDTH-1:0] vFastResult = vLogicResult | vUIResult | vPCResult;
+    wire [WORD_WIDTH-1:0] vFastResult = 
+        vLogicResult | vUIResult | vPCResult | vMulResult;
     wire [WORD_WIDTH-1:0] Sum = e_A + e_B + e_Carry;
     wire [WORD_WIDTH-1:0] vShiftAlternative = {
         e_SelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
@@ -651,12 +642,12 @@ module Pipeline #(
 
     // multi cycle instructions
 
-    wire MULDIVOpcode = ArithOpcode & MULDIVPart; // & ~m_Kill;
+    wire MULDIVOpcode = ArithOpcode & MULDIVPart;
     wire MulASigned = (d_Insn[13:12] != 2'b11);
     wire MulBSigned = ~d_Insn[13];
     wire DivSigned = ~d_Insn[12];
     wire DivResultSign = e_StartMC
-        ? (e_DivSigned & (e_A[31] ^ (e_FromDiv & e_B[31])) & (e_B!=0 || e_FromRem))
+        ? (e_DivSigned & (e_A[31] ^ (~e_SelRem & e_B[31])) & (e_B!=0 || e_SelRem))
         : e_DivResultSign;
 
     wire MultiCycle = (d_MultiCycleCounter != 0);
@@ -668,7 +659,7 @@ module Pipeline #(
                         ? 33 : 0);
 
 
-
+    // MULDIV unit
     wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_DivDivisor;
     wire DivNegative = DivDiff[2*WORD_WIDTH-1];
 
@@ -676,20 +667,19 @@ module Pipeline #(
         ? {e_MulASigned & e_A[WORD_WIDTH-1], e_A}
         : {1'b0, q_MulA[WORD_WIDTH:1]};
     wire [WORD_WIDTH:0] MulB = e_StartMC
-        ? {e_MulBSigned & e_B[31], e_B} 
+        ? {e_MulBSigned & e_B[WORD_WIDTH-1], e_B} 
         : q_MulB;
     wire [2*WORD_WIDTH:0] MulC = e_StartMC
         ? 0
         : { {e_MulBSigned & q_MulC[2*WORD_WIDTH], q_MulC[2*WORD_WIDTH:WORD_WIDTH+1]}
-//           ^^^^^^^^^^^^^^
-// Don't know, why this is required for MULHU and MULHSU.
-// q_MulC[2*WORD_WIDTH] should remain 0 for both anyway.
+    //       ^^^^^^^^^^^^^^
+    // Don't know, why this is required for MULHU and MULHSU.
+    // q_MulC[2*WORD_WIDTH] should remain 0 for both anyway.
             + (q_MulA[0] ? {q_MulB}
                          : {(WORD_WIDTH+1){1'b0}}), q_MulC[WORD_WIDTH:1]};
 
-
     wire [2*WORD_WIDTH-1:0] DivDivisor = e_StartMC
-        ? {1'b0, ((e_DivSigned & e_B[31]) ? (-e_B) : e_B), 31'b0} 
+        ? {1'b0, ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B), 31'b0} 
         : {1'b0, q_DivDivisor[2*WORD_WIDTH-1:1]};
     wire [WORD_WIDTH-1:0] DivQuot = e_StartMC
         ? 0 
@@ -698,10 +688,12 @@ module Pipeline #(
         ? ((e_DivSigned & e_A[31]) ? (-e_A) : e_A)
         : (DivNegative ? q_DivRem : DivDiff[WORD_WIDTH-1:0]);
 
+
+    // result selection for MULDIV
     wire FromMul  = MULDIVOpcode & (d_Insn[14:12]==3'b000);
     wire FromMulH = MULDIVOpcode & ~d_Insn[14] & (d_Insn[13] | d_Insn[12]);
-    wire FromDiv  = MULDIVOpcode & (d_Insn[14:13]==2'b10);
-    wire FromRem  = MULDIVOpcode & (d_Insn[14:13]==2'b11);
+    wire FromDivOrRem = MULDIVOpcode & d_Insn[14];
+    wire SelRem = d_Insn[13];
 
     wire [WORD_WIDTH-1:0] vMulResLo =
         {q_MulC[WORD_WIDTH:1]};
@@ -710,6 +702,11 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vMulResHi = q_MulA[0]
         ? (vMulResHi_C - q_MulB[WORD_WIDTH-1:0])
         :  vMulResHi_C;
+    wire [WORD_WIDTH-1:0] vDivRem = e_SelRem ? q_DivRem : q_DivQuot;
+    wire [WORD_WIDTH-1:0] vMulResult =
+          (e_FromMul ? vMulResLo : 0)
+          | (e_FromMulH ? vMulResHi : 0)
+          | (e_FromDivOrRem ? (e_DivResultSign ? (-vDivRem) : vDivRem) : 0);
 
 
 
@@ -961,8 +958,8 @@ module Pipeline #(
 
         e_FromMul  <= FromMul;
         e_FromMulH <= FromMulH;
-        e_FromDiv <= FromDiv;
-        e_FromRem <= FromRem;
+        e_FromDivOrRem <= FromDivOrRem;
+        e_SelRem <= SelRem;
 
 
 
@@ -1114,8 +1111,8 @@ module Pipeline #(
         $display("E vMulResLo=%h vMulResHi_Diff=%h",
             vMulResLo, vMulResHi_Diff);
 
-        $display("E %h/%h=%h e_FromDiv=%b",
-            q_DivRem, q_DivDivisor, q_DivQuot, e_FromDiv);
+        $display("E %h/%h=%h e_FromDivOrRem=%b",
+            q_DivRem, q_DivDivisor, q_DivQuot, e_FromDivOrRem);
 
 
 
