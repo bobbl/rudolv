@@ -88,7 +88,7 @@ module Pipeline #(
     reg e_StartMC;
     reg [WORD_WIDTH:0] q_MulA;
     reg [WORD_WIDTH:0] q_MulB;
-    reg [2*WORD_WIDTH:0] q_MulC;
+    reg [2*WORD_WIDTH+1:0] q_MulC;
     reg e_FromMul;
     reg e_FromMulH;
     reg e_MulASigned;
@@ -669,14 +669,11 @@ module Pipeline #(
     wire [WORD_WIDTH:0] MulB = e_StartMC
         ? {e_MulBSigned & e_B[WORD_WIDTH-1], e_B} 
         : q_MulB;
-    wire [2*WORD_WIDTH:0] MulC = e_StartMC
+    wire [2*WORD_WIDTH+1:0] MulC = e_StartMC
         ? 0
-        : { {e_MulBSigned & q_MulC[2*WORD_WIDTH], q_MulC[2*WORD_WIDTH:WORD_WIDTH+1]}
-    //       ^^^^^^^^^^^^^^
-    // Don't know, why this is required for MULHU and MULHSU.
-    // q_MulC[2*WORD_WIDTH] should remain 0 for both anyway.
-            + (q_MulA[0] ? {q_MulB}
-                         : {(WORD_WIDTH+1){1'b0}}), q_MulC[WORD_WIDTH:1]};
+        : { {q_MulC[2*WORD_WIDTH+1], q_MulC[2*WORD_WIDTH+1:WORD_WIDTH+1]}
+            + (q_MulA[0] ? {q_MulB[WORD_WIDTH], q_MulB} : {(WORD_WIDTH+2){1'b0}}), 
+            q_MulC[WORD_WIDTH:1]};
 
     wire [2*WORD_WIDTH-1:0] DivDivisor = e_StartMC
         ? {1'b0, ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B), 31'b0} 
