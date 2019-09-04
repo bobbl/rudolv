@@ -86,7 +86,6 @@ module Pipeline #(
     reg d_LastMultiCycle;
     reg e_LastMultiCycle;
     reg e_StartMC;
-    reg [WORD_WIDTH:0] q_MulA;
     reg [WORD_WIDTH:0] q_MulB;
     reg [2*WORD_WIDTH+1:0] q_MulC;
     reg e_FromMul;
@@ -94,13 +93,14 @@ module Pipeline #(
     reg e_MulASigned;
     reg e_MulBSigned;
 
-    reg [2*WORD_WIDTH-1:0] q_DivDivisor;
     reg [WORD_WIDTH-1:0] q_DivQuot;
-    reg [WORD_WIDTH-1:0] q_DivRem;
+    reg [WORD_WIDTH:0] q_DivRem;
     reg e_FromDivOrRem;
-    reg e_SelRem;
+    reg e_SelRemOrDiv;
+    reg e_SelDivOrMul;
     reg e_DivSigned;
     reg e_DivResultSign;
+    reg m_SelDivOrMul;
 
     // execute
     reg e_InsnJALR;
@@ -647,7 +647,8 @@ module Pipeline #(
     wire MulBSigned = ~d_Insn[13];
     wire DivSigned = ~d_Insn[12];
     wire DivResultSign = e_StartMC
-        ? (e_DivSigned & (e_A[31] ^ (~e_SelRem & e_B[31])) & (e_B!=0 || e_SelRem))
+        ? (e_DivSigned & (e_A[31] ^ (~e_SelRemOrDiv & e_B[31])) 
+            & (e_B!=0 || e_SelRemOrDiv))
         : e_DivResultSign;
 
     wire MultiCycle = (d_MultiCycleCounter != 0);
@@ -658,48 +659,50 @@ module Pipeline #(
                    : ((MULDIVOpcode & ~m_Kill & ~d_LastMultiCycle & ~e_LastMultiCycle) 
                         ? 33 : 0);
 
-
     // MULDIV unit
-    wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_DivDivisor;
-    wire DivNegative = DivDiff[2*WORD_WIDTH-1];
+    //wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_MulC;
+    //wire DivNegative = DivDiff[2*WORD_WIDTH-1];
+    wire [WORD_WIDTH:0] DivDiff = {1'b0, q_DivRem} - {1'b0, q_MulC[WORD_WIDTH-1:0]};
+    wire DivNegative = (q_MulC[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff[WORD_WIDTH];
 
-    wire [WORD_WIDTH:0] MulA = e_StartMC
-        ? {e_MulASigned & e_A[WORD_WIDTH-1], e_A}
-        : {1'b0, q_MulA[WORD_WIDTH:1]};
-    wire [WORD_WIDTH:0] MulB = e_StartMC
-        ? {e_MulBSigned & e_B[WORD_WIDTH-1], e_B} 
-        : q_MulB;
+    wire [WORD_WIDTH:0] DivRem = e_StartMC
+        ? (m_SelDivOrMul ? {1'b0, (e_DivSigned & e_A[31]) ? (-e_A) : e_A}
+                         : {e_MulASigned & e_A[WORD_WIDTH-1], e_A})
+        : ((DivNegative | ~m_SelDivOrMul) ? q_DivRem 
+                                          : {1'b0, DivDiff[WORD_WIDTH-1:0]});
+
+//    wire [WORD_WIDTH:0] MulB = e_StartMC
+//        ? {e_MulBSigned & e_B[WORD_WIDTH-1], e_B} 
+//        : {1'b0, q_MulB[WORD_WIDTH:1]};
+    wire [WORD_WIDTH:0] MulB = {e_MulBSigned & e_B[WORD_WIDTH-1],
+        e_StartMC ? e_B : q_MulB[WORD_WIDTH:1]};
+    wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot, ~DivNegative};
+
     wire [2*WORD_WIDTH+1:0] MulC = e_StartMC
-        ? 0
+        ? {3'b0,
+           m_SelDivOrMul ? ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B)
+                         : {(WORD_WIDTH){1'b0}},
+           {(WORD_WIDTH-1){1'b0}}}
         : { {q_MulC[2*WORD_WIDTH+1], q_MulC[2*WORD_WIDTH+1:WORD_WIDTH+1]}
-            + (q_MulA[0] ? {q_MulB[WORD_WIDTH], q_MulB} : {(WORD_WIDTH+2){1'b0}}), 
+            + ((~m_SelDivOrMul & q_MulB[0]) ? {q_DivRem[WORD_WIDTH], q_DivRem}
+                                            : {(WORD_WIDTH+2){1'b0}}),
             q_MulC[WORD_WIDTH:1]};
-
-    wire [2*WORD_WIDTH-1:0] DivDivisor = e_StartMC
-        ? {1'b0, ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B), 31'b0} 
-        : {1'b0, q_DivDivisor[2*WORD_WIDTH-1:1]};
-    wire [WORD_WIDTH-1:0] DivQuot = e_StartMC
-        ? 0 
-        : {q_DivQuot, ~DivNegative};
-    wire [WORD_WIDTH-1:0] DivRem = e_StartMC
-        ? ((e_DivSigned & e_A[31]) ? (-e_A) : e_A)
-        : (DivNegative ? q_DivRem : DivDiff[WORD_WIDTH-1:0]);
-
 
     // result selection for MULDIV
     wire FromMul  = MULDIVOpcode & (d_Insn[14:12]==3'b000);
     wire FromMulH = MULDIVOpcode & ~d_Insn[14] & (d_Insn[13] | d_Insn[12]);
     wire FromDivOrRem = MULDIVOpcode & d_Insn[14];
-    wire SelRem = d_Insn[13];
+    wire SelRemOrDiv = d_Insn[13];
+    wire SelDivOrMul = d_Insn[14];
 
     wire [WORD_WIDTH-1:0] vMulResLo =
         {q_MulC[WORD_WIDTH:1]};
     wire [WORD_WIDTH-1:0] vMulResHi_C =
         {q_MulC[2*WORD_WIDTH:WORD_WIDTH+1]};
-    wire [WORD_WIDTH-1:0] vMulResHi = q_MulA[0]
-        ? (vMulResHi_C - q_MulB[WORD_WIDTH-1:0])
+    wire [WORD_WIDTH-1:0] vMulResHi = q_MulB[0]
+        ? (vMulResHi_C - q_DivRem[WORD_WIDTH-1:0])
         :  vMulResHi_C;
-    wire [WORD_WIDTH-1:0] vDivRem = e_SelRem ? q_DivRem : q_DivQuot;
+    wire [WORD_WIDTH-1:0] vDivRem = e_SelRemOrDiv ? q_DivRem : q_DivQuot;
     wire [WORD_WIDTH-1:0] vMulResult =
           (e_FromMul ? vMulResLo : 0)
           | (e_FromMulH ? vMulResHi : 0)
@@ -815,7 +818,6 @@ module Pipeline #(
         ((m_CsrFromReg | w_CsrFromReg | (m_CsrRead & m_CsrValid)) ? 0 : m_WrData);
     wire [WORD_WIDTH-1:0] vCsrOrALU = 
         vCsrOrALU_2;
-//        m_FromMul ? q_MulC[WORD_WIDTH-1:0] : vCsrOrALU_2;
 
 
 `else
@@ -945,19 +947,18 @@ module Pipeline #(
         e_DivSigned <= DivSigned;
         e_DivResultSign <= DivResultSign;
 
-        q_MulA <= MulA;
         q_MulB <= MulB;
         q_MulC <= MulC;
-
-        q_DivDivisor <= DivDivisor;
         q_DivQuot <= DivQuot;
         q_DivRem <= DivRem;
 
         e_FromMul  <= FromMul;
         e_FromMulH <= FromMulH;
         e_FromDivOrRem <= FromDivOrRem;
-        e_SelRem <= SelRem;
+        e_SelRemOrDiv <= SelRemOrDiv;
+        e_SelDivOrMul <= SelDivOrMul;
 
+        m_SelDivOrMul <= StartMC ? SelDivOrMul : m_SelDivOrMul;
 
 
 
@@ -1102,14 +1103,17 @@ module Pipeline #(
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 
+        if (q_DivDivisor != q_MulC) 
+            $display("UNEQ");
         $display("E MCCounter=%h %h*%h=%h e_FromMul=%b d_LastMC=%b e_StartMC=%b",
             d_MultiCycleCounter, q_MulA, q_MulB, q_MulC, e_FromMul, 
             d_LastMultiCycle, e_StartMC);
-        $display("E vMulResLo=%h vMulResHi_Diff=%h",
-            vMulResLo, vMulResHi_Diff);
+        $display("E vMulResLo=%h e_SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
+            vMulResLo, e_SelDivOrMul, m_SelDivOrMul, e_DivSigned);
 
-        $display("E %h/%h=%h e_FromDivOrRem=%b",
-            q_DivRem, q_DivDivisor, q_DivQuot, e_FromDivOrRem);
+
+        $display("E %h %h e_FromDivOrRem=%b",
+            q_DivRem, q_DivQuot, e_FromDivOrRem);
 
 
 
