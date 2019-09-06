@@ -118,7 +118,8 @@ module tb_tests;
     end
 
     initial begin
-        #200000 $write("TIMEOUT"); $stop;
+//        #200000 $write("TIMEOUT"); $stop;
+        #5000000 $write("TIMEOUT"); $stop;
     end
 
 

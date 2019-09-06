@@ -104,7 +104,7 @@ try_attack(void)
 void
 main(void)
 {
-#define ATTACK_NR   2
+#define ATTACK_NR   9
 
     printk("RIPE is alive! %s\n", CONFIG_BOARD);
 

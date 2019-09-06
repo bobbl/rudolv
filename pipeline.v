@@ -83,8 +83,6 @@ module Pipeline #(
     reg d_Bubble;
 
     reg [5:0] d_MultiCycleCounter;
-    reg d_LastMultiCycle;
-    reg e_LastMultiCycle;
     reg e_StartMC;
     reg [WORD_WIDTH:0] q_MulB;
     reg [2*WORD_WIDTH+1:0] q_MulC;
@@ -286,8 +284,13 @@ module Pipeline #(
                 // of the MRET instructions.
             end
         end
+        else if (MULDIVOpcode & ~MultiCycle & ~m_Kill)
+            // start of multicycle execution
+            // the next instruction is currently beeing fetched and must
+            // be overwritten.
+            Insn <= 32'h13; // NOP
 `ifdef ENABLE_TIMER
-        else if (irq_timer & f_MModeIntEnable) begin
+        else if (irq_timer & f_MModeIntEnable & ~MultiCycle) begin
             // not the absoultely correct priority, but works
             TimerInt <= 1;
             MModeIntEnable <= 0;
@@ -299,11 +302,6 @@ module Pipeline #(
 `endif
         else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
             Insn <= d_DelayedInsn;
-        else if (MULDIVOpcode & ~MultiCycle) 
-            // start of multicycle execution
-            // the next instruction is currently beeing fetched and must
-            // be overwritten.
-            Insn <= 32'h13; // NOP
         else
             Insn <= mem_rdata;
     end
@@ -619,8 +617,11 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
 */
 
-    wire NotLastMultiCycle = 
+    // within multicycle, but not the last one
+    wire NotLastMultiCycle = ~m_Kill &
      (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2));
+//     ~~~~~~~~~~~~~~~~                                         ~~~~~~~~~~
+//     first                                                 second to one befor last
 
     wire [WORD_WIDTH-1:0] NextOrSum_2 = NotLastMultiCycle ? d_PC : NextOrSum;
 
@@ -642,22 +643,22 @@ module Pipeline #(
 
     // multi cycle instructions
 
+    wire UnkilledStartMC = e_StartMC & ~m_Kill;
     wire MULDIVOpcode = ArithOpcode & MULDIVPart;
     wire MulASigned = (d_Insn[13:12] != 2'b11);
     wire MulBSigned = ~d_Insn[13];
     wire DivSigned = ~d_Insn[12];
-    wire DivResultSign = e_StartMC
+    wire DivResultSign = UnkilledStartMC
         ? (e_DivSigned & (e_A[31] ^ (~e_SelRemOrDiv & e_B[31])) 
             & (e_B!=0 || e_SelRemOrDiv))
         : e_DivResultSign;
 
     wire MultiCycle = (d_MultiCycleCounter != 0);
-    wire StartMC = MULDIVOpcode & ~MultiCycle;
-    wire LastMultiCycle = (d_MultiCycleCounter == 1);
+    wire StartMC = MULDIVOpcode & ~MultiCycle & ~m_Kill;
     wire [5:0] MultiCycleCounter = 
+        m_Kill ? 0 : (
         MultiCycle ? (d_MultiCycleCounter-1)
-                   : ((MULDIVOpcode & ~m_Kill & ~d_LastMultiCycle & ~e_LastMultiCycle) 
-                        ? 33 : 0);
+                   : (MULDIVOpcode ? 33 : 0));
 
     // MULDIV unit
     //wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_MulC;
@@ -665,20 +666,20 @@ module Pipeline #(
     wire [WORD_WIDTH:0] DivDiff = {1'b0, q_DivRem} - {1'b0, q_MulC[WORD_WIDTH-1:0]};
     wire DivNegative = (q_MulC[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff[WORD_WIDTH];
 
-    wire [WORD_WIDTH:0] DivRem = e_StartMC
+    wire [WORD_WIDTH:0] DivRem = UnkilledStartMC
         ? (m_SelDivOrMul ? {1'b0, (e_DivSigned & e_A[31]) ? (-e_A) : e_A}
                          : {e_MulASigned & e_A[WORD_WIDTH-1], e_A})
         : ((DivNegative | ~m_SelDivOrMul) ? q_DivRem 
                                           : {1'b0, DivDiff[WORD_WIDTH-1:0]});
 
-//    wire [WORD_WIDTH:0] MulB = e_StartMC
+//    wire [WORD_WIDTH:0] MulB = UnkilledStartMC
 //        ? {e_MulBSigned & e_B[WORD_WIDTH-1], e_B} 
 //        : {1'b0, q_MulB[WORD_WIDTH:1]};
     wire [WORD_WIDTH:0] MulB = {e_MulBSigned & e_B[WORD_WIDTH-1],
-        e_StartMC ? e_B : q_MulB[WORD_WIDTH:1]};
+        UnkilledStartMC ? e_B : q_MulB[WORD_WIDTH:1]};
     wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot, ~DivNegative};
 
-    wire [2*WORD_WIDTH+1:0] MulC = e_StartMC
+    wire [2*WORD_WIDTH+1:0] MulC = UnkilledStartMC
         ? {3'b0,
            m_SelDivOrMul ? ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B)
                          : {(WORD_WIDTH){1'b0}},
@@ -938,8 +939,6 @@ module Pipeline #(
 
 
         d_MultiCycleCounter <= MultiCycleCounter;
-        d_LastMultiCycle <= LastMultiCycle;
-        e_LastMultiCycle <= d_LastMultiCycle;
         e_StartMC <= StartMC;
 
         e_MulASigned <= MulASigned;
@@ -1103,17 +1102,15 @@ module Pipeline #(
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 
-        if (q_DivDivisor != q_MulC) 
-            $display("UNEQ");
-        $display("E MCCounter=%h %h*%h=%h e_FromMul=%b d_LastMC=%b e_StartMC=%b",
-            d_MultiCycleCounter, q_MulA, q_MulB, q_MulC, e_FromMul, 
-            d_LastMultiCycle, e_StartMC);
+        $display("E MCCounter=%h rem=%h %h mul=%h e_FromMul=%b e_StartMC=%b",
+            d_MultiCycleCounter, q_DivRem, q_MulB, q_MulC, e_FromMul,
+            e_StartMC);
         $display("E vMulResLo=%h e_SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
             vMulResLo, e_SelDivOrMul, m_SelDivOrMul, e_DivSigned);
 
 
-        $display("E %h %h e_FromDivOrRem=%b",
-            q_DivRem, q_DivQuot, e_FromDivOrRem);
+        $display("E div=%h e_FromDivOrRem=%b NotLastMC=%b",
+            q_DivQuot, e_FromDivOrRem, NotLastMultiCycle);
 
 
 

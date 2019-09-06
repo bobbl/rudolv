@@ -2,7 +2,7 @@ include ../../config_default.mk
 
 USE_MYSTDLIB = 1
 OBJS = dhry_1.o dhry_2.o stdlib.o
-CFLAGS = -O3 -march=rv32i -mabi=ilp32 -DTIME -DRISCV
+CFLAGS = -O3 -march=rv32im -mabi=ilp32 -DTIME -DRISCV
 
 ifeq ($(USE_MYSTDLIB),1)
 CFLAGS += -DUSE_MYSTDLIB -ffreestanding -nostdlib
