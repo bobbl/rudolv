@@ -15,8 +15,13 @@ ARACHNE_DEVICE = 8k
 
 include device_$(DEVICE).mk
 
-
-all: arachne timing
+help: 
+	@echo "  make DEVICE=hx8k arachne timing"
+	@echo "        Route with arachne for the hx8k chip and print the clock rate estimate"
+	@echo "  make DEVICE=up5k PACKAGE=uwg30 nextpnr prog"
+	@echo "        Route with nextpnr for the up5k chip (package uwg30) and program it via usb"
+	@echo "  make DEVICE=up5k_miv PACKAGE=uwg30"
+	@echo "        Mi-V compatible memory map for the up5k chip"
 
 %.hex:
 	$(MAKE) -C `dirname $@`
@@ -30,11 +35,17 @@ hx8k.blif: hx8k.v $(VERILOG_FILES) bootloader_hx8k.hex
 up5k.blif: up5k.v $(VERILOG_FILES) ../../sw/bootloader/bootloader.hex
 	$(YOSYS) -ql $(DEVICE).log -p 'synth_ice40 -top top -blif $@' $< $(VERILOG_FILES)
 
+up5k_miv.blif: up5k_miv.v $(VERILOG_FILES) ../../sw/bootloader/bootloader.hex
+	$(YOSYS) -ql $(DEVICE).log -p 'synth_ice40 -top top -blif $@' $< $(VERILOG_FILES)
+
 %.json: %.v $(VERILOG_FILES)
 	$(YOSYS) -ql $(DEVICE).log -p 'synth_ice40 -top top -json $@' $^
 
 %.bin: %.asc
 	$(ICEPACK) $< $@
+
+up5k_miv.rpt: up5k_miv.asc
+	$(ICETIME) -d up5k -mtr $@ $<
 
 %.rpt: %.asc
 	$(ICETIME) -d $(DEVICE) -mtr $@ $<

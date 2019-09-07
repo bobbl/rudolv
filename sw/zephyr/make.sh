@@ -102,12 +102,6 @@ do
             target_ripe 3
             target_ripe 4
             target_ripe 5
-
-#            west_build ripe1
-#            west_build ripe2
-#            west_build ripe3
-#            west_build ripe4
-#            west_build ripe5
             ;;
         test)                   west_build $1 ;;
         hello_world)            west_build $1 ;;

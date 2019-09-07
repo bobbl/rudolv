@@ -8,6 +8,7 @@ module tb_femcb;
         #40 rstn = 1;
     end
 
+    wire retired;
     reg irq_timer;
     reg [63:0] mtime;
     reg [63:0] mtimecmp;

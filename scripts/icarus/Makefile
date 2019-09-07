@@ -11,7 +11,7 @@ FILES_HEX = $(FILES_S:%.S=%.hex)
 help:
 	@echo "  make CODE=foo.hex test          Simulate with extensive logging"
 	@echo "  make CODE=foo.hex test-nodebug  Simulate without logging"
-	@echo "  make CODE=foo.hex femcb         Simulate Future Electronics Microsemi Creative Board"
+	@echo "  make CODE=foo.hex femcb         Simulate Microsemi Mi-V"
 	@echo "  make picorv-dhrystone           Benchmark from picorrv32 repo"
 	@echo "  make riscv-dhrystone            Benchmark from RISC-V repo"
 
@@ -42,12 +42,12 @@ uart:
 	    tb_uart.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
-femcb:
+miv:
 	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
 	    tb_femcb.v memory32.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
-femcb-nodebug:
+miv-nodebug:
 	$(IVERILOG) -o tmp.vvp -DCODE=\"$(CODE)\" \
 	    tb_femcb.v memory32.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp

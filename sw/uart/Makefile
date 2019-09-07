@@ -1,15 +1,14 @@
 include ../../config_default.mk
 
-PROJ=uart
+all: uart.hex uart_miv.hex
 
-SRC_FILES = crt.S $(PROJ).c
-
-all: $(PROJ).hex
-
-$(PROJ).elf: $(SRC_FILES) link.ld
-	$(RV32_PREFIX)gcc -O2 -march=rv32i -I. -nostartfiles -Tlink.ld -o $@ $(SRC_FILES)
-
+uart.elf: crt.S uart.c link.ld
+	$(RV32_PREFIX)gcc -O2 -march=rv32i -I. -nostartfiles -Tlink.ld -o $@ crt.S uart.c
 #CAUTION: with -O0 the code is too slow for 115200 baud at 12 MHz
+
+uart_miv.elf: crt_miv.S uart.c miv.ld
+	$(RV32_PREFIX)gcc -O1 -march=rv32i -I. -nostartfiles -Tmiv.ld -o $@ crt_miv.S uart.c
+
 
 
 %.bin: %.elf

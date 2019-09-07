@@ -1,4 +1,4 @@
-#include "../bootloader/uart.h"
+#include "../bootloader/uart_miv.h"
 
 #define read_pc() ({ unsigned long __tmp; \
   asm volatile ("auipc %0, 0" : "=r"(__tmp)); \
@@ -50,13 +50,14 @@ int main(int argc, char **argv)
     unsigned long wait;
     int ch;
 
-    set_leds(1);
+//    set_leds(1);
     print_str("Starting\r\n");
-    set_leds(ff_leds = 0xaa);
+//    set_leds(ff_leds = 0xaa);
+
     while (1) {
-        set_leds(ff_leds = ff_leds ^ 0xa4);
+//        set_leds(ff_leds = ff_leds ^ 0xa4);
         print_hex32(read_pc());
-        print_str(" Hello2\r\n");
+        print_str(" Hello5\r\n");
 
         wait = read_csr(cycle);
         while (read_csr(cycle) - wait < 115200*read_uart_period()) { // one second
