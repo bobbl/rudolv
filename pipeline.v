@@ -17,13 +17,33 @@ module RegisterSet(
 
     initial begin
         regs[0] <= 0;
-        regs[32] <= 0; // placeholder for unknown CSR
     end
 
     always @(posedge clk) begin
         if (we) regs[wa] <= wd;
         rd1 <= regs[ra1];
         rd2 <= regs[ra2];
+    end
+endmodule
+
+
+// IGLOO2 cannot initialize block RAM at statup
+module RegisterSetMicrosemi(
+    input clk, 
+    input we,
+    input [5:0] wa,
+    input [31:0] wd,
+    input [5:0] ra1,
+    input [5:0] ra2,
+    output reg [31:0] rd1,
+    output reg [31:0] rd2
+);
+    reg [31:0] regs [0:63];
+
+    always @(posedge clk) begin
+        if (we) regs[wa] <= wd;
+        rd1 <= ra1 ? regs[ra1] : 0;
+        rd2 <= ra2 ? regs[ra2] : 0;
     end
 endmodule
 
@@ -70,7 +90,6 @@ module Pipeline #(
 
     // fetch
     reg [WORD_WIDTH-1:0] f_PC;
-    reg f_ChangeInsn;
 
     // decode
     reg [31:0] d_Insn;
@@ -95,7 +114,6 @@ module Pipeline #(
     reg [WORD_WIDTH:0] q_DivRem;
     reg e_FromDivOrRem;
     reg e_SelRemOrDiv;
-    reg e_SelDivOrMul;
     reg e_DivSigned;
     reg e_DivResultSign;
     reg m_SelDivOrMul;
@@ -694,7 +712,7 @@ module Pipeline #(
     wire FromMulH = MULDIVOpcode & ~d_Insn[14] & (d_Insn[13] | d_Insn[12]);
     wire FromDivOrRem = MULDIVOpcode & d_Insn[14];
     wire SelRemOrDiv = d_Insn[13];
-    wire SelDivOrMul = d_Insn[14];
+    wire SelDivOrMul = StartMC ? d_Insn[14] : m_SelDivOrMul;
 
     wire [WORD_WIDTH-1:0] vMulResLo =
         {q_MulC[WORD_WIDTH:1]};
@@ -914,7 +932,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] RdData1;
     wire [WORD_WIDTH-1:0] RdData2;
 
-    RegisterSet RegSet(
+    RegisterSetMicrosemi RegSet(
         .clk(clk),
         .we(MemWrEn),
         .wa(MemWrNo),
@@ -955,9 +973,8 @@ module Pipeline #(
         e_FromMulH <= FromMulH;
         e_FromDivOrRem <= FromDivOrRem;
         e_SelRemOrDiv <= SelRemOrDiv;
-        e_SelDivOrMul <= SelDivOrMul;
 
-        m_SelDivOrMul <= StartMC ? SelDivOrMul : m_SelDivOrMul;
+        m_SelDivOrMul <= SelDivOrMul;
 
 
 
@@ -1105,8 +1122,8 @@ module Pipeline #(
         $display("E MCCounter=%h rem=%h %h mul=%h e_FromMul=%b e_StartMC=%b",
             d_MultiCycleCounter, q_DivRem, q_MulB, q_MulC, e_FromMul,
             e_StartMC);
-        $display("E vMulResLo=%h e_SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
-            vMulResLo, e_SelDivOrMul, m_SelDivOrMul, e_DivSigned);
+        $display("E vMulResLo=%h SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
+            vMulResLo, SelDivOrMul, m_SelDivOrMul, e_DivSigned);
 
 
         $display("E div=%h e_FromDivOrRem=%b NotLastMC=%b",

@@ -4,17 +4,13 @@ PROJ=bootloader
 
 SRC_FILES = crt.S bootloader.c
 
-all: bootloader.hex tiny.hex miv.hex
+all: bootloader.hex tiny.hex miv.hex bl.hex
 
 bootloader.elf: $(SRC_FILES) bootloader.ld
 	$(RV32_PREFIX)gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles -Tbootloader.ld -o $@ $(SRC_FILES)
-
 #CAUTION: with -O0 the code is too slow for 115200 baud at 12 MHz
 
-tiny.elf: tiny.S
-	$(RV32_PREFIX)gcc -nostartfiles -Tbootloader.ld -o $@ $<
-
-miv.elf: miv.S
+%.elf: %.S
 	$(RV32_PREFIX)gcc -nostartfiles -Tbootloader.ld -o $@ $<
 
 %.bin: %.elf
