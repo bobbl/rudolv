@@ -1,0 +1,18 @@
+Microsemi Corporation - Microsemi Libero Software Release v12.1 (Version 12.600.0.14)
+
+Date      :  Mon Sep  9 19:08:39 2019
+Project   :  /home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest
+Component :  OSC_C0
+Family    :  IGLOO2
+
+
+HDL source files for all Synthesis and Simulation tools:
+    /home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest/component/work/OSC_C0/OSC_C0.v
+    /home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest/component/work/OSC_C0/OSC_C0_0/OSC_C0_OSC_C0_0_OSC.v
+
+HDL source files for Synopsys SynplifyPro Synthesis tool:
+    /home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest/component/Actel/SgCore/OSC/2.0.101/osc_comps.v
+
+HDL source files for Mentor Precision Synthesis tool:
+    /home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest/component/Actel/SgCore/OSC/2.0.101/osc_comps_pre.v
+

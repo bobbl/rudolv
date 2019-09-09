@@ -1,0 +1,9 @@
+KEY IDE_DES_TOOL "Ide"
+KEY IDE_DES_ADB_PATH "/home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest/designer/impl1/schematic.adb"
+LIST SOURCE_FILES
+VALUE "/home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest/constraint/io/m2gl025.pdc;pdc"
+ENDLIST
+LIST OPTIONAL_FILES
+ENDLIST
+LIST VCD_FILES
+ENDLIST
