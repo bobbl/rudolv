@@ -325,7 +325,9 @@ module Pipeline #(
 `endif
         if (Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn) begin
             //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-            if (CsrPart)
+            if (CsrPart & ~f_ExcGrubbyJump)
+// better: SysOpcode & CsrPart 
+
                 Insn <= {7'b0000000, 5'b00000,
                          vCsrTranslate,
 //                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
@@ -472,8 +474,8 @@ module Pipeline #(
 
 
     // possible jumps
-    wire InsnJALR       = (BranchOpcode &  d_Insn[2])
-        & (~e_MemAccess | MemMisaligned) & ~m_Kill; 
+    wire InsnJALR       = (BranchOpcode &  d_Insn[2]) & ~m_Kill
+        & (~e_MemAccess | MemMisaligned); 
             // disable JALR, if it is the memory bubble and there is no memory exception
     wire InsnBEQ        =  BranchOpcode & ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
     wire InsnBLTorBLTU  =  BranchOpcode & ~d_Insn[2] &  d_Insn[14];
@@ -499,10 +501,13 @@ module Pipeline #(
     wire CsrRead        = CsrFromExt & ~(DestReg0Part & ~d_Insn[7]);
 
     wire MemWr          = MemAccess & d_Insn[5];
+
     wire [1:0] MemWidth = (MemAccess & ~m_Kill & ~m_ExcMem) ? d_Insn[13:12] : 2'b11;  // = no mem access
         //                                       ~~~~~~~~~ 
         // If a load follows a excepting memory access, it must be disabled
         //  to allow the writing of MTVAL
+        // Maybe it can be removed, because m_Kill is now also checked in the
+        // next stage, wenn MemSignal is computed
 
     wire ShiftArith     = d_Insn[30];
     wire NegB           = ((SUBorSLL & SUBandSLL & ~MULDIVPart) | PartBranch) & LowPart;
@@ -941,9 +946,9 @@ module Pipeline #(
         default: MemSignals = 0;
     endcase
 
-    wire MemMisaligned = MemSignals[12];
-    wire [4:0] MemByte = MemSignals[11:7];
-    wire [2:0] MemSign = e_MemUnsignedLoad ? 0 : MemSignals[6:4];
+    wire MemMisaligned = MemSignals[12] & ~m_Kill;
+    wire [4:0] MemByte = m_Kill ? 0 : MemSignals[11:7];
+    wire [2:0] MemSign = (m_Kill | e_MemUnsignedLoad) ? 0 : MemSignals[6:4];
 
 
 
@@ -1189,8 +1194,8 @@ module Pipeline #(
 //        if (e_Grubby && e_InsnJALR) $display("GRUBBY jalr to %h", AddrSum);
 
 `ifdef DEBUG
-        $display("F write=%b wmask=%b wdata=%h addr=%h rdata=%h grubby=%b",
-            mem_write, mem_wmask, mem_wdata, mem_addr, mem_rdata, mem_rgrubby);
+        $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
+            mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
         $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h",
             d_PC, d_PC, d_Insn, Insn);
         $display("R  0 %h %h %h %h %h %h %h %h", 
@@ -1310,14 +1315,18 @@ module Pipeline #(
 
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
-/*
-        $display("  DecodeWrNo=%b e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
-            DecodeWrNo, e_WrNo, ExecuteWrNo, m_WrNo);
-        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
-            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
-//        $display("  vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
-//            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE);
-*/
+
+//        $display("  DecodeWrNo=%b e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
+//            DecodeWrNo, e_WrNo, ExecuteWrNo, m_WrNo);
+//        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
+//            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
+        $display("X vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b m_Cause=%h",
+            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
+        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h CsrResult=%h",
+            ExcWrData, e_ExcWrData2, m_ExcWrData, CsrResult);
+        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
+            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
+
 
 
 
