@@ -15,8 +15,10 @@ module tb_tests;
     wire mem_write;
     wire [3:0] mem_wmask;
     wire [31:0] mem_wdata;
+    wire mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
+    wire mem_rgrubby = 0;
 
     Memory32 #(
         .WIDTH(13), // 4 * (2**13) = 32 KiByte
@@ -69,8 +71,10 @@ module tb_tests;
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (mem_rdata)
+        .mem_rdata      (mem_rdata),
+        .mem_rgrubby    (mem_rgrubby)
     );
 
 
@@ -118,8 +122,8 @@ module tb_tests;
     end
 
     initial begin
-//        #200000 $write("TIMEOUT"); $stop;
-        #5000000 $write("TIMEOUT"); $stop;
+        #200000 $write("TIMEOUT"); $stop;
+//        #5000000 $write("TIMEOUT"); $stop;
     end
 
 

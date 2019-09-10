@@ -1,4 +1,4 @@
-module tb_miv;
+module tb_grubby;
 
     reg clk = 1;
     always #5 clk = !clk;
@@ -21,7 +21,7 @@ module tb_miv;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_rom;
-    wire [31:0] mem_rdata_ram;
+    wire [35:0] mem_rdata_ram;
 
     reg [31:0] q_MemAddr;
     reg [31:0] MemRData;
@@ -33,9 +33,13 @@ module tb_miv;
         32'h7000_0010: MemRData = 1; // uart ready to send, nothing received
         32'h8000_????: MemRData = mem_rdata_rom;
         32'h8001_????: MemRData = mem_rdata_rom;
-        32'h8004_????: MemRData = mem_rdata_ram;
+        32'h8004_????: MemRData = mem_rdata_ram[31:0];
         default:       MemRData = ~0;
     endcase
+    wire MemRGrubby = (q_MemAddr[31:16]==16'h8004) ? mem_rdata_ram[32] : 0;
+
+    wire MemWGrubby = (mem_wmask != 4'b1111) | mem_wgrubby;
+    wire [35:0] MemWData36 = {3'b0, MemWGrubby, mem_wdata[31:0]};
 
 
     Memory32 #(
@@ -51,14 +55,14 @@ module tb_miv;
         .rdata  (mem_rdata_rom)
     );
 
-    Memory32 #(
+    Memory36 #(
         .WIDTH(14) // 64K
     ) ram (
         .clk    (clk),
         .valid  (mem_valid),
         .write  (mem_write_ram),
         .wmask  (mem_wmask),
-        .wdata  (mem_wdata),
+        .wdata  (MemWData36),
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata_ram)
     );
@@ -104,8 +108,10 @@ module tb_miv;
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (MemRData)
+        .mem_rdata      (MemRData),
+        .mem_rgrubby    (MemRGrubby)
     );
 
 
@@ -125,9 +131,19 @@ module tb_miv;
                         mtimecmp[31:0] <= mem_wdata;
                     end
                 end
+                'h4400_4004: begin // mtimecmp
+                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
+                        mtimecmp[63:32] <= mem_wdata;
+                    end
+                end
                 'h4400_bff8: begin // mtime
                     if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
                         mtime[31:0] <= mem_wdata;
+                    end
+                end
+                'h4400_bffc: begin // mtime
+                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
+                        mtime[63:32] <= mem_wdata;
                     end
                 end
 
@@ -158,8 +174,8 @@ module tb_miv;
     end
 
     initial begin
-        #1_200_001 $display("***** TIMEOUT"); $stop; // enough for ripe 1,2,5
-//        #2_900_001 $display("***** TIMEOUT"); $stop; // enough for ripe 3,4
+//        #1_200_001 $display("***** TIMEOUT"); $stop; // enough for ripe 1,2,5
+        #3_100_001 $display("***** TIMEOUT"); $stop; // enough for ripe 3,4
     end
 
 endmodule
