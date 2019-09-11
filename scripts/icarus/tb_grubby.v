@@ -8,18 +8,19 @@ module tb_grubby;
         #40 rstn = 1;
     end
 
-    wire retired;
-    reg irq_timer;
-    reg [63:0] mtime;
-    reg [63:0] mtimecmp;
+    reg         irq_timer;
+    wire        retired;
+    reg [63:0]  mtime;
+    reg [63:0]  mtimecmp;
 
-    wire mem_valid;
-    wire mem_write;
-    wire mem_write_rom = 0;
-    wire mem_write_ram = mem_write & (mem_addr[31:16]==16'h8004);
-    wire [3:0] mem_wmask;
+    wire        mem_valid;
+    wire        mem_write;
+    wire        mem_write_rom = 0;
+    wire        mem_write_ram = mem_write & (mem_addr[31:16]==16'h8004);
+    wire [3:0]  mem_wmask;
     wire [31:0] mem_wdata;
     wire [31:0] mem_addr;
+    wire        mem_wgrubby;
     wire [31:0] mem_rdata_rom;
     wire [35:0] mem_rdata_ram;
 
@@ -37,7 +38,6 @@ module tb_grubby;
         default:       MemRData = ~0;
     endcase
     wire MemRGrubby = (q_MemAddr[31:16]==16'h8004) ? mem_rdata_ram[32] : 0;
-
     wire MemWGrubby = (mem_wmask != 4'b1111) | mem_wgrubby;
     wire [35:0] MemWData36 = {3'b0, MemWGrubby, mem_wdata[31:0]};
 
@@ -67,30 +67,31 @@ module tb_grubby;
         .rdata  (mem_rdata_ram)
     );
 
-    wire csr_read;
-    wire [2:0] csr_modify;
+    wire        csr_read;
+    wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata;
-    wire csr_valid;
+    wire        csr_valid;
 
     CsrCounter counter (
         .clk    (clk),
         .rstn   (rstn),
-        .retired(retired),
 
         .read   (csr_read),
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (csr_rdata),
-        .valid  (csr_valid)
+        .valid  (csr_valid),
+
+        .retired(retired)
     );
 
     Pipeline #(
+    //    .START_PC(0)
         .START_PC(32'h8000_0000)
-//        .START_PC(0)
-    ) dut (
+    ) pipe (
         .clk            (clk),
         .rstn           (rstn),
 
