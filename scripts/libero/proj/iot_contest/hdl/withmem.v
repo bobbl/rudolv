@@ -22,10 +22,10 @@ module withmem (
 
     localparam integer ADDR_UART = 32'h7000_0000;
 
-    reg         irq_timer;
     wire        retired;
-    reg [63:0]  mtime;
-    reg [63:0]  mtimecmp;
+    reg         irq_timer;
+    reg  [63:0] mtime;
+    reg  [63:0] mtimecmp;
 
     // uart
     reg  [3:0] q_UartRecvBitCounter;
@@ -42,16 +42,15 @@ module withmem (
 
     wire        mem_valid;
     wire        mem_write;
+    wire [31:0] mem_addr;
     wire        mem_write_code  = mem_write & mem_addr[31] & ~mem_addr[18] & ~mem_addr[15];
     wire        mem_write_code2 = mem_write & mem_addr[31] & ~mem_addr[18] & mem_addr[15];
     wire        mem_write_data  = mem_write & mem_addr[31] & mem_addr[18];
-    wire [3:0]  mem_wmask;
+    wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
-    wire [31:0] mem_addr;
-    wire        mem_wgrubby;
     wire [31:0] mem_rdata_code;
     wire [31:0] mem_rdata_code2;
-    wire [35:0] mem_rdata_data;
+    wire [31:0] mem_rdata_data;
     wire [31:0] mem_rdata_bootrom;
 
     reg [31:0] q_MemAddr;
@@ -66,134 +65,9 @@ module withmem (
         ADDR_UART+16:  MemRData = {30'b0, q_UartRecvFull, q_UartSendBitCounter==0};
         32'b1000_0000_0000_0000_0???_????_????_????: MemRData = mem_rdata_code;
         32'b1000_0000_0000_0000_100?_????_????_????: MemRData = mem_rdata_code2;
-        32'b1000_0000_0000_0100_00??_????_????_????: MemRData = mem_rdata_data[31:0];
+        32'b1000_0000_0000_0100_00??_????_????_????: MemRData = mem_rdata_data;
         default:       MemRData = ~0;
     endcase
-    wire MemRGrubby = (q_MemAddr[31:16]==16'h8004) ? mem_rdata_data[32] : 0;
-    wire MemWGrubby = (mem_wmask != 4'b1111) | mem_wgrubby;
-    wire [35:0] MemWData36 = {3'b0, MemWGrubby, mem_wdata[31:0]};
-
-
-    Memory32 #(
-        .WIDTH(13)  // 32 KiByte
-    ) codemem (
-        .clk    (clk),
-        .valid  (mem_valid),
-        .write  (mem_write_code),
-        .wmask  (mem_wmask),
-        .wdata  (mem_wdata),
-        .addr   (mem_addr[14:2]),
-        .rdata  (mem_rdata_code)
-    );
-
-    Memory32 #(
-        .WIDTH(11)  // 8 KiByte
-    ) codemem2 (
-        .clk    (clk),
-        .valid  (mem_valid),
-        .write  (mem_write_code2),
-        .wmask  (mem_wmask),
-        .wdata  (mem_wdata),
-        .addr   (mem_addr[12:2]),
-        .rdata  (mem_rdata_code2)
-    );
-
-    Memory36 #(
-        .WIDTH(12)  // 16 KiByte
-    ) datamem (
-        .clk    (clk),
-        .valid  (mem_valid),
-        .write  (mem_write_data),
-        .wmask  (mem_wmask),
-        .wdata  (MemWData36),
-        .addr   (mem_addr[13:2]),
-        .rdata  (mem_rdata_data)
-    );
-
-    ROM32 #(
-        .WIDTH(5),
-        .CONTENT("miv.hex")
-    ) bootrom (
-        .clk    (clk),
-        .addr   (mem_addr[6:2]),
-        .rdata  (mem_rdata_bootrom)
-    );
-
-
-
-
-    wire        CounterValid;
-    wire [31:0] CounterRData;
-    wire        LedsValid;
-    wire [31:0] LedsRData;
-
-    wire        csr_read;
-    wire [2:0]  csr_modify;
-    wire [31:0] csr_wdata;
-    wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = CounterRData | LedsRData;
-    wire        csr_valid = CounterValid | LedsValid;
-
-    CsrCounter counter (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (CounterRData),
-        .valid  (CounterValid),
-
-        .retired(retired)
-    );
-
-
-    CsrLeds #(
-        .COUNT(4)
-    ) csr_leds (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (LedsRData),
-        .valid  (LedsValid),
-
-        .leds   (leds)
-    );
-
-
-    Pipeline #(
-        .START_PC       (0)
-    ) pipe (
-        .clk            (clk),
-        .rstn           (rstn),
-
-        .irq_timer      (irq_timer),
-        .retired        (retired),
-
-        .csr_read       (csr_read),
-        .csr_modify     (csr_modify),
-        .csr_wdata      (csr_wdata),
-        .csr_addr       (csr_addr),
-        .csr_rdata      (csr_rdata),
-        .csr_valid      (csr_valid),
-
-        .mem_valid      (mem_valid),
-        .mem_write      (mem_write),
-        .mem_wmask      (mem_wmask),
-        .mem_wdata      (mem_wdata),
-        .mem_wgrubby    (mem_wgrubby),
-        .mem_addr       (mem_addr),
-        .mem_rdata      (MemRData),
-        .mem_rgrubby    (MemRGrubby)
-    );
-
-
-
 
     always @(posedge clk) begin
         q_MemAddr <= mem_addr;
@@ -204,19 +78,9 @@ module withmem (
                         mtimecmp[31:0] <= mem_wdata;
                     end
                 end
-                'h4400_4004: begin // mtimecmp
-                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                        mtimecmp[63:32] <= mem_wdata;
-                    end
-                end
                 'h4400_bff8: begin // mtime
                     if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
                         mtime[31:0] <= mem_wdata;
-                    end
-                end
-                'h4400_bffc: begin // mtime
-                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                        mtime[63:32] <= mem_wdata;
                     end
                 end
 
@@ -294,29 +158,120 @@ module withmem (
 
     assign uart_tx = q_UartSendTX;
 
-endmodule
+
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+    wire        LedsValid;
+    wire [31:0] LedsRData;
+
+    wire        csr_read;
+    wire [2:0]  csr_modify;
+    wire [31:0] csr_wdata;
+    wire [11:0] csr_addr;
+    wire [31:0] csr_rdata = CounterRData | LedsRData;
+    wire        csr_valid = CounterValid | LedsValid;
+
+    CsrCounter counter (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (CounterRData),
+        .valid  (CounterValid),
+
+        .retired(retired)
+    );
 
 
+    CsrLeds #(
+        .COUNT(4)
+    ) csr_leds (
+        .clk    (clk),
+        .rstn   (rstn),
 
-module ROM32 #(
-    parameter WIDTH = 13,
-    parameter CONTENT = ""
-) (
-    input clk, 
-    input [WIDTH-1:0] addr,
-    output reg [31:0] rdata
-);
-    localparam integer SIZE = 1 << WIDTH;
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (LedsRData),
+        .valid  (LedsValid),
 
-    reg [31:0] mem [0:SIZE-1];
+        .leds   (leds)
+    );
 
-    initial begin
-        $readmemh(CONTENT, mem);
-    end
 
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-    end
+    Pipeline #(
+        .START_PC       (0)
+    ) pipe (
+        .clk            (clk),
+        .rstn           (rstn),
+
+        .retired        (retired),
+        .irq_timer      (irq_timer),
+
+        .csr_read       (csr_read),
+        .csr_modify     (csr_modify),
+        .csr_wdata      (csr_wdata),
+        .csr_addr       (csr_addr),
+        .csr_rdata      (csr_rdata),
+        .csr_valid      (csr_valid),
+
+        .mem_valid      (mem_valid),
+        .mem_write      (mem_write),
+        .mem_wmask      (mem_wmask),
+        .mem_wdata      (mem_wdata),
+        .mem_addr       (mem_addr),
+        .mem_rdata      (MemRData)
+    );
+
+    Memory32 #(
+        .WIDTH(13)  // 32 KiByte
+    ) codemem (
+        .clk    (clk),
+        .valid  (mem_valid),
+        .write  (mem_write_code),
+        .wmask  (mem_wmask),
+        .wdata  (mem_wdata),
+        .addr   (mem_addr[14:2]),
+        .rdata  (mem_rdata_code)
+    );
+
+    Memory32 #(
+        .WIDTH(11)  // 8 KiByte
+    ) codemem2 (
+        .clk    (clk),
+        .valid  (mem_valid),
+        .write  (mem_write_code2),
+        .wmask  (mem_wmask),
+        .wdata  (mem_wdata),
+        .addr   (mem_addr[12:2]),
+        .rdata  (mem_rdata_code2)
+    );
+
+    Memory32 #(
+        .WIDTH(12)  // 16 KiByte
+    ) datamem (
+        .clk    (clk),
+        .valid  (mem_valid),
+        .write  (mem_write_data),
+        .wmask  (mem_wmask),
+        .wdata  (mem_wdata),
+        .addr   (mem_addr[13:2]),
+        .rdata  (mem_rdata_data)
+    );
+
+    ROM32 #(
+        .WIDTH(5),
+        .CONTENT("miv.hex")
+    ) bootrom (
+        .clk    (clk),
+        .addr   (mem_addr[6:2]),
+        .rdata  (mem_rdata_bootrom)
+    );
+
 endmodule
 
 
@@ -348,29 +303,24 @@ endmodule
 
 
 
-// 36 bit single ported zero latency memory
-module Memory36 #(
-    parameter WIDTH = 13
+module ROM32 #(
+    parameter WIDTH = 13,
+    parameter CONTENT = ""
 ) (
     input clk, 
-    input valid,
-    input write,
-    input [3:0] wmask,
-    input [35:0] wdata,
     input [WIDTH-1:0] addr,
-    output reg [35:0] rdata
+    output reg [31:0] rdata
 );
-    reg [35:0] mem [0:(1<<WIDTH)-1];
+    localparam integer SIZE = 1 << WIDTH;
+
+    reg [31:0] mem [0:SIZE-1];
+
+    initial begin
+        $readmemh(CONTENT, mem);
+    end
 
     always @(posedge clk) begin
-        rdata <= {mem[addr][35], mem[addr][26], mem[addr][17], mem[addr][8],
-                  mem[addr][34:27], mem[addr][25:18], mem[addr][16:9], mem[addr][7:0]};
-        if (valid & write) begin
-            if (wmask[0]) mem[addr][8:0]   <= {wdata[32], wdata[7:0]};
-            if (wmask[1]) mem[addr][17:9]  <= {wdata[33], wdata[15:8]};
-            if (wmask[2]) mem[addr][26:18] <= {wdata[34], wdata[23:16]};
-            if (wmask[3]) mem[addr][35:27] <= {wdata[35], wdata[31:24]};
-        end
+        rdata <= mem[addr];
     end
 endmodule
 
