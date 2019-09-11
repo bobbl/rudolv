@@ -36,12 +36,14 @@ get_image:
         add     s1, s1, 1
         bltu    s1, a1, 1b
 
-        lui     s1, 0x80000
-        add     a1, s1, s0
-2:      lw      a0, 0(s1)
-        sw      a0, 0(s1)
-        add     s1, s1, 4
-        bltu    s1, a1, 2b
+# Not necessary, since code has no grubby bit
+# And would not work since grubby bit is inherited :-)
+#        lui     s1, 0x80000
+#        add     a1, s1, s0
+#2:      lw      a0, 0(s1)
+#        sw      a0, 0(s1)
+#        add     s1, s1, 4
+#        bltu    s1, a1, 2b
 
         lui     ra, 0x80000
         jr      ra

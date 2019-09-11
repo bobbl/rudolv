@@ -48,7 +48,7 @@ module RegisterSetMicrosemi(
 endmodule
 
 
-module RegisterSetGrubby(
+module RegisterSetGrubbyMicrosemi(
     input clk, 
     input we,
     input [5:0] wa,
@@ -70,19 +70,42 @@ module RegisterSetGrubby(
         rd2 <= ra2 ? regs[ra2][31:0] : 0;
         rg2 <= ra1 ? regs[ra2][32] : 0;
     end
-/*
+endmodule
+
+
+module RegisterSetGrubby(
+    input clk, 
+    input we,
+    input [5:0] wa,
+    input [31:0] wd,
+    input wg,
+    input [5:0] ra1,
+    input [5:0] ra2,
+    output reg [31:0] rd1,
+    output reg rg1,
+    output reg [31:0] rd2,
+    output reg rg2
+);
     reg [31:0] regs [0:63];
+    reg grubby[0:63];
+
+    initial begin
+        regs[0] <= 0;
+    end
 
     always @(posedge clk) begin
         if (we) regs[wa] <= wd;
-        rd1 <= ra1 ? regs[ra1] : 0;
-        rd2 <= ra2 ? regs[ra2] : 0;
-        rg1 <= 0;
-        rg2 <= 0;
+        rd1 <= regs[ra1];
+        rd2 <= regs[ra2];
     end
-*/
-endmodule
 
+    always @(posedge clk) begin
+        if (we) grubby[wa] <= wg;
+        rg1 <= grubby[ra1];
+        rg2 <= grubby[ra2];
+    end
+
+endmodule
 
 
 
