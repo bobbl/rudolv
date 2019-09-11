@@ -1,13 +1,6 @@
 /* Connect pipeline with memory that can be infered by 
  * Microsemi IGLOO2 M2GL025 (Future Electronics Creative Board)
-
-Memory map
-0000'0000h 64KiB main memory (SPRAM)
-0002'0000h  1KiB boot loader (BRAM)
-
-CSR
-7c0h       UART
-*/
+ */
 
 module withmem (
     input clk,
@@ -24,13 +17,13 @@ module withmem (
 
     reg         irq_timer;
     wire        retired;
-    reg [63:0]  mtime;
-    reg [63:0]  mtimecmp;
+    reg [31:0]  mtime;
+    reg [31:0]  mtimecmp;
 
     // uart
     reg  [3:0] q_UartRecvBitCounter;
     reg [15:0] q_UartRecvClkCounter;
-    reg  [7:0] q_UartRecvBits;
+    reg  [6:0] q_UartRecvBits;
     reg  [7:0] q_UartRecvChar;
     reg        q_UartRecvFull;
     reg        q_UartRecvRX;
@@ -54,21 +47,38 @@ module withmem (
     wire [35:0] mem_rdata_data;
     wire [31:0] mem_rdata_bootrom;
 
-    reg [31:0] q_MemAddr;
-    reg [31:0] MemRData;
-    always @* casez (q_MemAddr)
-        32'h0000_????: MemRData = mem_rdata_bootrom;
-        32'h4400_4000: MemRData = mtimecmp[31:0];
-        32'h4400_4004: MemRData = mtimecmp[63:32];
-        32'h4400_bff8: MemRData = mtime[31:0];
-        32'h4400_bffc: MemRData = mtime[63:32];
-        ADDR_UART+4:   MemRData = q_UartRecvChar;
-        ADDR_UART+16:  MemRData = {30'b0, q_UartRecvFull, q_UartSendBitCounter==0};
-        32'b1000_0000_0000_0000_0???_????_????_????: MemRData = mem_rdata_code;
-        32'b1000_0000_0000_0000_100?_????_????_????: MemRData = mem_rdata_code2;
-        32'b1000_0000_0000_0100_00??_????_????_????: MemRData = mem_rdata_data[31:0];
-        default:       MemRData = ~0;
-    endcase
+    reg  [31:0] q_MemAddr;
+    reg  [31:0] q_MemWData;
+    reg         q_WriteMTIMECMP;
+    reg         q_WriteUART;
+    reg  [31:0] MemRData;
+
+    always @* begin
+        if (q_MemAddr[31]) begin
+            MemRData = q_MemAddr[18] ? mem_rdata_data[31:0] 
+                : (q_MemAddr[15] ? mem_rdata_code2 : mem_rdata_code);
+        end else begin
+            if (q_MemAddr[30]) begin
+                if (q_MemAddr[29]) begin
+                    MemRData = q_MemAddr[2] ? q_UartRecvChar 
+                        : {30'b0, q_UartRecvFull, q_UartSendBitCounter==0};
+                end else begin
+/*
+                    case (q_MemAddr[3:2])
+                        2'b00: MemRData = mtimecmp[31:0];
+                        2'b01: MemRData = 0;//mtimecmp[63:32];
+                        2'b10: MemRData = mtime[31:0];
+                        2'b11: MemRData = 0;//mtime[63:32];
+                    endcase
+*/
+                    MemRData = (q_MemAddr[3:2]==2'b10) ? mtime[31:0] : 0;
+                end
+            end else begin
+                MemRData = mem_rdata_bootrom;
+            end
+        end
+    end
+
     wire MemRGrubby = (q_MemAddr[31:16]==16'h8004) ? mem_rdata_data[32] : 0;
     wire MemWGrubby = (mem_wmask != 4'b1111) | mem_wgrubby;
     wire [35:0] MemWData36 = {3'b0, MemWGrubby, mem_wdata[31:0]};
@@ -121,50 +131,12 @@ module withmem (
 
 
 
-
-    wire        CounterValid;
-    wire [31:0] CounterRData;
-    wire        LedsValid;
-    wire [31:0] LedsRData;
-
     wire        csr_read;
     wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = CounterRData | LedsRData;
-    wire        csr_valid = CounterValid | LedsValid;
-
-    CsrCounter counter (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (CounterRData),
-        .valid  (CounterValid),
-
-        .retired(retired)
-    );
-
-
-    CsrLeds #(
-        .COUNT(4)
-    ) csr_leds (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (LedsRData),
-        .valid  (LedsValid),
-
-        .leds   (leds)
-    );
-
+    wire [31:0] csr_rdata = 0;
+    wire        csr_valid = 0;
 
     Pipeline #(
         .START_PC       (0)
@@ -194,48 +166,70 @@ module withmem (
 
 
 
+    wire WriteLSBinQ1 = mem_valid & mem_write & mem_wmask[0] & 
+                        ~mem_addr[31] & mem_addr[30] &
+                        ~mem_addr[3] & ~mem_addr[2];
+        // common address bits of mtimecmp and UART send char
 
     always @(posedge clk) begin
         q_MemAddr <= mem_addr;
-        if (mem_valid & mem_write) begin
-            case (mem_addr)
-                'h4400_4000: begin // mtimecmp
-                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                        mtimecmp[31:0] <= mem_wdata;
-                    end
-                end
-                'h4400_4004: begin // mtimecmp
-                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                        mtimecmp[63:32] <= mem_wdata;
-                    end
-                end
-                'h4400_bff8: begin // mtime
-                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                        mtime[31:0] <= mem_wdata;
-                    end
-                end
-                'h4400_bffc: begin // mtime
-                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                        mtime[63:32] <= mem_wdata;
-                    end
-                end
+        q_MemWData <= mem_wdata;
 
-                ADDR_UART: begin // UART send char
-                    if (mem_wmask[0]) begin
-                        q_UartSendTX <= 0;
-                        q_UartSendClkCounter <= CLOCK_RATE / BAUD_RATE;
-                        q_UartSendBitCounter <= 10;
-                        q_UartSendBits <= mem_wdata[7:0];
-                    end
-                end
+/*
+        q_WriteTimer <= 0;
+        q_WriteUART <= 0;
+        if (mem_valid & mem_write) begin
+            if (mem_addr[31:29]==3'b010) begin
+                // 4000'0000h - 5fff'ffff
+                q_WriteTimer <= (mem_wmask[0] & mem_wmask[1] &
+                                 mem_wmask[2] & mem_wmask[3]);
+            end
+            if (mem_addr[31:29]==3'b011 && mem_addr[4:2]==0) begin
+                // 6000'0000h - 7fff'ffff
+                q_WriteUART <= mem_wmask[0];
+            end
+        end
+        if (q_WriteTimer) begin
+            case (q_MemAddr[3:2])
+                2'b00: //'h4400_4000 mtimecmp
+                        mtimecmp[31:0] <= q_MemWData;
+//                2'b01: //'h4400_4004 mtimecmph
+//                        mtimecmp[63:32] <= q_MemWData;
+//                2'b10: //'h4400_bff8 mtime
+//                        mtime[31:0] <= q_MemWData;
+//                2'b11: //'h4400_bffc mtimeh
+//                        mtime[63:32] <= q_MemWData;
             endcase
         end
+*/
+        // 4400'0000h
+        q_WriteMTIMECMP <= WriteLSBinQ1 & ~mem_addr[29] & 
+            mem_wmask[1] & mem_wmask[2] & mem_wmask[3];
+
+        // 7000'0000h
+        q_WriteUART <= WriteLSBinQ1 & mem_addr[29];
+
+        if (q_WriteMTIMECMP) begin
+            //'h4400_4000 mtimecmp
+            mtimecmp[31:0] <= q_MemWData;
+        end
+
+        if (q_WriteUART) begin
+            //'h7000_0000 uart send
+            q_UartSendTX <= 0;
+            q_UartSendClkCounter <= CLOCK_RATE / BAUD_RATE;
+            q_UartSendBitCounter <= 10;
+            q_UartSendBits <= q_MemWData[7:0];
+        end
+
+
 
         irq_timer <= (mtime >= mtimecmp);
         mtime <= mtime + 1;
 
-
-        if (mem_valid & ~mem_write & (mem_addr==ADDR_UART+4)) begin
+        // check only the important bits of address 7000'0004
+        if (mem_valid & ~mem_write & (mem_addr[31:29]==3'b011) &
+                                     (mem_addr[4:2]==3'b001)) begin
             q_UartRecvFull <= 0; // clear flag if char is read
         end
 
@@ -245,29 +239,16 @@ module withmem (
                 q_UartRecvClkCounter <= q_UartRecvClkCounter - 1;
             end else begin
                 q_UartRecvClkCounter <= CLOCK_DIV;
-                q_UartRecvBits <= {q_UartRecvRX, q_UartRecvBits[7:1]};
-/*
-                if (q_UartRecvBitCounter==1) begin
-                    q_UartRecvFull <= 1;
-                    q_UartRecvChar <= q_UartRecvBits;
-                end
-*/
+                q_UartRecvBits <= {q_UartRecvRX, q_UartRecvBits[6:1]};
                 if (q_UartRecvBitCounter==2) begin
                     q_UartRecvFull <= 1;
-                    q_UartRecvChar <= {q_UartRecvRX, q_UartRecvBits[7:1]};
+                    q_UartRecvChar <= {q_UartRecvRX, q_UartRecvBits};
                 end
                 q_UartRecvBitCounter <= q_UartRecvBitCounter - 1;
             end
         end else if (~q_UartRecvRX) begin
             q_UartRecvClkCounter <= CLOCK_DIV / 2;
             q_UartRecvBitCounter <= 10;
-/*
-            q_UartRecvBits <= 0;
-        end else begin
-            q_UartRecvClkCounter <= 0;
-            q_UartRecvBitCounter <= 0;
-            q_UartRecvBits <= 0;
-*/
         end
 
         if (q_UartSendBitCounter) begin
@@ -282,6 +263,9 @@ module withmem (
         end
 
         if (!rstn) begin
+            q_WriteMTIMECMP <= 0;
+            q_WriteUART <= 0;
+
             mtime <= 0;
             mtimecmp <= ~0;
 
@@ -293,6 +277,7 @@ module withmem (
     end
 
     assign uart_tx = q_UartSendTX;
+    assign leds = 4'b0010;
 
 endmodule
 
@@ -376,47 +361,4 @@ endmodule
 
 
 
-module CsrLeds #(
-    parameter [11:0]  BASE_ADDR  = 12'h7c1, // CSR address
-    parameter integer COUNT = 4
-) (
-    input clk,
-    input rstn,
 
-    input read,
-    input [2:0] modify,
-    input [31:0] wdata,
-    input [11:0] addr,
-    output [31:0] rdata,
-    output valid,
-
-    output [COUNT-1:0] leds,
-
-    output AVOID_WARNING
-);
-    assign AVOID_WARNING = read | |wdata;
-
-    reg [COUNT-1:0] q_Leds;
-    reg Valid;
-    reg [31:0] RData;
-
-    always @(posedge clk) begin
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= q_Leds;
-            case (modify)
-                3'b01: q_Leds <= wdata[COUNT-1:0]; // write 0
-                3'b10: q_Leds <= q_Leds | wdata[COUNT-1:0]; // set
-                3'b11: q_Leds <= q_Leds &~ wdata[COUNT-1:0]; // clear
-                default: ;
-            endcase
-        end
-        if (~rstn) q_Leds <= 1;
-    end
-
-    assign valid = Valid;
-    assign rdata = RData;
-    assign leds = q_Leds;
-endmodule
