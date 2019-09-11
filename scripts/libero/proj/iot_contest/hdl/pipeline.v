@@ -48,6 +48,43 @@ module RegisterSetMicrosemi(
 endmodule
 
 
+module RegisterSetGrubby(
+    input clk, 
+    input we,
+    input [5:0] wa,
+    input [31:0] wd,
+    input wg,
+    input [5:0] ra1,
+    input [5:0] ra2,
+    output reg [31:0] rd1,
+    output reg rg1,
+    output reg [31:0] rd2,
+    output reg rg2
+);
+    reg [35:0] regs [0:63];
+
+    always @(posedge clk) begin
+        if (we) regs[wa] <= {3'b0, wg, wd};
+        rd1 <= ra1 ? regs[ra1][31:0] : 0;
+        rg1 <= ra1 ? regs[ra1][32] : 0;
+        rd2 <= ra2 ? regs[ra2][31:0] : 0;
+        rg2 <= ra1 ? regs[ra2][32] : 0;
+    end
+/*
+    reg [31:0] regs [0:63];
+
+    always @(posedge clk) begin
+        if (we) regs[wa] <= wd;
+        rd1 <= ra1 ? regs[ra1] : 0;
+        rd2 <= ra2 ? regs[ra2] : 0;
+        rg1 <= 0;
+        rg2 <= 0;
+    end
+*/
+endmodule
+
+
+
 
 
 module Pipeline #(
@@ -70,8 +107,10 @@ module Pipeline #(
     output mem_write,
     output [3:0] mem_wmask,
     output [31:0] mem_wdata,
+    output mem_wgrubby,
     output [31:0] mem_addr,
-    input [31:0] mem_rdata
+    input [31:0] mem_rdata,
+    input mem_rgrubby
 );
     localparam integer WORD_WIDTH = 32;
 
@@ -142,6 +181,8 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] e_B;
     reg [WORD_WIDTH-1:0] e_Imm;
     reg [WORD_WIDTH-1:0] e_PCImm;
+    reg e_AGrubby;
+    reg e_BGrubby;
 
     reg e_Carry;
     reg e_WrEn;
@@ -165,6 +206,7 @@ module Pipeline #(
     reg w_WrEn;
     reg [5:0] w_WrNo;
     reg [WORD_WIDTH-1:0] w_WrData;
+    reg w_WrGrubby;
 
 
 `ifdef ENABLE_EXCEPTIONS
@@ -173,8 +215,13 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_ExcWrData;
     reg e_ExcUser;
     reg m_ExcUser;
+    reg e_ExcGrubbyInsn;
+    reg m_ExcGrubbyInsn;
     reg d_ExcJump;
     reg e_ExcJump;
+    reg f_ExcGrubbyJump;
+    reg d_ExcGrubbyJump;
+    reg e_ExcGrubbyJump;
     reg m_ExcMem;
     reg w_ExcMem;
 //    reg e_EBREAKorECALL;
@@ -229,6 +276,9 @@ module Pipeline #(
     reg [11:0] e_CsrAddr;
 `endif
 
+    reg DecodeGrubbyInsn;
+    reg d_GrubbyInsn;
+
 
 
 // ---------------------------------------------------------------------
@@ -249,6 +299,7 @@ module Pipeline #(
 
     reg [31:0] Insn;
     always @* begin
+        DecodeGrubbyInsn <= 0;
 `ifdef ENABLE_TIMER
         TimerInt <= 0;
         MModeIntEnable <= f_MModeIntEnable;
@@ -270,14 +321,17 @@ module Pipeline #(
             endcase
         end
 `endif
-        if (Bubble | ExcJump) begin
+        if (Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn) begin
             //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-            if (CsrPart)
+            if (CsrPart & ~f_ExcGrubbyJump)
+// better: SysOpcode & CsrPart 
+
                 Insn <= {7'b0000000, 5'b00000,
                          vCsrTranslate,
 //                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
                          3'b110, vCsrTranslate, 7'b0110011}; // OR
-            else if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET) begin // WFI
+            else if (~ExcUser & ~ExcGrubbyInsn & ~ExcJump & ~f_ExcGrubbyJump 
+                & ~MemAccess & ~InsnMRET) begin // WFI
 //                Insn <= {7'b0000000, 5'b00000, 5'b00000,
 //                         3'b110, 5'b00000, 7'b0110011}; // OR X0, X0, X0
 
@@ -320,10 +374,13 @@ module Pipeline #(
 `endif
         else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
             Insn <= d_DelayedInsn;
-        else
+        else begin
+            DecodeGrubbyInsn <= mem_rgrubby;
             Insn <= mem_rdata;
+        end
     end
-    wire RdNo1Aux = Bubble | ExcJump | (irq_timer & f_MModeIntEnable);
+    wire RdNo1Aux = Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn
+                           | (irq_timer & f_MModeIntEnable);
 
 
 
@@ -415,7 +472,7 @@ module Pipeline #(
 
 
     // possible jumps
-    wire InsnJALR       = (BranchOpcode &  d_Insn[2])
+    wire InsnJALR       = (BranchOpcode &  d_Insn[2]) & ~m_Kill
         & (~e_MemAccess | MemMisaligned); 
             // disable JALR, if it is the memory bubble and there is no memory exception
     wire InsnBEQ        =  BranchOpcode & ~d_Insn[2] & ~d_Insn[14] & ~d_Insn[13];
@@ -442,10 +499,13 @@ module Pipeline #(
     wire CsrRead        = CsrFromExt & ~(DestReg0Part & ~d_Insn[7]);
 
     wire MemWr          = MemAccess & d_Insn[5];
+
     wire [1:0] MemWidth = (MemAccess & ~m_Kill & ~m_ExcMem) ? d_Insn[13:12] : 2'b11;  // = no mem access
         //                                       ~~~~~~~~~ 
         // If a load follows a excepting memory access, it must be disabled
         //  to allow the writing of MTVAL
+        // Maybe it can be removed, because m_Kill is now also checked in the
+        // next stage, wenn MemSignal is computed
 
     wire ShiftArith     = d_Insn[30];
     wire NegB           = ((SUBorSLL & SUBandSLL & ~MULDIVPart) | PartBranch) & LowPart;
@@ -554,6 +614,17 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}};
 
 
+    wire ALUResultGrubby = 0;
+    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : RdGrubby1;
+    wire ForwardAMGrubby =  FwdAM ? MemResultGrubby : ForwardAWGrubby;
+    wire ForwardAEGrubby = (FwdAE ? ALUResultGrubby : ForwardAMGrubby)
+        & ~d_RdNo1[5];
+    wire ForwardBRGrubby = ~SelImm & (FwdBW ? w_WrGrubby : RdGrubby2);
+    wire ForwardBMGrubby =  FwdBM ? MemResultGrubby : ForwardBRGrubby;
+    wire ForwardBEGrubby = (FwdBE ? ALUResultGrubby : ForwardBMGrubby)
+        & ~d_RdNo2[5]; 
+        // No grubby flag for CSR regsiters, because this would complicate
+        // exception handling (for all exceptions, not just the grubby ones)
 
 
 
@@ -736,13 +807,14 @@ module Pipeline #(
 
 `ifdef ENABLE_EXCEPTIONS
     wire ExcUser        = ((SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21])
-                            & ~m_Kill);
-// REVERT m_Kill?
-
+                            & ~m_Kill); // REVERT m_Kill?
+    wire ExcGrubbyInsn  = d_GrubbyInsn;
+    wire ExcGrubbyJump  = e_InsnJALR & e_AGrubby & ~m_Kill;
     wire ExcJump        = m_Kill & f_PC[1];
-    wire vWriteMEPC     = ExcJump | m_ExcUser | m_ExcMem;
-    wire WriteMCAUSE    = ExcJump | m_ExcUser            | w_ExcMem;
-    wire WriteMTVAL     = d_ExcJump           | m_ExcMem;
+
+    wire vWriteMEPC     = ExcJump | f_ExcGrubbyJump | m_ExcUser | m_ExcGrubbyInsn | m_ExcMem;
+    wire WriteMCAUSE    = ExcJump | f_ExcGrubbyJump | m_ExcUser | m_ExcGrubbyInsn | w_ExcMem;
+    wire WriteMTVAL     = d_ExcJump | d_ExcGrubbyJump | m_ExcMem;
 
     wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
     wire MemWrEn        = m_WrEn | vExcOverwrite;
@@ -755,20 +827,12 @@ module Pipeline #(
         m_WrNo));
 
 
-/*
-    //wire [3:0] Cause = m_ExcMem  ? (m_MemWr         ? 6 : 4) :
-    //                  (e_ExcUser ? (e_EBREAKorECALL ? 3 : 11) : 0);
-    wire [3:0] Cause = {
-        e_ExcUser & ~e_EBREAKorECALL,
-        m_ExcMem,
-        (m_ExcMem & m_MemWr) | e_ExcUser,
-        e_ExcUser};
-*/
-//    wire [4:0] Cause = m_ExcMem  ? (m_MemWr ? 6 : 4) :
-//                      (e_ExcUser ? e_Cause1 : 0); // -> m_Cause
-//    wire [4:0] Cause1 = d_TimerInt ? 5'b10111: (d_Insn[20] ? 3 : 11); // -> e_Cause1
-    wire [4:0] Cause = m_ExcMem  ? (m_MemWr ? 6 : 4) :
-                      (e_TimerInt ? 5'b10111 : (e_ExcUser ? e_Cause1 : 0)); // -> m_Cause
+    wire [4:0] Cause = m_ExcMem        ? (m_MemWr ? 6 : 4) :
+                      (e_TimerInt      ? 5'b10111 :
+                      (e_ExcUser       ? e_Cause1 :
+                      (e_ExcGrubbyInsn ? 14 : 
+                      (ExcGrubbyJump ? 10 : 
+                      /* e_ExcJump */    0)))); // -> m_Cause
     wire [4:0] Cause1 = d_Insn[20] ? 3 : 11; // -> e_Cause1
 
 
@@ -780,8 +844,8 @@ module Pipeline #(
                         : e_ExcWrData2;
 
     wire [WORD_WIDTH-1:0] CsrResult =
-        vExcOverwrite   ? (e_ExcJump ? e_ExcWrData2 // MTVAL for jump
-                                     : m_ExcWrData)
+        vExcOverwrite   ? ((e_ExcJump | e_ExcGrubbyJump) ? e_ExcWrData2 // MTVAL for jump
+                                                         : m_ExcWrData)
                         : vCsrOrALU;
 
     // CSRs
@@ -880,9 +944,9 @@ module Pipeline #(
         default: MemSignals = 0;
     endcase
 
-    wire MemMisaligned = MemSignals[12];
-    wire [4:0] MemByte = MemSignals[11:7];
-    wire [2:0] MemSign = e_MemUnsignedLoad ? 0 : MemSignals[6:4];
+    wire MemMisaligned = MemSignals[12] & ~m_Kill;
+    wire [4:0] MemByte = m_Kill ? 0 : MemSignals[11:7];
+    wire [2:0] MemSign = (m_Kill | e_MemUnsignedLoad) ? 0 : MemSignals[6:4];
 
 
 
@@ -900,17 +964,21 @@ module Pipeline #(
     wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)      | CsrResult[7:0];
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
+    wire MemResultGrubby = m_MemByte[4] & mem_rgrubby;
+        // grubby if 32 bit load of grubby word
 
     wire [WORD_WIDTH-1:0] MemWriteData = {
          e_MemWidth[1] ? e_B[31:24] : (e_MemWidth[0]  ? e_B[15:8] : e_B[7:0]),
          e_MemWidth[1] ? e_B[23:16]                               : e_B[7:0],
         (e_MemWidth[1] |               e_MemWidth[0]) ? e_B[15:8] : e_B[7:0],
                                                                     e_B[7:0]};
+    wire MemWriteDataGrubby = e_AGrubby | e_BGrubby;
 
     assign mem_valid = 1;
     assign mem_write = e_MemWr & ~DualKill;
     assign mem_wmask = MemSignals[3:0];
     assign mem_wdata = MemWriteData;
+    assign mem_wgrubby = MemWriteDataGrubby;
     assign mem_addr  = MemAddr;
 
 
@@ -931,8 +999,24 @@ module Pipeline #(
     wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
     wire [WORD_WIDTH-1:0] RdData1;
     wire [WORD_WIDTH-1:0] RdData2;
+    wire RdGrubby1;
+    wire RdGrubby2;
 
-    RegisterSetMicrosemi RegSet(
+    RegisterSetGrubby RegSet(
+        .clk(clk),
+        .we(MemWrEn),
+        .wa(MemWrNo),
+        .wd(MemResult),
+        .wg(MemResultGrubby),
+        .ra1(RdNo1),
+        .ra2(RdNo2),
+        .rd1(RdData1),
+        .rg1(RdGrubby1),
+        .rd2(RdData2),
+        .rg2(RdGrubby2)
+    );
+/*
+    RegisterSet RegSet(
         .clk(clk),
         .we(MemWrEn),
         .wa(MemWrNo),
@@ -942,7 +1026,7 @@ module Pipeline #(
         .rd1(RdData1),
         .rd2(RdData2)
     );
-
+*/
     always @(posedge clk) begin
 
         // fetch
@@ -982,6 +1066,8 @@ module Pipeline #(
         d_PC <= DecodePC;
         e_A <= ForwardAE;
         e_B <= ForwardBE;
+        e_AGrubby <= ForwardAEGrubby;
+        e_BGrubby <= ForwardBEGrubby;
         e_Imm <= ImmISU;
         e_PCImm <= PCImm;
 
@@ -1026,6 +1112,7 @@ module Pipeline #(
         w_WrEn <= MemWrEn;
         w_WrNo <= MemWrNo;
         w_WrData <= MemResult;
+        w_WrGrubby <= MemResultGrubby;
 
 
 
@@ -1035,8 +1122,13 @@ module Pipeline #(
         m_ExcWrData         <= ExcWrData; 
         e_ExcUser           <= ExcUser;
         m_ExcUser           <= (e_ExcUser & ~m_Kill) | e_TimerInt;
+        e_ExcGrubbyInsn     <= ExcGrubbyInsn;
+        m_ExcGrubbyInsn     <= (e_ExcGrubbyInsn & ~m_Kill);
         d_ExcJump           <= ExcJump;
         e_ExcJump           <= d_ExcJump;
+        f_ExcGrubbyJump     <= ExcGrubbyJump;
+        d_ExcGrubbyJump     <= f_ExcGrubbyJump;
+        e_ExcGrubbyJump     <= d_ExcGrubbyJump;
         m_ExcMem            <= MemMisaligned & ~m_Kill;
         w_ExcMem            <= m_ExcMem & ~m_Kill;
 //        e_EBREAKorECALL     <= d_Insn[20];
@@ -1091,10 +1183,11 @@ module Pipeline #(
 
 
 
+        d_GrubbyInsn <= DecodeGrubbyInsn;
 
 `ifdef DEBUG
-        $display("F write=%b wmask=%b wdata=%h addr=%h rdata=%h",
-            mem_write, mem_wmask, mem_wdata, mem_addr, mem_rdata);
+        $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
+            mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
         $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h",
             d_PC, d_PC, d_Insn, Insn);
         $display("R  0 %h %h %h %h %h %h %h %h", 
@@ -1109,6 +1202,11 @@ module Pipeline #(
         $display("R 24 %h %h %h %h %h %h %h %h", 
             RegSet.regs[24], RegSet.regs[25], RegSet.regs[26], RegSet.regs[27], 
             RegSet.regs[28], RegSet.regs[29], RegSet.regs[30], RegSet.regs[31]);
+        $display("R grubby %b%b%b%b %b%b%b%b %b%b%b%b %b%b%b%b",
+            RegSet.regs[0][32], RegSet.regs[1][32], RegSet.regs[2][32], RegSet.regs[3][32], 
+            RegSet.regs[4][32], RegSet.regs[5][32], RegSet.regs[6][32], RegSet.regs[7][32], 
+            RegSet.regs[8][32], RegSet.regs[9][32], RegSet.regs[10][32], RegSet.regs[11][32], 
+            RegSet.regs[12][32], RegSet.regs[13][32], RegSet.regs[14][32], RegSet.regs[15][32]);
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, RdData1, d_RdNo2, RdData2);
@@ -1116,6 +1214,7 @@ module Pipeline #(
             d_Bubble, d_SaveFetch, f_PC);
         $display("E a=%h b=%h i=%h -> %h -> x%d wren=%b",
             e_A, e_B, e_Imm, ALUResult, e_WrNo, e_WrEn);
+/*
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 
@@ -1124,17 +1223,21 @@ module Pipeline #(
             e_StartMC);
         $display("E vMulResLo=%h SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
             vMulResLo, SelDivOrMul, m_SelDivOrMul, e_DivSigned);
-
-
         $display("E div=%h e_FromDivOrRem=%b NotLastMC=%b",
             q_DivQuot, e_FromDivOrRem, NotLastMultiCycle);
+*/
 
 
-
-        $display("X ExcUserDEM %b%b%b ExcJumpFDE %b%b%b ExcMemEMW %b%b%b vWriteMEPC=%b",
+        $display("X Exc UserDEM %b%b%b GInsnDEM %b%b%b GJumpFDE %b%b%b JumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcUser,
             e_ExcUser,
             m_ExcUser,
+            ExcGrubbyInsn,
+            e_ExcGrubbyInsn,
+            m_ExcGrubbyInsn,
+            f_ExcGrubbyJump,
+            d_ExcGrubbyJump,
+            e_ExcGrubbyJump,
             ExcJump,
             d_ExcJump,
             e_ExcJump,
@@ -1147,12 +1250,27 @@ module Pipeline #(
 
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchPC);
 
+/*
         $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
             vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
         $display("  e_InsnBLTorBLTU=%b vLess=%b e_InsnJALorFENCEI=%b",
             e_InsnBLTorBLTU, vLess, e_InsnJALorFENCEI);
         $display("  e_InsnBEQ=%b e_InvertBranch=%b vEqual=%b",
             e_InsnBEQ, e_InvertBranch, vEqual);
+*/
+
+        $display("G MemResultGrubby=%b e_AGrubby=%b",
+            MemResultGrubby, e_AGrubby);
+        $display("G FwdAEGrubby=%b d_RdNo1[5]=%b w_WrGrubby=%b RdGrubby1=%b",
+            ForwardAEGrubby, d_RdNo1[5], w_WrGrubby, RdGrubby1);
+
+/*
+    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : RdGrubby1;
+    wire ForwardAMGrubby =  FwdAM ? MemResultGrubby : ForwardAWGrubby;
+    wire ForwardAEGrubby = (FwdAE ? ALUResultGrubby : ForwardAMGrubby)
+        & ~d_RdNo1[5];
+*/
+
 
         $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
             FwdAE, FwdAM, FwdAW, ForwardAR, ForwardAM, ForwardAE);
@@ -1160,17 +1278,20 @@ module Pipeline #(
             FwdBE, FwdBM, FwdBW, ForwardBR, ForwardBM, ForwardBE, SelImm);
 
 
+/*
         $display("C MTVEC=%h MSCRATCH=%h MEPC=%h MCAUSE=%h MTVAL=%h",
             RegSet.regs[REG_CSR_MTVEC],
             RegSet.regs[REG_CSR_MSCRATCH],
             RegSet.regs[REG_CSR_MEPC],
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
+*/
 
 //        $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h",
 //            AddrSum, NextOrSum, NoBranch);
 
 
+/*
         $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b",
             vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp);
         $display("C vCsrOrALU=%h CsrResult=%h",
@@ -1182,40 +1303,30 @@ module Pipeline #(
             m_CsrRead, m_CsrValid, m_CsrRdData);
         $display("C CSR addr=%h rdata=%h valid=%b",
             csr_addr, csr_rdata, csr_valid);
-
+*/
 
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
-        $display("  DecodeWrNo=%b e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
-            DecodeWrNo, e_WrNo, ExecuteWrNo, m_WrNo);
-        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
-            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
-//        $display("  vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
-//            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE);
+
+//        $display("  DecodeWrNo=%b e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
+//            DecodeWrNo, e_WrNo, ExecuteWrNo, m_WrNo);
+//        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
+//            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
+        $display("X vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b m_Cause=%h",
+            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
+        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h CsrResult=%h",
+            ExcWrData, e_ExcWrData2, m_ExcWrData, CsrResult);
+        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
+            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
 
 
 
-
-        $display("  m_WrEn=%b ExcJump=%b m_ExcUser=%b m_ExcMem=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b",
-            m_WrEn, ExcJump, m_ExcUser, m_ExcMem, m_WriteMTVAL, m_WriteMCAUSE);
-/*
-    wire ExcUser        = (SysOpcode & PrivOpcode & ~d_Insn[22] & ~d_Insn[21])
-                            | d_TimerInt;
-    wire ExcJump        = m_Kill & f_PC[1];
-    wire vWriteMEPC     = ExcJump | m_ExcUser | m_ExcMem;
-    wire WriteMCAUSE    = ExcJump | m_ExcUser            | w_ExcMem;
-    wire WriteMTVAL     = d_ExcJump           | m_ExcMem;
-
-    wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
-    wire MemWrEn        = m_WrEn | vExcOverwrite;
-*/
 
 
 
         $display("I MIE=%b MPIE=%b d_TimerInt=%b irq_timer=%b e_InsnJALR=%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             d_TimerInt, irq_timer, e_InsnJALR);
-
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1277,7 +1388,6 @@ module CsrCounter #(
 )(
     input clk,
     input rstn,
-    input retired,
 
     input read,
     input [2:0] modify,
@@ -1285,6 +1395,8 @@ module CsrCounter #(
     input [11:0] addr,
     output [31:0] rdata,
     output valid,
+
+    input retired,
 
     output AVOID_WARNING
 );

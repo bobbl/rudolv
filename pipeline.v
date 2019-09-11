@@ -276,8 +276,6 @@ module Pipeline #(
     reg [11:0] e_CsrAddr;
 `endif
 
-    reg [31:0] q_mem_addr;
-    reg [31:0] qq_mem_addr;
     reg DecodeGrubbyInsn;
     reg d_GrubbyInsn;
 
@@ -1185,13 +1183,7 @@ module Pipeline #(
 
 
 
-        q_mem_addr <= mem_addr;
-        qq_mem_addr <= q_mem_addr;
         d_GrubbyInsn <= DecodeGrubbyInsn;
-//        e_Grubby <= d_Grubby;
-
-//        if (d_Grubby) $display("GRUBBY fetch at %h", d_PC);
-//        if (e_Grubby && e_InsnJALR) $display("GRUBBY jalr to %h", AddrSum);
 
 `ifdef DEBUG
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
@@ -1396,7 +1388,6 @@ module CsrCounter #(
 )(
     input clk,
     input rstn,
-    input retired,
 
     input read,
     input [2:0] modify,
@@ -1404,6 +1395,8 @@ module CsrCounter #(
     input [11:0] addr,
     output [31:0] rdata,
     output valid,
+
+    input retired,
 
     output AVOID_WARNING
 );
