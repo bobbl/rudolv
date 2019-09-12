@@ -9,7 +9,7 @@ module withmem (
     output uart_tx,
     output [3:0] leds
 );
-    localparam integer CLOCK_RATE = 12_000_000;
+    localparam integer CLOCK_RATE = 99_000_000;
     localparam integer BAUD_RATE = 115200;
     localparam integer CLOCK_DIV = CLOCK_RATE / BAUD_RATE;
 

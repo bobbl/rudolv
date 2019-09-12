@@ -16,8 +16,8 @@ output GL0;
     VCC vcc_inst (.Y(vcc_net));
     GND gnd_inst (.Y(gnd_net));
     CLKINT GL0_INST (.A(GL0_net), .Y(GL0));
-    CCC #( .INIT(210'h0000007F90000045574000718C6318C2318C1DEC0404040800B18)
-        , .VCOFREQUENCY(768.000) )  CCC_INST (.Y0(), .Y1(), .Y2(), .Y3(
+    CCC #( .INIT(210'h0000007F88000044D74000318C6318C1F18C61EC0404040406231)
+        , .VCOFREQUENCY(792.000) )  CCC_INST (.Y0(), .Y1(), .Y2(), .Y3(
         ), .PRDATA({nc0, nc1, nc2, nc3, nc4, nc5, nc6, nc7}), .LOCK(
         LOCK), .BUSY(), .CLK0(vcc_net), .CLK1(vcc_net), .CLK2(vcc_net), 
         .CLK3(vcc_net), .NGMUX0_SEL(gnd_net), .NGMUX1_SEL(gnd_net), 

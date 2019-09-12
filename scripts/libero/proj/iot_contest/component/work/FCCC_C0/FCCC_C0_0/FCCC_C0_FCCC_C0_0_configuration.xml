@@ -8,7 +8,7 @@
 </header>
 <row>
  <cell>Date:</cell>
- <cell>Mon Sep  9 19:08:08 2019</cell>
+ <cell>Fri Sep 13 01:35:43 2019</cell>
 </row>
 <separator/>
 <row>
@@ -49,10 +49,10 @@
  <cell>GL0</cell>
  <cell>primary clock</cell>
  <cell>PLL (0)</cell>
- <cell>24 MHz</cell>
- <cell>12 MHz</cell>
- <cell>12 MHz</cell>
- <cell>2 (GPD0)</cell>
+ <cell>99 MHz</cell>
+ <cell>99 MHz</cell>
+ <cell>99 MHz</cell>
+ <cell>--</cell>
 </row>
 <separator/>
 </table>
@@ -72,11 +72,11 @@
 </row>
 <row>
  <cell>Output frequency</cell>
- <cell>24 MHz</cell>
+ <cell>99 MHz</cell>
 </row>
 <row>
  <cell>VCO frequency</cell>
- <cell>768 MHz</cell>
+ <cell>792 MHz</cell>
 </row>
 <separator/>
 <row>
@@ -85,7 +85,7 @@
 </row>
 <row>
  <cell>CCC reference clock divider</cell>
- <cell>25</cell>
+ <cell>50</cell>
 </row>
 <separator/>
 <row>
@@ -98,7 +98,7 @@
 </row>
 <row>
  <cell>CCC feedback divider</cell>
- <cell>12</cell>
+ <cell>99</cell>
 </row>
 <row>
  <cell>External feedback divider</cell>
@@ -107,7 +107,7 @@
 <separator/>
 <row>
  <cell>PLL VCO divider</cell>
- <cell>32</cell>
+ <cell>8</cell>
 </row>
 <separator/>
 <row>
@@ -161,7 +161,7 @@
 <row>
  <cell>FCCC_RFDIV_CR</cell>
  <cell>0x02</cell>
- <cell>0x18</cell>
+ <cell>0x31</cell>
  <cell>RFDIV configuration register</cell>
 </row>
 <row>
@@ -173,7 +173,7 @@
 <row>
  <cell>FCCC_FBDIV_CR0</cell>
  <cell>0x04</cell>
- <cell>0x0b</cell>
+ <cell>0x62</cell>
  <cell>FBDIV configuration register 0</cell>
 </row>
 <row>
@@ -185,7 +185,7 @@
 <row>
  <cell>FCCC_NGMUX0_CR0</cell>
  <cell>0x06</cell>
- <cell>0x08</cell>
+ <cell>0x07</cell>
  <cell>NGMUX0 configuration register 0</cell>
 </row>
 <row>
@@ -233,7 +233,7 @@
 <row>
  <cell>FCCC_GPMUX0_CR</cell>
  <cell>0x0e</cell>
- <cell>0x47</cell>
+ <cell>0x58</cell>
  <cell>GPMUX0 configuration register</cell>
 </row>
 <row>
@@ -257,7 +257,7 @@
 <row>
  <cell>FCCC_GPD0_CR</cell>
  <cell>0x12</cell>
- <cell>0x02</cell>
+ <cell>0x01</cell>
  <cell>GPD0 configuration register</cell>
 </row>
 <row>
@@ -329,7 +329,7 @@
 <row>
  <cell>FCCC_PLL_CR7</cell>
  <cell>0x1e</cell>
- <cell>0x05</cell>
+ <cell>0x03</cell>
  <cell>PLL&apos;s internal output divider configuration register</cell>
 </row>
 <row>
@@ -347,13 +347,13 @@
 <row>
  <cell>FCCC_PLL_CR10</cell>
  <cell>0x21</cell>
- <cell>0x02</cell>
+ <cell>0x01</cell>
  <cell>PLL loop filter range configuration register</cell>
 </row>
 <row>
  <cell>FCCC_GPD0_SYNC_CR</cell>
  <cell>0x22</cell>
- <cell>0x03</cell>
+ <cell>0x02</cell>
  <cell>GPD0 operating mode configuration register</cell>
 </row>
 <row>

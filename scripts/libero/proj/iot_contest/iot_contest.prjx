@@ -1,6 +1,7 @@
 KEY LIBERO "12.600"
 KEY CAPTURE "12.600.0.14"
 KEY DEFAULT_IMPORT_LOC "E:\Hotline_Cases\IP_cases\2012\493642-863181735\Mir_429\component\Actel\DirectCore\CORE429\3.1.103\rtl\vhdl\core"
+KEY DEFAULT_OPEN_LOC ""
 KEY ProjectID "0"
 KEY HDLTechnology "VERILOG"
 KEY VERILOGMODE "VERILOG2001"
@@ -14,7 +15,9 @@ KEY VendorTechnology_DieVoltage "1.2"
 KEY VendorTechnology_PART_RANGE "COM"
 KEY VendorTechnology_DSW_VCCA_VOLTAGE_RAMP_RATE "100_MS"
 KEY VendorTechnology_IO_DEFT_STD "LVCMOS25"
+KEY VendorTechnology_OPCONR ""
 KEY VendorTechnology_PLL_SUPPLY "PLL_SUPPLY_25"
+KEY VendorTechnology_RAD_EXPOSURE ""
 KEY VendorTechnology_RESERVEMIGRATIONPINS "1"
 KEY VendorTechnology_RESTRICTPROBEPINS "1"
 KEY VendorTechnology_RESTRICTSPIPINS "0"
@@ -28,7 +31,7 @@ KEY VendorTechnology_VCCI_1.8_VOLTR "COM"
 KEY VendorTechnology_VCCI_2.5_VOLTR "COM"
 KEY VendorTechnology_VCCI_3.3_VOLTR "COM"
 KEY VendorTechnology_VOLTR "COM"
-KEY ProjectLocation "/home/bobbl/git/github/rudolv/scripts/libero/proj/iot_contest"
+KEY ProjectLocation "/home/bobbl/tmp/rudolv/scripts/libero/proj/iot_contest"
 KEY ProjectDescription ""
 KEY Pa4PeripheralNewSeq "GOOD"
 KEY SimulationType "VERILOG"
@@ -41,19 +44,19 @@ ENDLIST
 LIST FileManager
 VALUE "<project>/component/Actel/SgCore/FCCC/2.0.201/FCCC.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568048888"
+TIME="1568333591"
 SIZE="241"
 PARENT="<project>/component/work/FCCC_C0/FCCC_C0.cxf"
 ENDFILE
 VALUE "<project>/component/Actel/SgCore/OSC/2.0.101/OSC.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="684"
 PARENT="<project>/component/work/OSC_C0/OSC_C0.cxf"
 ENDFILE
 VALUE "<project>/component/Actel/SgCore/OSC/2.0.101/osc_comps.v,hdl"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="924"
 PARENT="<project>/component/Actel/SgCore/OSC/2.0.101/OSC.cxf"
 BEGIN_USE_CONSTRAINT
@@ -65,7 +68,7 @@ IS_READONLY="TRUE"
 ENDFILE
 VALUE "<project>/component/Actel/SgCore/OSC/2.0.101/osc_comps_pre.v,hdl"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="726"
 PARENT="<project>/component/Actel/SgCore/OSC/2.0.101/OSC.cxf"
 BEGIN_USE_CONSTRAINT
@@ -77,83 +80,102 @@ IS_READONLY="TRUE"
 ENDFILE
 VALUE "<project>/component/work/FCCC_C0/FCCC_C0.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568048888"
-SIZE="10447"
+TIME="1568333591"
+SIZE="10451"
 ENDFILE
 VALUE "<project>/component/work/FCCC_C0/FCCC_C0.v,hdl"
 STATE="utd"
-TIME="1568048888"
+TIME="1568333591"
 SIZE="2203"
 PARENT="<project>/component/work/FCCC_C0/FCCC_C0.cxf"
 IS_READONLY="TRUE"
 ENDFILE
 VALUE "<project>/component/work/FCCC_C0/FCCC_C0_0/FCCC_C0_FCCC_C0_0_FCCC.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568048888"
+TIME="1568333591"
 SIZE="674"
 PARENT="<project>/component/work/FCCC_C0/FCCC_C0.cxf"
 ENDFILE
 VALUE "<project>/component/work/FCCC_C0/FCCC_C0_0/FCCC_C0_FCCC_C0_0_FCCC.v,hdl"
 STATE="utd"
-TIME="1568048888"
+TIME="1568333591"
 SIZE="1685"
 PARENT="<project>/component/work/FCCC_C0/FCCC_C0_0/FCCC_C0_FCCC_C0_0_FCCC.cxf"
 IS_READONLY="TRUE"
 ENDFILE
 VALUE "<project>/component/work/OSC_C0/OSC_C0.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="2914"
 ENDFILE
 VALUE "<project>/component/work/OSC_C0/OSC_C0.v,hdl"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="2132"
 PARENT="<project>/component/work/OSC_C0/OSC_C0.cxf"
 IS_READONLY="TRUE"
 ENDFILE
 VALUE "<project>/component/work/OSC_C0/OSC_C0_0/OSC_C0_OSC_C0_0_OSC.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="439"
 PARENT="<project>/component/work/OSC_C0/OSC_C0.cxf"
 ENDFILE
 VALUE "<project>/component/work/OSC_C0/OSC_C0_0/OSC_C0_OSC_C0_0_OSC.v,hdl"
 STATE="utd"
-TIME="1568048919"
+TIME="1568333591"
 SIZE="509"
 PARENT="<project>/component/work/OSC_C0/OSC_C0_0/OSC_C0_OSC_C0_0_OSC.cxf"
 IS_READONLY="TRUE"
 ENDFILE
 VALUE "<project>/component/work/schematic/schematic.cxf,actgen_cxf"
 STATE="utd"
-TIME="1568049166"
+TIME="1568333591"
 SIZE="2119"
+ENDFILE
+VALUE "<project>/constraint/100mhz.sdc,sdc"
+STATE="utd"
+TIME="1568333591"
+SIZE="392"
+ENDFILE
+VALUE "<project>/constraint/98mhz.sdc,sdc"
+STATE="utd"
+TIME="1568333591"
+SIZE="393"
 ENDFILE
 VALUE "<project>/constraint/io/m2gl025.pdc,io_pdc"
 STATE="utd"
-TIME="1568048489"
+TIME="1568333591"
 SIZE="941"
 ENDFILE
 VALUE "<project>/designer/impl1/schematic.ide_des,ide_des"
 STATE="utd"
-TIME="1568049178"
-SIZE="314"
+TIME="1568333591"
+SIZE="388"
 ENDFILE
 VALUE "<project>/hdl/pipeline.v,hdl"
 STATE="utd"
-TIME="1568048489"
-SIZE="45377"
+TIME="1568333591"
+SIZE="49165"
 ENDFILE
 VALUE "<project>/hdl/withmem.v,hdl"
 STATE="utd"
-TIME="1568048752"
-SIZE="9914"
+TIME="1568333591"
+SIZE="10393"
 ENDFILE
 ENDLIST
 LIST UsedFile
 ENDLIST
 LIST NewModulesInfo
+LIST "schematic::work"
+FILE "<project>/component/work/schematic/schematic.cxf,actgen_cxf"
+LIST SynthesisConstraints
+VALUE "<project>/constraint/100mhz.sdc,sdc"
+ENDLIST
+LIST TimingConstraints
+VALUE "<project>/constraint/98mhz.sdc,sdc"
+ENDLIST
+ENDLIST
 ENDLIST
 LIST AssociatedStimulus
 ENDLIST
@@ -284,42 +306,59 @@ ENDLIST
 LIST ModuleSubBlockList
 LIST "CsrCounter::work","hdl/pipeline.v","FALSE","FALSE"
 ENDLIST
-LIST "CsrLeds::work","hdl/withmem.v","FALSE","FALSE"
-ENDLIST
 LIST "CsrUart::work","hdl/pipeline.v","FALSE","FALSE"
 ENDLIST
 LIST "Memory32::work","hdl/withmem.v","FALSE","FALSE"
 ENDLIST
+LIST "Memory36::work","hdl/withmem.v","FALSE","FALSE"
+ENDLIST
 LIST "ROM32::work","hdl/withmem.v","FALSE","FALSE"
 ENDLIST
+LIST "FCCC_C0::work","component/work/FCCC_C0/FCCC_C0.v","TRUE","FALSE"
+SUBBLOCK "FCCC_C0_FCCC_C0_0_FCCC::work","component/work/FCCC_C0/FCCC_C0_0/FCCC_C0_FCCC_C0_0_FCCC.v","FALSE","FALSE"
+ENDLIST
+LIST "FCCC_C0_FCCC_C0_0_FCCC::work","component/work/FCCC_C0/FCCC_C0_0/FCCC_C0_FCCC_C0_0_FCCC.v","FALSE","FALSE"
+ENDLIST
 LIST "Memory32::work","hdl/withmem.v","FALSE","FALSE"
 ENDLIST
-LIST "FCCC_C0::work","component/work/FCCC_C0/FCCC_C0.cxf","TRUE","FALSE"
+LIST "OSC_C0::work","component/work/OSC_C0/OSC_C0.v","TRUE","FALSE"
+SUBBLOCK "OSC_C0_OSC_C0_0_OSC::work","component/work/OSC_C0/OSC_C0_0/OSC_C0_OSC_C0_0_OSC.v","FALSE","FALSE"
 ENDLIST
-LIST "Memory32::work","hdl/withmem.v","FALSE","FALSE"
-ENDLIST
-LIST "OSC_C0::work","component/work/OSC_C0/OSC_C0.cxf","TRUE","FALSE"
+LIST "OSC_C0_OSC_C0_0_OSC::work","component/work/OSC_C0/OSC_C0_0/OSC_C0_OSC_C0_0_OSC.v","FALSE","FALSE"
+SUBBLOCK "RCOSC_25_50MHZ::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
 ENDLIST
 LIST "Pipeline::work","hdl/pipeline.v","FALSE","FALSE"
-SUBBLOCK "RegisterSetMicrosemi::work","hdl/pipeline.v","FALSE","FALSE"
+SUBBLOCK "RegisterSetGrubby::work","hdl/pipeline.v","FALSE","FALSE"
+ENDLIST
+LIST "RCOSC_1MHZ::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
+ENDLIST
+LIST "RCOSC_1MHZ_FAB::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
+ENDLIST
+LIST "RCOSC_25_50MHZ::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
+ENDLIST
+LIST "RCOSC_25_50MHZ_FAB::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
 ENDLIST
 LIST "RegisterSet::work","hdl/pipeline.v","FALSE","FALSE"
+ENDLIST
+LIST "RegisterSetGrubby::work","hdl/pipeline.v","FALSE","FALSE"
 ENDLIST
 LIST "RegisterSetMicrosemi::work","hdl/pipeline.v","FALSE","FALSE"
 ENDLIST
 LIST "schematic::work","component/work/schematic/schematic.cxf","TRUE","FALSE"
-SUBBLOCK "FCCC_C0::work","component/work/FCCC_C0/FCCC_C0.cxf","TRUE","FALSE"
-SUBBLOCK "OSC_C0::work","component/work/OSC_C0/OSC_C0.cxf","TRUE","FALSE"
+SUBBLOCK "FCCC_C0::work","component/work/FCCC_C0/FCCC_C0.v","TRUE","FALSE"
+SUBBLOCK "OSC_C0::work","component/work/OSC_C0/OSC_C0.v","TRUE","FALSE"
 SUBBLOCK "withmem::work","hdl/withmem.v","FALSE","FALSE"
 ENDLIST
 LIST "withmem::work","hdl/withmem.v","FALSE","FALSE"
-SUBBLOCK "CsrCounter::work","hdl/pipeline.v","FALSE","FALSE"
-SUBBLOCK "CsrLeds::work","hdl/withmem.v","FALSE","FALSE"
 SUBBLOCK "Memory32::work","hdl/withmem.v","FALSE","FALSE"
 SUBBLOCK "Pipeline::work","hdl/pipeline.v","FALSE","FALSE"
 SUBBLOCK "Memory32::work","hdl/withmem.v","FALSE","FALSE"
+SUBBLOCK "Memory36::work","hdl/withmem.v","FALSE","FALSE"
 SUBBLOCK "ROM32::work","hdl/withmem.v","FALSE","FALSE"
-SUBBLOCK "Memory32::work","hdl/withmem.v","FALSE","FALSE"
+ENDLIST
+LIST "XTLOSC::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
+ENDLIST
+LIST "XTLOSC_FAB::work","component/Actel/SgCore/OSC/2.0.101/osc_comps.v","FALSE","FALSE"
 ENDLIST
 ENDLIST
 LIST ActiveTestBenchList
@@ -330,6 +369,8 @@ ENDLIST
 LIST FPTabList
 ENDLIST
 LIST TimingTabList
+VALUE "constraint/98mhz.sdc"
+VALUE "constraint/100mhz.sdc"
 ENDLIST
 LIST FDCTabList
 ENDLIST
