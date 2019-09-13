@@ -39,9 +39,6 @@ compiler modifications are necessary.
     component.
   * Click on _Program Design/Run PROGRAM Action_ within the `Design Flow` tab
     to synthesize the bitstream and program the FPGA board.
-  * To disable the attack detection, set `MemRGrubby` to 0 in line 82 of
-    `scripts/libero/proj/iot_contest/hdl/withmem.v` and synthesize and program
-    again.
 
 Alternatively the complete bitstream can be downloaded as release `iot_contest`
 from the RudolV GitHub repository.
@@ -53,6 +50,9 @@ binary data. The following script can be used:
 
     sw/bootloader/send_image.sh /dev/ttyUSB0 image.bin
 
+To check what happens without the grubby attack detection, edit line 74 in
+`scripts/libero/proj/iot_contest/hdl/withmem.v` and set `MemRGrubby` to 0.
+After synthesis and programming the attacks will be successful.
 
 
 ### Build the software

@@ -63,14 +63,6 @@ module withmem (
                     MemRData = q_MemAddr[2] ? q_UartRecvChar 
                         : {30'b0, q_UartRecvFull, q_UartSendBitCounter==0};
                 end else begin
-/*
-                    case (q_MemAddr[3:2])
-                        2'b00: MemRData = mtimecmp[31:0];
-                        2'b01: MemRData = 0;//mtimecmp[63:32];
-                        2'b10: MemRData = mtime[31:0];
-                        2'b11: MemRData = 0;//mtime[63:32];
-                    endcase
-*/
                     MemRData = (q_MemAddr[3:2]==2'b10) ? mtime[31:0] : 0;
                 end
             end else begin
@@ -195,12 +187,12 @@ module withmem (
             case (q_MemAddr[3:2])
                 2'b00: //'h4400_4000 mtimecmp
                         mtimecmp[31:0] <= q_MemWData;
-//                2'b01: //'h4400_4004 mtimecmph
-//                        mtimecmp[63:32] <= q_MemWData;
-//                2'b10: //'h4400_bff8 mtime
-//                        mtime[31:0] <= q_MemWData;
-//                2'b11: //'h4400_bffc mtimeh
-//                        mtime[63:32] <= q_MemWData;
+                2'b01: //'h4400_4004 mtimecmph
+                        mtimecmp[63:32] <= q_MemWData;
+                2'b10: //'h4400_bff8 mtime
+                        mtime[31:0] <= q_MemWData;
+                2'b11: //'h4400_bffc mtimeh
+                        mtime[63:32] <= q_MemWData;
             endcase
         end
 */
