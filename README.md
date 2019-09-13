@@ -9,6 +9,7 @@ RudolV participates in the [2019 RISC-V SoftCPU Contest on Security](https://ris
 __EXCUSE:__ Due to the time consuming contest, the other parts of the
 repository currently are not up-to-date.
 
+
 RISC-V SoftCPU Contest on Security
 ----------------------------------
 
@@ -29,7 +30,7 @@ compiler modifications are necessary.
 
 
 
-### Build the CPU
+### CPU
 
   * Plug in the Creative Board.
   * Open the project file `scripts/libero/proj/iot_contest/iot_contest.prjx`
@@ -45,15 +46,34 @@ compiler modifications are necessary.
 Alternatively the complete bitstream can be downloaded as release `iot_contest`
 from the RudolV GitHub repository.
 
+After pushing the reset button, RudolV waits for the binary application image to
+be transfered via the UART. The format is simple: first send the length of the
+image (in bytes) as decimal ASCII string. Followed by a blank (0x20) and then the
+binary data. The following script can be used:
+
+    sw/bootloader/send_image.sh /dev/ttyUSB0 image.bin
+
 
 
 ### Build the software
 
-Make sure the environmental variable `ZEPHYR_SDK_INSTALL_DIR` points to the
-Zephyr SDK directory. Then install Zephyr OS v1.14.1-rc1 with
+RudolV is binary compatible to Mi-V for the Creative Board therefore binaries
+can be build the same way as descibed in the 
+[contest rules](https://github.com/Thales-RISC-V/RISC-V-IoT-Contest). 
+After building an application, the raw binary image `zephyr.bin` can be found
+in the Zephyr build directory. To run it use
+
+    sw/bootloader/send_image.sh /dev/ttyUSB0 zephyr.bin
+
+To build the RIPE binaries make sure that the environmental variable
+`ZEPHYR_SDK_INSTALL_DIR` points to the Zephyr SDK directory.
+
+If there is already a Zephyr installation, set `ZEPHYR_BASE` accoringly and
+`ZEPHYR_TOOLCHAIN_VARIANT=zephyr`. Otherwise Zephyr OS v1.14.1-rc1 can be 
+instaled locally with
 
     cd sw/zephyr
-    ./make.sh zephyr
+    source ./make.sh zephyr
 
 Build the RIPE attack binaries
 

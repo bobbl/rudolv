@@ -26,6 +26,7 @@ target_zephyr() {
 
     pip3 install --user -r zephyr/scripts/requirements.txt
     export ZEPHYR_BASE=$(pwd)/zephyr
+    export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
     cd ..
 }
 
@@ -40,11 +41,9 @@ target_ripe() {
 
     rm -rf build
     west build -p -b m2gl025_miv
-    cp build/zephyr/zephyr.elf ../../$BUILDDIR/ripe$1.rv32im.elf
+    cp build/zephyr/zephyr.bin ../../$BUILDDIR/ripe$1.rv32im.bin
     mv ${SRCFILE}.bak ${SRCFILE}
     cd ../..
-
-    elf_to_hex $BUILDDIR/ripe$1.rv32im
 }
 
 # $1 app name = subdir
@@ -53,20 +52,6 @@ west_build() {
     cd apps/$1
     rm -rf build
 
-
-    # the recommended patch has no effect, therefore use unpatched zephyr
-    export ZEPHYR_BASE=${zephyr_base}
-
-    # When building for rv32i, the SDK gcc cannot be used, because its libgcc
-    # contains rv32ima instructions and is linked to the executable. Therefore
-    # use special cross compiler.
-#    export ZEPHYR_TOOLCHAIN_VARIANT=cross-compile
-#    west build -p -b m2gl025_miv
-#    cp build/zephyr/zephyr.elf ../../build/$1.a.elf
-
-    # For rv32ima the zephyr SDK can be used
-    # To change the ISA, CONFIG_COMPILER_OPT in prj.conf must be modified, too.
-    export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
     west build -p -b m2gl025_miv
     cp build/zephyr/zephyr.elf ../../build/$1.rv32im.elf
     cd ../..
@@ -91,7 +76,6 @@ then
 fi
 
 apps=$(cd apps; echo * | sed 's/SOURCE//')
-zephyr_base=$(pwd)/zephyrproject/zephyr
 
 while [ $# -ne 0 ]
 do
