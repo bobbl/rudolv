@@ -80,6 +80,8 @@ module withmem (
     end
 
     wire MemRGrubby = (q_MemAddr[31:16]==16'h8004) ? mem_rdata_data[32] : 0;
+        // to disable the grubby attack detection disable  MemRGrubby:
+        // wire MemRGrubby = 0;
     wire MemWGrubby = (mem_wmask != 4'b1111) | mem_wgrubby;
     wire [35:0] MemWData36 = {3'b0, MemWGrubby, mem_wdata[31:0]};
 

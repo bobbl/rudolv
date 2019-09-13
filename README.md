@@ -3,9 +3,101 @@
 A 32 bit RISC-V processor with 5 pipeline stages and in-order execution.
 The architecture avoids speculative components to provide a predictable timing
 as required by hard real-time systems. It is based on a submission to the 
-[RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
+[2018 RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
+RudolV participates in the [2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
 
-Edit `config.mk` if the tools are not in the search path.
+__EXCUSE:__ Due to the time consuming contest, the other parts of the
+repository currently are not up-to-date.
+
+RISC-V SoftCPU Contest on Security
+----------------------------------
+
+The objective of the contest is to thwart 5 particular attacks of RIPE, the
+[Runtime Intrusion Prevention Evaluator](https://github.com/johnwilander/RIPE).
+RudolV can detect all these 5 attacks and responds with an exception. No
+compiler modifications are necessary.
+
+
+### Requirements
+
+  * Future Electronics - Microsemi Creative Development Board with 
+    IGLOO 2 M2GL025-VF256 FPGA
+  * Libero 12.1 (I managed to install it on Ubuntu 18.04, a description follows
+    soon)
+  * Zephyr SDK 0.10.0 (only this version fits Zephyr OS v1.14.1-rc1 which is
+    required by the contest)
+
+
+
+### Build the CPU
+
+  * Plug in the Creative Board.
+  * Open the project file `scripts/libero/proj/iot_contest/iot_contest.prjx`
+    with Libero.
+  * Choose the `schematic` tab and click on the leftmost icon to generate the
+    component.
+  * Click on _Program Design/Run PROGRAM Action_ within the `Design Flow` tab
+    to synthesize the bitstream and program the FPGA board.
+  * To disable the attack detection, set `MemRGrubby` to 0 in line 82 of
+    `scripts/libero/proj/iot_contest/hdl/withmem.v` and synthesize and program
+    again.
+
+Alternatively the complete bitstream can be downloaded as release `iot_contest`
+from the RudolV GitHub repository.
+
+
+
+### Build the software
+
+Make sure the environmental variable `ZEPHYR_SDK_INSTALL_DIR` points to the
+Zephyr SDK directory. Then install Zephyr OS v1.14.1-rc1 with
+
+    cd sw/zephyr
+    ./make.sh zephyr
+
+Build the RIPE attack binaries
+
+    ./make.sh ripe
+
+
+
+### Run the attacks
+
+Use a terminal emulator like picocom at 115200 baud to receive the output of RIPE:
+
+    picocom -b 115200 /dev/ttyUSB0
+
+Now push the reset button on the Creative Board and transfer the binary image of
+an attack to the bootloader of RudolV:
+
+    sw/bootloader/send_image.sh /dev/ttyUSB0 sw/zephyr/build/ripe1.rv32im.bin
+
+For the other attacks use `ripe2` to `ripe5`. 
+
+
+
+### How does the detection work?
+
+All attacks have in common, that they alter the memory byte by byte, not with
+full 32 bit writes. Therefore RudolV uses an additional _grubby_ bit for each
+memory location to keep track of words that were not written as a whole.
+If RudolV fetches an instruction word with the grubby bit set, it throws
+exception 14. If it loads a grubby word and uses it as target address for a
+jump, exception 10 is thrown.
+
+
+### Chip resources for the IGLOO 2 port of RudolV
+
+
+| chip resources  | unit      |  number |
+|:--------------- | ---------:| -------:|
+| LUT4            |           |    3551 |
+| flip-flops      |     1 Bit |    2293 |
+| LEs             |           |    3633 |
+| uRAM            |   1 KiBit |       7 |
+| LSRAM           |  18 KiBit |      28 |
+| clock frequency |       MHz |      99 |
+
 
 
 
@@ -21,6 +113,7 @@ be considered as a static always not taken prediction.
 
 | instruction class  | examples        | cycles |
 | ------------------ | --------------- | ------ |
+| RV32M              | MUL, DIV, ...   | 34     |
 | pipeline flush     | FENCE.I         | 3      |
 | exception          | ECALL, EBREAK   | 3      |
 | unconditional jump | JAL, JALR       | 3      |
