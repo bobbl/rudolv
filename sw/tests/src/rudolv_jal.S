@@ -167,6 +167,27 @@ target_2:
 1:  addi x4, x4, 1; \
   )
 
+  #-------------------------------------------------------------
+  # Test 16: JALR with a killed memory access before
+  #-------------------------------------------------------------
+
+test_16:
+        li      TESTNUM, 16
+        li      x4, 0
+        la      ra, 2f 
+        la      x5, tdat1
+        beqz    x4, 1f
+        bnez    x4, 1f          # never reached
+        lw      x4, 0(x5)       # never reached, but in the delay slot
+        bnez    x4, 1f          # never reached
+1:      jalr    ra
+        li      x4, 3           # should bot be reached
+2:      add     x4, x4, 1
+        li      x5, 1
+        bne     x4, x5, fail
+
+
+
 
   TEST_PASSFAIL
 

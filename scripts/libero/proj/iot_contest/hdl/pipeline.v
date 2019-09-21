@@ -1086,7 +1086,7 @@ module Pipeline #(
         e_SelSum <= SelSum;
         e_SetCond <= SetCond;
         e_LTU <= LTU;
-        e_MemAccess <= MemAccess;
+        e_MemAccess <= MemAccess & ~m_Kill;
         e_MemWr <= MemWr;
         e_MemWidth <= MemWidth;
 
