@@ -23,11 +23,9 @@ compiler modifications are necessary.
 
   * Future Electronics - Microsemi Creative Development Board with 
     IGLOO 2 M2GL025-VF256 FPGA
-  * Libero 12.1 (I managed to install it on Ubuntu 18.04, a description follows
-    soon)
+  * Libero 12.1 ([Howto install Libero on Ubuntu](https://bobbl.github.io/fpga/microsemi/2019/09/23/install-libero.html))
   * Zephyr SDK 0.10.0 (only this version fits Zephyr OS v1.14.1-rc1 which is
     required by the contest)
-
 
 
 ### CPU
