@@ -2,7 +2,7 @@
 //`define ENABLE_IDS
 `define ENABLE_TIMER
 
-
+/*
 module RegisterSet(
     input clk, 
     input we,
@@ -106,7 +106,7 @@ module RegisterSetGrubby(
     end
 
 endmodule
-
+*/
 
 
 
@@ -1025,7 +1025,7 @@ module Pipeline #(
     wire RdGrubby1;
     wire RdGrubby2;
 
-    RegisterSetGrubby RegSet(
+    RegisterSet RegSet(
         .clk(clk),
         .we(MemWrEn),
         .wa(MemWrNo),

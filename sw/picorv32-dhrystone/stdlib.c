@@ -52,13 +52,16 @@ char *malloc(int size)
 
 static void printf_c(int c)
 {
-	*((volatile int*)0x10000000) = c;
+	asm volatile(
+		"1: csrrw t0, 0xbc0, %0 \n\t"
+		"and t0, t0,0x200       \n\t"
+		"bnez t0, 1b            \n\t"
+		:: "rK"(c) : "t0");
 }
 
 static void printf_s(char *p)
 {
-	while (*p)
-		*((volatile int*)0x10000000) = *(p++);
+	while (*p) printf_c(*(p++));
 }
 
 static void printf_d(int val)

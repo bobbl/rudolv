@@ -15,6 +15,16 @@
 extern volatile uint64_t tohost;
 extern volatile uint64_t fromhost;
 
+static void put_uart(int c)
+{
+	asm volatile(
+		"1: csrrw t0, 0xbc0, %0 \n\t"
+		"and t0, t0,0x200       \n\t"
+		"bnez t0, 1b            \n\t"
+		:: "rK"(c) : "t0");
+}
+
+
 static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t arg2)
 {
 /*
@@ -37,7 +47,7 @@ static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t
         char *s = (char *)(uintptr_t)arg1;
         uint64_t len = arg2;
         uint64_t i;
-        for (i=0; i<len; i++) *(char *)0x10000000 = s[i];
+        for (i=0; i<len; i++) put_uart(s[i]);
     }
     return 0;
 }
@@ -65,6 +75,7 @@ void setStats(int enable)
 void __attribute__((noreturn)) tohost_exit(uintptr_t code)
 {
   tohost = (code << 1) | 1;
+  write_csr(0x3ff, 1);
   while (1);
 }
 

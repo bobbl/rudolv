@@ -12,7 +12,8 @@ VERILOG_FILES="../../pipeline.v"
 #   $2 filename of expected signature
 check_sig() {
     NAME=$(basename $1 .hex)
-    iverilog -o tmp.vvp -DCODE=\"$1\" tb_tests.v memory32.v ${VERILOG_FILES}
+    iverilog -o tmp.vvp -DCODE=\"$1\" tb_tests.v \
+        ../../src/memory32.v ../../src/regset32.v ${VERILOG_FILES}
     vvp -N tmp.vvp | sed -e '/^xxxxxxxx$/d' > tmp.sig
 
     diff --strip-trailing-cr $2 tmp.sig > tmp.diff

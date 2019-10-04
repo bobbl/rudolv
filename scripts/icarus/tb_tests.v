@@ -1,5 +1,7 @@
 module tb_tests;
 
+    localparam CSR_UART = 12'hbc0;
+    localparam CSR_SIM  = 12'h3ff;
 
     reg clk = 1;
     always #5 clk = !clk;
@@ -53,6 +55,12 @@ module tb_tests;
         .valid  (csr_valid)
     );
 
+    reg q_ReadUART;
+    // wire [31:0] CsrRData = q_ReadUART ? 0 : csr_rdata; 
+    //   csr_rdata is 0 anyway
+    wire CsrValid = q_ReadUART | csr_valid;
+
+
     Pipeline dut (
         .clk            (clk),
         .rstn           (rstn),
@@ -65,7 +73,7 @@ module tb_tests;
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),
-        .csr_valid      (csr_valid),
+        .csr_valid      (CsrValid),
 
         .mem_valid      (mem_valid),
         .mem_write      (mem_write),
@@ -82,48 +90,37 @@ module tb_tests;
     always #10 $monitor("  time %t", $time);
 `endif
 
-/*
     integer i;
     always @(posedge clk) begin
-        if (mem_wren & mem_wmask[0] & (mem_addr==32'h10001000)) begin
-            if (mem_wdata[7:0]==8'h03) begin
-                $write("ok");
-            end else begin
-                $write("FAILED");
-            end
-            $finish;
-        end
-    end
-*/
+        q_ReadUART <= csr_read & (csr_addr==CSR_UART);
 
-    integer i;
-    always @(posedge clk) begin
-        if (mem_write & mem_wmask[0] & (mem_addr==32'h10001000)) begin
-            if (mem_wdata[7:0]==8'h03) begin
-                for (i=0; i<64; i=i+1) begin
-                    $display("%h", mem.mem['h1FC0+i]);
+        if (csr_modify==1) begin
+            case (csr_addr)
+                CSR_SIM: begin
+                    case (csr_wdata)
+                        2: begin // signature from compliance tests
+                            for (i=0; i<64; i=i+1) begin
+                                $display("%h", mem.mem['h1FC0+i]);
+                            end
+                        end
+                        default: $display("exit due to write to CSR 0x3ff");
+                    endcase
+                    $finish;
                 end
-            end else begin
-                $display("***** Test FAILED");
-            end
-            $finish;
+                CSR_UART: begin
+                    $write("\033[1;37m%c\033[0m", csr_wdata[7:0]);
+                end
+            endcase
         end
-        if (mem_write & mem_wmask[0] & (mem_addr==32'h00001000)) begin
-            $display("tohost (at 0x1000) exit");
-            $finish;
-        end
-        if (mem_write & mem_wmask[0] & (mem_addr==32'h10000000)) begin
-`ifdef DEBUG
-            $display("\033[1;37mputchar '%c'\033[0m", mem_wdata[7:0]);
-`else
-            $write("\033[1;37m%c\033[0m", mem_wdata[7:0]);
-`endif
-        end
+
     end
 
     initial begin
-        #200000 $write("TIMEOUT"); $stop;
-//        #5000000 $write("TIMEOUT"); $stop;
+`ifdef DEBUG
+        #200_000 $write("*** TIMEOUT"); $stop;
+`else
+        #5_000_001 $write("*** TIMEOUT"); $stop;
+`endif
     end
 
 

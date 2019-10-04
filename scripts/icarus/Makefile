@@ -1,65 +1,35 @@
 include ../../config_default.mk
 
-PATH_TESTS = ../../sw/tests
-PATH_COMPLIANCE = ../../sw/compliance
-VERILOG_FILES = ../../pipeline.v
-
-
-FILES_S = $(wildcard $(PATH_TO_TESTS)/*.S)
-FILES_HEX = $(FILES_S:%.S=%.hex)
+VERILOG_FILES = ../../src/memory32.v ../../src/regset33.v ../../pipeline.v
 
 help:
 	@echo "  make CODE=foo.hex test          Simulate with extensive logging"
 	@echo "  make CODE=foo.hex test-nodebug  Simulate without logging"
-	@echo "  make CODE=foo.hex miv           Simulate Microsemi Mi-V"
-	@echo "  make picorv-dhrystone           Benchmark from picorrv32 repo"
-	@echo "  make riscv-dhrystone            Benchmark from RISC-V repo"
+	@echo "  make CODE=foo.hex miv           Simulate Microsemi Mi-V memory map"
+	@echo "  make CODE=foo.hex miv-nodebug   Simulate Microsemi Mi-V memory map w/o logging"
+	@echo
+	@echo "CODE="
+	@echo "  ../../sw/picorv-dhrystone/dhrystone.hex        Benchmark from picorrv32 repo"
+	@echo "  ../../sw/riscv-dhrystone/dhrystone.hex         Benchmark from RISC-V repo"
 
 test: $(CODE) tb_tests.v $(VERILOG_FILES)
 	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
-	    tb_tests.v memory32.v $(VERILOG_FILES)
+	    tb_tests.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
 test-nodebug: $(CODE) tb_tests.v $(VERILOG_FILES)
 	$(IVERILOG) -o tmp.vvp -DCODE=\"$(CODE)\" \
-	    tb_tests.v memory32.v $(VERILOG_FILES)
-	$(VVP) -N tmp.vvp
-
-picorv32-dhrystone:
-	$(MAKE) -C ../../sw/picorv32-dhrystone
-	$(IVERILOG) -o tmp.vvp -DCODE=\"../../sw/picorv32-dhrystone/dhrystone.hex\" \
-	     -DDHRYSTONE tb_dhrystone.v memory32.v $(VERILOG_FILES)
-	$(VVP) -N tmp.vvp
-
-riscv-dhrystone:
-	$(MAKE) -C ../../sw/riscv-dhrystone
-	$(IVERILOG) -o tmp.vvp -DCODE=\"../../sw/riscv-dhrystone/dhrystone.hex\" \
-	     -DDHRYSTONE tb_dhrystone.v memory32.v $(VERILOG_FILES)
-	$(VVP) -N tmp.vvp
-
-uart:
-	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"../../sw/uart/uart.hex\" \
-	    tb_uart.v $(VERILOG_FILES)
+	    tb_tests.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
 miv:
 	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
-	    tb_miv.v memory32.v $(VERILOG_FILES)
+	    tb_miv.v ../../src/memory36.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
 miv-nodebug:
 	$(IVERILOG) -o tmp.vvp -DCODE=\"$(CODE)\" \
-	    tb_miv.v memory32.v $(VERILOG_FILES)
-	$(VVP) -N tmp.vvp
-
-grubby:
-	$(IVERILOG) -o tmp.vvp -DDEBUG -DCODE=\"$(CODE)\" \
-	    tb_grubby.v memory32.v memory36.v $(VERILOG_FILES)
-	$(VVP) -N tmp.vvp
-
-grubby-nodebug:
-	$(IVERILOG) -o tmp.vvp -DCODE=\"$(CODE)\" \
-	    tb_grubby.v memory32.v memory36.v $(VERILOG_FILES)
+	    tb_miv.v ../../src/memory36.v $(VERILOG_FILES)
 	$(VVP) -N tmp.vvp
 
 
@@ -68,4 +38,4 @@ clean:
 	rm -f test.vvp
 
 .SECONDARY:
-.PHONY: all test-all compliance riscv-dhrystone dhrystone clean
+.PHONY: all test test-nodebug miv miv-nodebug clean

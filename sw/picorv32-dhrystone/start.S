@@ -46,10 +46,8 @@ start:
 	sw a4,0(a0)
 	sw a5,0(a0)
 
-        /* tohost exit (added) */
-        lui a0, 0x10001
-        li a1, 1
-        sw a1, 0(a0)
+        /* simulation exit (added) */
+        csrw 0x3ff, 1
 
 	/* trap */
 	ebreak

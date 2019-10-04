@@ -24,11 +24,8 @@ _start2:
 #define RVTEST_CODE_END
 
 #define RVTEST_EXIT             \
-        li x10, 0x03;           \
-        lui x11, 0x10001;       \
-        sw x10, 0(x11);         \
+        csrw 0x3ff, 2;          \
 1:      j 1b;
-
 
 #define RVTEST_PASS             \
         la x11, result_ok;      \
