@@ -14,7 +14,7 @@ one_column()
 
 
 # 4 columns of the bytes
-od -An -tx1 -v -w4 ../../sw/bootloader/bootloader.bin > mem32.tmp
+od -An -tx1 -v -w4 ../../sw/uart/build/bootloader_char.bin > mem32.tmp
 i=$(wc -l < mem32.tmp)
 
 # align to 512 bytes
@@ -30,24 +30,36 @@ one_column 3 mem1.hex
 one_column 4 mem2.hex
 one_column 5 mem3.hex
 
-exit
 
 
 
-
+mkdir -p build
 cp ${PROJ}.qsf build/
-cp build
+
+cd build
 
 
+## CAUTION: offset is a word (4 byte) address, not a byte address
+#sed -e 's/@0 /@3f80 /' ../../../sw/bootloader/bootloader.hex > bootloader.hex
 
 
-# CAUTION: offset is a word (4 byte) address, not a byte address
-sed -e 's/@0 /@3f80 /' ../../../sw/bootloader/bootloader.hex > bootloader.hex
+${QUARTUS_BIN}/quartus_map ${PROJ}.qsf
+${QUARTUS_BIN}/quartus_fit --read_settings_files=off -write_settings_files=off ${PROJ} -c ${PROJ}
+${QUARTUS_BIN}/quartus_sta ${PROJ} -c ${PROJ}
+${QUARTUS_BIN}/quartus_asm ${PROJ}
+
+grep -A3 "Total logic elements" output_files/${PROJ}.fit.summary
+grep -B1 "Slack" output_files/${PROJ}.sta.summary
 
 
-${QUARTUS_BIN}\quartus_map ${PROJ}.qsf
-${QUARTUS_BIN}\quartus_fit --read_settings_files=off -write_settings_files=off ${PROJ} -c ${PROJ}
-${QUARTUS_BIN}\quartus_sta ${PROJ} -c ${PROJ}
+# programmer
+
+# sudo killall jtagd
+# sudo ${QUARTUS_BIN}/jtagconfig
+
+${QUARTUS_BIN}/quartus_pgm -m jtag -o "p;output_files/${PROJ}.sof"
+
+
 
 
 cd ..

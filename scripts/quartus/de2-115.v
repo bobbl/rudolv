@@ -1,7 +1,7 @@
 /* wrapper for Altera DE2-115 board
 
 Memory map
-0001'0000h main memory (BRAM, 64 KiByte)
+0000'0000h main memory (BRAM, 64 KiByte)
 0000'FE00h start address of boot loader
 
 CSR
@@ -42,7 +42,7 @@ module top (
 
     wire        retired;
     wire        csr_read;
-    wire [1:0]  csr_modify;
+    wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata = CounterRData | UartRData;
@@ -64,7 +64,7 @@ module top (
         .AVOID_WARNING()
     );
 
-    CsrUart #(
+    CsrUartChar #(
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (

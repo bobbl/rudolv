@@ -341,6 +341,8 @@ module Pipeline #(
                     MModeIntEnable      <= f_MModeIntEnable      & ~e_CsrWData[3];
                     MModePriorIntEnable <= f_MModePriorIntEnable & ~e_CsrWData[7];
                 end
+                default: begin  // do not alter
+                end
             endcase
         end
 `endif
@@ -768,14 +770,14 @@ module Pipeline #(
     wire MultiCycle = (d_MultiCycleCounter != 0);
     wire StartMC = MULDIVOpcode & ~MultiCycle & ~m_Kill;
     wire [5:0] MultiCycleCounter = 
-        m_Kill ? 0 : (
-        MultiCycle ? (d_MultiCycleCounter-1)
-                   : (MULDIVOpcode ? 33 : 0));
+        m_Kill ? 6'b0 : (
+        MultiCycle ? (d_MultiCycleCounter-6'b1)
+                   : (MULDIVOpcode ? 6'h21 : 6'b0));
 
     // MULDIV unit
     //wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_MulC;
     //wire DivNegative = DivDiff[2*WORD_WIDTH-1];
-    wire [WORD_WIDTH:0] DivDiff = {1'b0, q_DivRem} - {1'b0, q_MulC[WORD_WIDTH-1:0]};
+    wire [WORD_WIDTH:0] DivDiff = {q_DivRem} - {1'b0, q_MulC[WORD_WIDTH-1:0]};
     wire DivNegative = (q_MulC[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff[WORD_WIDTH];
 
     wire [WORD_WIDTH:0] DivRem = UnkilledStartMC
@@ -789,7 +791,7 @@ module Pipeline #(
 //        : {1'b0, q_MulB[WORD_WIDTH:1]};
     wire [WORD_WIDTH:0] MulB = {e_MulBSigned & e_B[WORD_WIDTH-1],
         UnkilledStartMC ? e_B : q_MulB[WORD_WIDTH:1]};
-    wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot, ~DivNegative};
+    wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot[WORD_WIDTH-2:0], ~DivNegative};
 
     wire [2*WORD_WIDTH+1:0] MulC = UnkilledStartMC
         ? {3'b0,
@@ -815,7 +817,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vMulResHi = q_MulB[0]
         ? (vMulResHi_C - q_DivRem[WORD_WIDTH-1:0])
         :  vMulResHi_C;
-    wire [WORD_WIDTH-1:0] vDivRem = e_SelRemOrDiv ? q_DivRem : q_DivQuot;
+    wire [WORD_WIDTH-1:0] vDivRem = e_SelRemOrDiv ? q_DivRem[WORD_WIDTH-1:0] : q_DivQuot;
     wire [WORD_WIDTH-1:0] vMulResult =
           (e_FromMul ? vMulResLo : 0)
           | (e_FromMulH ? vMulResHi : 0)
@@ -850,13 +852,13 @@ module Pipeline #(
         m_WrNo));
 
 
-    wire [4:0] Cause = m_ExcMem        ? (m_MemWr ? 6 : 4) :
-                      (e_TimerInt      ? 5'b10111 :
+    wire [4:0] Cause = m_ExcMem        ? (m_MemWr ? 5'h06 : 5'h04) :
+                      (e_TimerInt      ? 5'h17 :
                       (e_ExcUser       ? e_Cause1 :
-                      (e_ExcGrubbyInsn ? 14 : 
-                      (ExcGrubbyJump ? 10 : 
-                      /* e_ExcJump */    0)))); // -> m_Cause
-    wire [4:0] Cause1 = d_Insn[20] ? 3 : 11; // -> e_Cause1
+                      (e_ExcGrubbyInsn ? 5'h0e : 
+                      (ExcGrubbyJump   ? 5'h0a : 
+                      /* e_ExcJump */    5'h00 )))); // -> m_Cause
+    wire [4:0] Cause1 = d_Insn[20] ? 5'h03 : 5'h0b; // -> e_Cause1
 
 
     wire [WORD_WIDTH-1:0] ExcWrData2 =
@@ -968,8 +970,8 @@ module Pipeline #(
     endcase
 
     wire MemMisaligned = MemSignals[12] & ~m_Kill;
-    wire [4:0] MemByte = m_Kill ? 0 : MemSignals[11:7];
-    wire [2:0] MemSign = (m_Kill | e_MemUnsignedLoad) ? 0 : MemSignals[6:4];
+    wire [4:0] MemByte = m_Kill ? 5'b0 : MemSignals[11:7];
+    wire [2:0] MemSign = (m_Kill | e_MemUnsignedLoad) ? 3'b0 : MemSignals[6:4];
 
 
 
@@ -1200,7 +1202,7 @@ module Pipeline #(
         e_CsrRead           <= CsrRead;
         m_CsrRead           <= e_CsrRead;
         m_CsrValid          <= csr_valid | CsrValidInternal;
-        m_CsrRdData         <= csr_rdata;
+        m_CsrRdData         <= csr_rdata  | CsrRDataInternal;
 
 
 
@@ -1549,7 +1551,8 @@ module CsrUartChar #(
 );
     assign AVOID_WARNING = read | |wdata;
 
-    localparam integer CLOCK_DIV = CLOCK_RATE / BAUD_RATE;
+    localparam [15:0] CLOCK_DIV = CLOCK_RATE / BAUD_RATE;
+        // 16 bit is enough for up to 7.5 GHz (at 115200 baud)
 
     reg Valid;
     reg [31:0] RData;
@@ -1592,7 +1595,7 @@ module CsrUartChar #(
         q_RX <= rx;
         if (q_UartRecvBitCounter) begin
             if (q_UartRecvClkCounter) begin
-                q_UartRecvClkCounter <= q_UartRecvClkCounter - 1;
+                q_UartRecvClkCounter <= q_UartRecvClkCounter - 16'b1;
             end else begin
                 q_UartRecvClkCounter <= CLOCK_DIV;
                 q_UartRecvBits <= {q_RX, q_UartRecvBits[6:1]};
@@ -1600,21 +1603,21 @@ module CsrUartChar #(
                     q_UartRecvEmpty <= 0;
                     q_UartRecvChar <= {q_RX, q_UartRecvBits};
                 end
-                q_UartRecvBitCounter <= q_UartRecvBitCounter - 1;
+                q_UartRecvBitCounter <= q_UartRecvBitCounter - 4'b1;
             end
         end else if (~q_RX) begin
-            q_UartRecvClkCounter <= CLOCK_DIV / 2;
+            q_UartRecvClkCounter <= CLOCK_DIV / 16'h2;
             q_UartRecvBitCounter <= 10;
         end
 
         if (UartSendFull) begin
             if (q_UartSendClkCounter) begin
-                q_UartSendClkCounter <= q_UartSendClkCounter - 1;
+                q_UartSendClkCounter <= q_UartSendClkCounter - 16'b1;
             end else begin
                 q_UartSendClkCounter <= CLOCK_DIV;
                 q_TX <= q_UartSendBits[0];
                 q_UartSendBits <= {1'b1, q_UartSendBits[7:1]};
-                q_UartSendBitCounter <= q_UartSendBitCounter - 1;
+                q_UartSendBitCounter <= q_UartSendBitCounter - 4'b1;
             end
         end
 
