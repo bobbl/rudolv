@@ -3,7 +3,7 @@
 # put your modifications there
 
 # any gcc for risc-v, libs are not used
-RV32_PREFIX = riscv64-unknown-elf-
+RV_PREFIX = riscv64-unknown-elf-
 
 # gcc with libs compiled for RV32I
 RV32I_PREFIX = riscv32i-unknown-elf-

@@ -11,7 +11,10 @@ for different UART interfaces
     miv         Mi-V compatible memory mapped character interface
 EOF
 
-rv32i_prefix=riscv32-unknown-elf-
+
+
+. ../../config_default.sh
+[ ! -e ../../config.sh ] || . ../../config.sh
 
 
 
@@ -19,13 +22,13 @@ rv32i_prefix=riscv32-unknown-elf-
 #   $1 macro name
 #   $2 executable name suffix
 build() {
-    ${rv32i_prefix}gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
+    ${RV_PREFIX}gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
         -Tbootloader.ld -D$1 crt.S \
         bootloader.c -o build/bootloader_$2.elf
-    ${rv32i_prefix}gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
+    ${RV_PREFIX}gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
         -Tbootloader.ld -D$1 crt.S \
         test.c -o build/test_$2.elf
-    ${rv32i_prefix}gcc -nostartfiles -Tbootloader.ld -D$1 \
+    ${RV_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
         bl.S -o build/bl_$2.elf
 }
 
@@ -42,7 +45,7 @@ do
     bin=$(echo $elf | sed 's/elf$/bin/')
     hex=$(echo $elf | sed 's/elf$/hex/')
 
-    ${rv32i_prefix}objcopy -O binary $elf $bin
+    ${RV32I_PREFIX}objcopy -O binary $elf $bin
     printf "@0 " > $hex
     od -An -tx4 -w4 -v $bin | cut -b2- >> $hex
 done

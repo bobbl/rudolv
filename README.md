@@ -190,7 +190,7 @@ Now the processor within the FPGA executes the bootloader and waits for data
 from the UART. To run the Dhrystone benchmark on the FPGA use:
 
     make -C sw/uart-dhrystone/
-    sw/bootloader/send_image.sh /dev/ttyUSB1 sw/uart-dhrystone/dhrystone.bin
+    sw/bootloader/send_elf.sh /dev/ttyUSB1 sw/uart-dhrystone/dhrystone.elf
 
 This Dhrystone version is derived from the risv-tests version, but with the
 correct clock frequency of 24 MHz and 100'000 iterations. The result is 32697
@@ -201,7 +201,7 @@ at 115200 baud:
 
 The processor logic and the bootloader are written to the flash memory. Hence, the
 processor can be reset with switch SW2 of the MDP board. After switching it back and
-forth, `send_image.sh` can be used again to start a new program on the processor.
+forth, `send_elf.sh` can be used again to start a new program on the processor.
 
 | chip resources  | unit      | default | no counters | no exceptions | minimal |
 |:--------------- | ---------:| -------:| -----------:| -------------:| -------:|
@@ -227,7 +227,7 @@ To get the CoreMark of an FPGA implementation, build an image with UART output
 and send it to the bootloader:
 
     make -C sw/coremark/ build-uart
-    sw/bootloader/send_image.sh /dev/ttyUSB1 sw/coremark/coremark_uart.bin
+    sw/bootloader/send_elf.sh /dev/ttyUSB1 sw/coremark/coremark_uart.elf
 
 The CoreMark/MHz of RudolV is 0.892.
 
