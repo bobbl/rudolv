@@ -1,4 +1,16 @@
-/* MiV-compatible image for iCE40 UP5K MDP board */
+/* Wrapper to run Zephyr images for the Microsemi Creative Board with a Mi-V
+ * core on the iCE40 UP5K MDP board.
+ * No grubby, since SPRAM has no parity bit and BRAM is not enough.
+ *
+ * memory map
+ * 0000'0000 128 bytes for bootloader (entry at 0, jumps to 8000'0000)
+ * 4400'0000 mtimecmp (64 bit)
+ * 4400'bff8 mtime (64 bit)
+ * 7000'0000 UART send char
+ * 7000'0010 UART state
+ * 8000'0000 64 KiByte code memory (can be written although ROM at MiV)
+ * 8000'4000 64 KiByte data memory
+ */
 
 module top (
     input uart_rx,
@@ -122,7 +134,7 @@ module top (
 
     ROM32 #(
         .WIDTH(5),
-        .CONTENT("../../sw/bootloader/miv.hex")
+        .CONTENT("../../sw/uart/bl_miv.hex")
     ) bootrom (
         .clk    (clk),
         .addr   (mem_addr[6:2]),
@@ -229,33 +241,6 @@ module top (
                     end
                 end
             endcase
-        end
-*/
-/*
-        if (mem_valid & mem_write) begin
-            if (mem_addr[31:29]==3'b010) begin
-                // 4000'0000h - 5fff'ffff
-                if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
-                    case (mem_addr[3:2])
-                        2'b00: //'h4400_4000 mtimecmp
-                                mtimecmp[31:0] <= mem_wdata;
-                        2'b01: //'h4400_4004 mtimecmph
-                                mtimecmp[63:32] <= mem_wdata;
-                        2'b10: //'h4400_bff8 mtime
-                                mtime[31:0] <= mem_wdata;
-                        2'b11: //'h4400_bffc mtimeh
-                                mtime[63:32] <= mem_wdata;
-                    endcase
-                end
-            end if (mem_addr[31:29]==3'b011 && mem_addr[7:0]==0) begin
-                // 6000'0000h - 7fff'ffff
-                if (mem_wmask[0]) begin
-                    q_UartSendTX <= 0;
-                    q_UartSendClkCounter <= CLOCK_RATE / BAUD_RATE;
-                    q_UartSendBitCounter <= 10;
-                    q_UartSendBits <= mem_wdata[7:0];
-                end
-            end
         end
 */
         if (mem_valid & mem_write) begin
@@ -374,41 +359,6 @@ endmodule
 
 
 
-// 32 bit single ported zero latency memory
-module Memory32 #(
-    parameter WIDTH = 13,
-    parameter CONTENT = ""
-) (
-    input clk, 
-    input valid,
-    input write,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [WIDTH-1:0] addr,
-    output reg [31:0] rdata
-);
-    reg [31:0] mem [0:(1<<WIDTH)-1];
-
-    initial begin
-        if (CONTENT != "") $readmemh(CONTENT, mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (valid & write) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
-endmodule
-
-
-
-
-
-
 module SPRAMMemory (
     input clk,
     input valid,
@@ -446,34 +396,4 @@ SB_SPRAM256KA spram_hi(
     );
 
 endmodule
-
-
-module BRAMMemory (
-    input clk, 
-    input write,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [7:0] addr,
-    output reg [31:0] rdata
-);
-    reg [31:0] mem [0:255];
-
-    initial begin
-        $readmemh("../../sw/bootloader/bootloader.hex", mem);
-//        $readmemh("../../sw/bootloader/tiny.hex", mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (write) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
-endmodule
-
-
-
 

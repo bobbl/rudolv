@@ -1,3 +1,16 @@
+/* Wrapper to run Zephyr images for the Microsemi Creative Board MiV with 
+ * Icarus Verilog.
+ * Grubby support.
+ *
+ * memory map
+ * 4400'0000 mtimecmp (64 bit)
+ * 4400'bff8 mtime (64 bit)
+ * 7000'0000 UART send char
+ * 7000'0010 UART state
+ * 8000'0000 128 KiByte code memory (can be written although ROM at MiV)
+ * 8000'4000 64 KiByte data memory (+ grubby bit)
+ */
+
 module tb_grubby;
 
     reg clk = 1;
@@ -160,12 +173,10 @@ module tb_grubby;
             endcase
         end
 
-/*
         if (csr_addr==12'hbff && csr_modify!=0) begin
-            $display("exit due to write to CSR 0xbff / WFI");
+            $display("exit due to write to CSR 0x3ff / WFI");
             $finish;
         end
-*/
 
         irq_timer <= (mtime >= mtimecmp);
         mtime <= mtime + 1;

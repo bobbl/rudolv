@@ -7,4 +7,6 @@ Modifications:
     Set code start to 0 instead of 0x10000.
   * start.S: 
     Set stack pointer to end of available memory.
-    Signal program termination to simulator via tohost.
+    Signal program termination to simulator via CSR 0x3ff.
+  * stdlib.c:
+    Implement printf_c() via CSR 0xbc0

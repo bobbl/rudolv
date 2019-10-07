@@ -10,7 +10,7 @@ include ../../config_default.mk
 
 CODE = ../../sw/tests/build/simple.hex
 DEVICE = hx8k
-VERILOG_FILES = ../../pipeline.v
+VERILOG_FILES = ../../src/regset33.v ../../pipeline.v
 ARACHNE_DEVICE = 8k
 
 include device_$(DEVICE).mk

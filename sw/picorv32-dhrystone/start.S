@@ -49,6 +49,9 @@ start:
         /* simulation exit (added) */
         csrw 0x3ff, 1
 
+        /* infinite loop (for FPGA) */
+1:      j 1b
+
 	/* trap */
 	ebreak
 

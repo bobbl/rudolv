@@ -1437,7 +1437,9 @@ module CsrCounter #(
         RData <= 0;
         case (addr)
             12'hB00: RData <= q_CounterCYCLE[31:0];     // MCYCLE
+            12'hB02: RData <= q_CounterINSTRET[31:0];   // MINSTRET
             12'hB80: RData <= q_CounterCYCLEH;          // MCYCLEH
+            12'hB82: RData <= q_CounterINSTRETH;        // MINSRETH
             12'hC00: RData <= q_CounterCYCLE[31:0];     // CYCLE
             12'hC80: RData <= q_CounterCYCLEH;          // CYCLEH
             12'hC01: RData <= q_CounterCYCLE[31:0];     // TIME
@@ -1473,7 +1475,7 @@ endmodule
 
 
 
-module CsrUart #(
+module CsrUartBitbang #(
     parameter [11:0]  BASE_ADDR  = 12'h7c0,    // CSR address
     parameter integer CLOCK_RATE = 12_000_000,
     parameter integer BAUD_RATE  = 115200
@@ -1521,3 +1523,115 @@ module CsrUart #(
     assign rdata = RData;
     assign tx = q_TX;
 endmodule
+
+
+
+
+module CsrUartChar #(
+    parameter [11:0]  BASE_ADDR  = 12'hbc0,    // CSR address
+    parameter integer CLOCK_RATE = 12_000_000,
+    parameter integer BAUD_RATE  = 115200
+) (
+    input clk,
+    input rstn,
+
+    input read,
+    input [2:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    input rx,
+    output tx,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = read | |wdata;
+
+    localparam integer CLOCK_DIV = CLOCK_RATE / BAUD_RATE;
+
+    reg Valid;
+    reg [31:0] RData;
+
+    reg  [3:0] q_UartRecvBitCounter;
+    reg [15:0] q_UartRecvClkCounter;
+    reg  [6:0] q_UartRecvBits;
+    reg  [7:0] q_UartRecvChar;
+    reg        q_UartRecvEmpty;
+    reg        q_RX;
+    reg  [3:0] q_UartSendBitCounter;
+    reg [15:0] q_UartSendClkCounter;
+    reg  [7:0] q_UartSendBits;
+    reg        q_TX;
+
+
+    wire UartSendFull = (q_UartSendBitCounter!=0);
+
+    always @(posedge clk) begin
+        Valid <= 0;
+        RData <= 0;
+        if (addr==BASE_ADDR) begin
+            Valid <= 1;
+            RData <= {UartSendFull, q_UartRecvEmpty, q_UartRecvChar};
+            case (modify)
+                3'b001: begin // write
+                    if (!UartSendFull) begin
+                        q_TX <= 0;
+                        q_UartSendClkCounter <= CLOCK_DIV;
+                        q_UartSendBitCounter <= 10;
+                        q_UartSendBits <= wdata[7:0];
+                    end
+                end
+                3'b010: begin // set
+                    q_UartRecvEmpty <= 1;
+                end
+            endcase
+        end
+
+        q_RX <= rx;
+        if (q_UartRecvBitCounter) begin
+            if (q_UartRecvClkCounter) begin
+                q_UartRecvClkCounter <= q_UartRecvClkCounter - 1;
+            end else begin
+                q_UartRecvClkCounter <= CLOCK_DIV;
+                q_UartRecvBits <= {q_RX, q_UartRecvBits[6:1]};
+                if (q_UartRecvBitCounter==2) begin
+                    q_UartRecvEmpty <= 0;
+                    q_UartRecvChar <= {q_RX, q_UartRecvBits};
+                end
+                q_UartRecvBitCounter <= q_UartRecvBitCounter - 1;
+            end
+        end else if (~q_RX) begin
+            q_UartRecvClkCounter <= CLOCK_DIV / 2;
+            q_UartRecvBitCounter <= 10;
+        end
+
+        if (UartSendFull) begin
+            if (q_UartSendClkCounter) begin
+                q_UartSendClkCounter <= q_UartSendClkCounter - 1;
+            end else begin
+                q_UartSendClkCounter <= CLOCK_DIV;
+                q_TX <= q_UartSendBits[0];
+                q_UartSendBits <= {1'b1, q_UartSendBits[7:1]};
+                q_UartSendBitCounter <= q_UartSendBitCounter - 1;
+            end
+        end
+
+        if (!rstn) begin
+            q_UartRecvEmpty <= 1;
+            q_UartRecvBitCounter <= 0;
+            q_UartSendBitCounter <= 0;
+            q_TX <= 1;
+        end
+    end
+
+    assign valid = Valid;
+    assign rdata = RData;
+    assign tx = q_TX;
+endmodule
+
+
+
+
+

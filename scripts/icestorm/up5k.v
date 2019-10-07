@@ -40,10 +40,12 @@ module top (
 //    wire  [3:0] mem_wmask_main = (mem_write & ~mem_addr[17]) ? mem_wmask : 0;
 //    wire  [3:0] mem_wmask_boot = (mem_write &  mem_addr[17]) ? mem_wmask : 0;
     wire [31:0] mem_wdata;
+    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
     wire [31:0] mem_rdata = q_SelBootMem ? mem_rdata_boot : mem_rdata_main;
+    wire        mem_rgrubby = 0;
 
     reg q_SelBootMem;
     always @(posedge clk) begin
@@ -79,7 +81,7 @@ module top (
         .retired(retired)
     );
 
-    CsrUart #(
+    CsrUartChar #(
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
@@ -117,8 +119,10 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (mem_rdata)
+        .mem_rdata      (mem_rdata),
+        .mem_rgrubby    (mem_rgrubby)
     );
 
     SPRAMMemory mainmem (
@@ -192,8 +196,9 @@ module BRAMMemory (
     reg [31:0] mem [0:255];
 
     initial begin
-        $readmemh("../../sw/bootloader/bootloader.hex", mem);
-//        $readmemh("../../sw/bootloader/tiny.hex", mem);
+        $readmemh("../../sw/uart/build/bootloader_char.hex", mem);
+//        $readmemh("../../sw/uart/build/bl_char.hex", mem);
+//        $readmemh("../../sw/uart/build/test_char.hex", mem);
     end
 
     always @(posedge clk) begin
