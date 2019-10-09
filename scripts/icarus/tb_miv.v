@@ -189,8 +189,8 @@ module tb_grubby;
 
     initial begin
 //        #1_200_001 $display("***** TIMEOUT"); $stop; // enough for ripe 1,2,5
-        #3_100_001 $display("***** TIMEOUT"); $stop; // enough for ripe 3,4
-//        #103_100_001 $display("***** TIMEOUT"); $stop; // enough for ripe 3,4
+//        #3_100_001 $display("***** TIMEOUT"); $stop; // enough for ripe 3,4
+        #103_100_001 $display("***** TIMEOUT"); $stop; // enough for synchronization
     end
 
 endmodule

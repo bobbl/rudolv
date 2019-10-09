@@ -1,20 +1,30 @@
 #!/bin/sh
 
-cat << EOF
-Building 
-    bootloader  large bootloader with prompt and LED output
-    bl          minimal bootloader
-    test        UART test program to be used as firmware instead of bootloader
-for different UART interfaces
-    bitbang     directly control TX and RX pins by software
-    char        RudolV's CSR mapped character interface
-    miv         Mi-V compatible memory mapped character interface
-EOF
+if [ $# -eq 0 ] 
+then
+    echo "Usage: $0 all"
+    echo
+    echo "Build 3 firmware images for 3 uart interfaces"
+    echo
+    echo "firmware"
+    echo "  bootloader  large bootloader with prompt and LED output"
+    echo "  bl          minimal bootloader"
+    echo "  test        UART test program to be used instead of bootloader"
+    echo
+    echo "interface"
+    echo "  bitbang     directly control TX and RX pins by software"
+    echo "  char        RudolV's CSR mapped character interface"
+    echo "  miv         Mi-V compatible memory mapped character interface"
+    exit 1
+fi
 
+if [ $# -ne 1 ] || [ "$1" != "all" ]
+then
+    echo "Only target all supported"
+fi 
 
-
-. ../../config_default.sh
-[ ! -e ../../config.sh ] || . ../../config.sh
+# Read configuration for external tools
+. ../../config_default.sh ; [ ! -e ../../config.sh ] || . ../../config.sh
 
 
 

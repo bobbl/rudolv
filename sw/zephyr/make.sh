@@ -1,17 +1,6 @@
 #!/bin/sh
 
-BOARD=m2gl025_miv
 BUILDDIR=build
-RV32IM_PREFIX="${ZEPHYR_SDK_INSTALL_DIR}/riscv32-zephyr-elf/bin/riscv32-zephyr-elf-"
-
-
-# convert $1.elf to $1.bin and $1.hex
-# $1 filename
-elf_to_hex() {
-    ${RV32IM_PREFIX}objcopy -O binary $1.elf $1.bin
-    printf "@0 " > $1.hex
-    od -An -tx4 -w4 -v $1.bin | cut -b2- >> $1.hex
-}
 
 
 
@@ -25,24 +14,26 @@ target_zephyr() {
     sed -i 's/hub==/git-spindle==/' zephyr/scripts/requirements.txt 
 
     pip3 install --user -r zephyr/scripts/requirements.txt
-    export ZEPHYR_BASE=$(pwd)/zephyr
-    export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+    ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+    export ZEPHYR_TOOLCHAIN_VARIANT
+    ZEPHYR_BASE=$(pwd)/zephyr
+    export ZEPHYR_BASE
     cd ..
 }
 
 # $1 attack number 1..5
 target_ripe() {
-    SRCFILE=src/ripe_attack_generator.c
+    srcfile=src/ripe_attack_generator.c
     mkdir -p $BUILDDIR
     cd apps/ripe
 
     # set attack number
-    sed -i.bak "s/^#define ATTACK_NR   .*/#define ATTACK_NR   $1/" ${SRCFILE}
+    sed -i.bak "s/^#define ATTACK_NR   .*/#define ATTACK_NR   $1/" ${srcfile}
 
     rm -rf build
     west build -p -b m2gl025_miv
-    cp build/zephyr/zephyr.bin ../../$BUILDDIR/ripe$1.rv32im.bin
-    mv ${SRCFILE}.bak ${SRCFILE}
+    cp build/zephyr/zephyr.elf ../../$BUILDDIR/ripe$1.elf
+    mv ${srcfile}.bak ${srcfile}
     cd ../..
 }
 
@@ -53,10 +44,8 @@ west_build() {
     rm -rf build
 
     west build -p -b m2gl025_miv
-    cp build/zephyr/zephyr.elf ../../build/$1.rv32im.elf
+    cp build/zephyr/zephyr.elf ../../build/$1.elf
     cd ../..
-
-    elf_to_hex $BUILDDIR/$1.rv32im
 }
 
 
@@ -75,6 +64,27 @@ then
     exit 1
 fi
 
+if [ -z "$ZEPHYR_SDK_INSTALL_DIR" ]
+then
+    echo "ZEPHY_SDK_INSTALL_DIR must be set"
+    exit 2
+fi
+
+if [ -z "$ZEPHYR_TOOLCHAIN_VARIANT" ]
+then
+    if [ -d zephyrproject/zephr ]
+    then
+        echo "Zephyr not found. Set ZEPHYR_BASE or install with $0 zephyr"
+        exit 3
+    fi
+    ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+    export ZEPHYR_TOOLCHAIN_VARIANT
+    ZEPHYR_BASE=$(pwd)/zephyrproject/zephyr
+    export ZEPHYR_BASE
+fi
+
+
+
 apps=$(cd apps; echo * | sed 's/SOURCE//')
 
 while [ $# -ne 0 ]
@@ -87,11 +97,11 @@ do
             target_ripe 4
             target_ripe 5
             ;;
-        test)                   west_build $1 ;;
-        hello_world)            west_build $1 ;;
-        synchronization)        west_build $1 ;;
-        philosophers)           west_build $1 ;;
-        zephyr)                 target_zephyr ;;
+        test)            west_build $1 ;;
+        hello_world)     west_build $1 ;;
+        synchronization) west_build $1 ;;
+        philosophers)    west_build $1 ;;
+        zephyr)          target_zephyr ;;
         all)
 #            target_zephyr
             for a in $apps ; do west_build $a ; done

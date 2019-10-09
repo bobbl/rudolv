@@ -4,10 +4,10 @@
   asm volatile ("auipc %0, 0" : "=r"(__tmp)); \
   __tmp; })
 
-void delay(unsigned long cycles)
+static void delay(unsigned long cycles)
 {
-    unsigned long wait = read_csr(cycle);
-    while (read_csr(cycle) - wait < cycles);
+    unsigned long wait = read_cycle();
+    while (read_cycle() - wait < cycles);
 }
 
 static inline void set_leds(unsigned leds)
@@ -15,7 +15,7 @@ static inline void set_leds(unsigned leds)
     write_csr(0x7c1, leds);
 }
 
-void print_str(char *s)
+static void print_str(char *s)
 {
     char ch;
     while (ch=*s++) uart_send(ch);
@@ -39,7 +39,7 @@ static void print_int32(int32_t l)
     uart_send((l % 10) + '0');
 }
 
-void print_hex32(uint32_t l)
+static void print_hex32(uint32_t l)
 {
     int i;
     for (i=28; i>=0; i-=4) {
@@ -65,8 +65,8 @@ int main(int argc, char **argv)
         print_hex32(read_pc());
         print_str(" Hello5\r\n");
 
-        wait = read_csr(cycle);
-        while (read_csr(cycle) - wait < 12000000) { // one second
+        wait = read_cycle();
+        while (read_cycle() - wait < 12000000) { // one second
             ch = uart_nonblocking_receive();
             if (ch>0) uart_send(ch+1);
         }

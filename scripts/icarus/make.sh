@@ -5,8 +5,8 @@ then
     echo "Usage: $0 <targets> ..."
     echo "  run <file.elf>       Simulate without logging"
     echo "  debug <file.elf>     Simulate with extensive logging"
-    echo "  miv_run <file.elf>   Simulate Microsemi Mi-V memory map"
-    echo "  miv_debug <file.elf> Simulate Micorsemi Mi-V with logging"
+    echo "  miv-run <file.elf>   Simulate Microsemi Mi-V memory map"
+    echo "  miv-debug <file.elf> Simulate Micorsemi Mi-V with logging"
     echo "  tests                Run riscv-tests and riscv-compliance tests"
     echo
     echo "<file.elf>"
@@ -18,7 +18,7 @@ fi
 . ../../config_default.sh
 [ ! -e ../../config.sh ] || . ../../config.sh
 
-verilog_files="../../src/memory32.v ../../src/regset33.v ../../pipeline.v"
+verilog_files="../../src/memory.v ../../src/regset33.v ../../src/csr.v ../../pipeline.v"
 path_tests="../../sw/tests"
 path_compliance="../../sw/compliance"
 
@@ -103,12 +103,12 @@ do
             sim "-DDEBUG tb_tests.v" $2
             shift
             ;;
-        miv_run)
-            sim "tb_miv.v ../../src/memory36.v" $2
+        miv-run)
+            sim "tb_miv.v" $2
             shift
             ;;
-        miv_debug)
-            sim "-DDEBUG tb_miv.v ../../src/memory36.v" $2
+        miv-debug)
+            sim "-DDEBUG tb_miv.v" $2
             shift
             ;;
         tests)

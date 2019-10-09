@@ -14,8 +14,10 @@ fi
 bin=send_elf.tmp
 
 ${RV_PREFIX}objcopy -O binary "$2" $bin
+size=$(wc -c < $bin)
+echo "Sending $size bytes to UART"
 
 stty -F "$1" 115200
-echo $(wc -c < $bin) >> "$1"
+echo $size >> "$1"
 cat $bin >> "$1"
 rm $bin

@@ -67,6 +67,11 @@ void uart_send(unsigned ch)
     }
 }
 
+static inline unsigned long read_cycle()
+{
+    return read_csr(cycle);
+}
+
 #endif
 
 
@@ -105,6 +110,11 @@ void uart_send(unsigned ch)
     while (swap_csr(0xbc0, ch) & UART_SEND_BUF_FULL);
 }
 
+static inline unsigned long read_cycle()
+{
+    return read_csr(cycle);
+}
+
 #endif
 
 
@@ -117,11 +127,11 @@ void uart_send(unsigned ch)
 #define uart_recv_char (*(volatile char *)0x70000004)
 #define uart_state     (*(volatile char *)0x70000010)
 #define uart_send_ready (uart_state & 1)
-#define uart_recv_full (uart_state & 2)
+#define uart_recv_filled (uart_state & 2)
 
 int uart_nonblocking_receive()
 {
-    return uart_recv_full ? uart_recv_char : -1;
+    return uart_recv_filled ? uart_recv_char : -1;
 }
 
 int uart_blocking_receive()
@@ -137,6 +147,11 @@ void uart_send(unsigned ch)
 {
     while (!uart_send_ready);
     uart_send_char = ch;
+}
+
+static inline unsigned long read_cycle()
+{
+    return (*(volatile unsigned long *)0x4400bff8);
 }
 
 #endif
