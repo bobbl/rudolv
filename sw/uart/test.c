@@ -10,9 +10,9 @@ static void delay(unsigned long cycles)
     while (read_cycle() - wait < cycles);
 }
 
-static inline void set_leds(unsigned leds)
+static inline void set_leds(unsigned long leds)
 {
-    write_csr(0x7c1, leds);
+    write_csr(0xbc1, leds);
 }
 
 static void print_str(char *s)
@@ -56,12 +56,12 @@ int main(int argc, char **argv)
     unsigned long wait;
     int ch;
 
-//    set_leds(1);
+    set_leds(1);
     print_str("Starting\r\n");
-//    set_leds(ff_leds = 0xaa);
+    set_leds(ff_leds = 0xaa);
 
     while (1) {
-//        set_leds(ff_leds = ff_leds ^ 0xa4);
+        set_leds(ff_leds = ff_leds ^ 0xa4);
         print_hex32(read_pc());
         print_str(" Hello5\r\n");
 
@@ -83,3 +83,5 @@ int main(int argc, char **argv)
     }
 */
 }
+
+// SPDX-License-Identifier: ISC

@@ -5,8 +5,8 @@ Memory map
 0000'1E00h start address of boot loader
 
 CSR
-7c0h       UART
-7c1h       LEDs
+bc0h       UART
+bc1h       LEDs
 */
 
 module top (
@@ -28,8 +28,10 @@ module top (
     wire mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
+    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
+    wire        mem_rgrubby = 0;
 
 
     wire        CounterValid;
@@ -40,8 +42,10 @@ module top (
     wire [31:0] LedsRData;
 
     wire        retired;
+    wire        irq_timer=0;
+
     wire        csr_read;
-    wire [1:0]  csr_modify;
+    wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata = CounterRData | UartRData;
@@ -61,7 +65,7 @@ module top (
         .retired(retired)
     );
 
-    CsrUart #(
+    CsrUartChar #(
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
@@ -79,6 +83,7 @@ module top (
         .tx     (uart_tx)
     );
 
+/*
     CsrLeds csr_leds (
         .clk    (clk),
         .rstn   (rstn),
@@ -92,6 +97,23 @@ module top (
 
         .leds   (leds)
     );
+*/
+    CsrPinsOut #(
+        .BASE_ADDR(12'hbc1),
+        .COUNT(8)
+    ) csr_leds (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (LedsRData),
+        .valid  (LedsValid),
+
+        .pins   (leds)
+    );
 
     Pipeline #(
         .START_PC       (32'h_0000_1e00)
@@ -101,6 +123,8 @@ module top (
         .rstn           (rstn),
 
         .retired        (retired),
+        .irq_timer      (irq_timer),
+
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
         .csr_wdata      (csr_wdata),
@@ -112,8 +136,10 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (mem_rdata)
+        .mem_rdata      (mem_rdata),
+        .mem_rgrubby    (mem_rgrubby)
     );
 
     BRAMMemory mem (
@@ -138,11 +164,10 @@ module BRAMMemory (
     reg [31:0] mem [0:2047];
 
     initial begin
-        $readmemh("bootloader_hx8k.hex", mem);
+        $readmemh("hx8k_bootloader.hex", mem);
             // bootloader code is the same as on other platforms, but at the
             // beginning there must be '@1e00' to load the code at the correct
             // start adress
-//        $readmemh("../../sw/uart/uart.hex", mem);
     end
 
     always @(posedge clk) begin
@@ -156,15 +181,15 @@ module BRAMMemory (
     end
 endmodule
 
-
+/*
 module CsrLeds #(
-    parameter [11:0]  BASE_ADDR  = 12'h7c1 // CSR address
+    parameter [11:0]  BASE_ADDR  = 12'hbc1 // CSR address
 ) (
     input clk,
     input rstn,
 
     input read,
-    input [1:0] modify,
+    input [2:0] modify,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -184,9 +209,9 @@ module CsrLeds #(
             Valid <= 1;
             RData <= q_Leds;
             case (modify)
-                2'b01: q_Leds <= wdata[7:0]; // write 0
-                2'b10: q_Leds <= q_Leds | wdata[7:0]; // set
-                2'b11: q_Leds <= q_Leds &~ wdata[7:0]; // clear
+                3'b001: q_Leds <= wdata[7:0]; // write
+                3'b010: q_Leds <= q_Leds | wdata[7:0]; // set
+                3'b011: q_Leds <= q_Leds &~ wdata[7:0]; // clear
             endcase
         end
         if (~rstn) q_Leds <= 'h81;
@@ -196,3 +221,4 @@ module CsrLeds #(
     assign rdata = RData;
     assign leds = q_Leds;
 endmodule
+*/

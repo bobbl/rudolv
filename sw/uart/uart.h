@@ -22,6 +22,8 @@
 
 
 
+
+
 #ifdef UART_BITBANG
 // bitbanging interface: read and set RX and TX pins by software
 
@@ -159,3 +161,5 @@ static inline unsigned long read_cycle()
 
 
 #endif
+
+// SPDX-License-Identifier: ISC

@@ -40,8 +40,6 @@ module top (
 
     reg         irq_timer;
     wire        retired;
-//    reg [63:0]  mtime;
-//    reg [63:0]  mtimecmp;
     reg [31:0]  mtime;
     reg [31:0]  mtimecmp;
 
@@ -134,7 +132,7 @@ module top (
 
     ROM32 #(
         .WIDTH(5),
-        .CONTENT("../../sw/uart/bl_miv.hex")
+        .CONTENT("../../sw/uart/build/bl_miv.hex")
     ) bootrom (
         .clk    (clk),
         .addr   (mem_addr[6:2]),
@@ -144,34 +142,12 @@ module top (
 
 
 
-    wire        CounterValid;
-    wire [31:0] CounterRData;
-//    wire        UartValid;
-//    wire [31:0] UartRData;
-
     wire        csr_read;
     wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = 0; //CounterRData; // | UartRData;
-    wire        csr_valid = 0; //CounterValid; // | UartValid;
-
-/* Counter not required, use mtime instead
-
-    CsrCounter counter (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (CounterRData),
-        .valid  (CounterValid),
-
-        .retired(retired)
-    );
-*/
+    wire [31:0] csr_rdata = 0;
+    wire        csr_valid = 0;
 
     Pipeline #(
         .START_PC       (0)
@@ -335,30 +311,6 @@ module top (
 endmodule
 
 
-
-module ROM32 #(
-    parameter WIDTH = 13,
-    parameter CONTENT = ""
-) (
-    input clk, 
-    input [WIDTH-1:0] addr,
-    output reg [31:0] rdata
-);
-    localparam integer SIZE = 1 << WIDTH;
-
-    reg [31:0] mem [0:SIZE-1];
-
-    initial begin
-        $readmemh("../../sw/bootloader/miv.hex", mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-    end
-endmodule
-
-
-
 module SPRAMMemory (
     input clk,
     input valid,
@@ -396,4 +348,3 @@ SB_SPRAM256KA spram_hi(
     );
 
 endmodule
-

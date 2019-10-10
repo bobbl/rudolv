@@ -1,4 +1,4 @@
-bootloader_hx8k.hex
+hx8k_bootloader.hex
 *.asc
 *.bin
 *.blif

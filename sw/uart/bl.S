@@ -146,3 +146,5 @@ get_image:
         jr      ra
 
 #endif
+
+# SPDX-License-Identifier: ISC

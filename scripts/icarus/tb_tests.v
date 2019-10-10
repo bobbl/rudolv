@@ -1,6 +1,7 @@
 module tb_tests;
 
     localparam CSR_UART = 12'hbc0;
+    localparam CSR_LEDS = 12'hbc1;
     localparam CSR_SIM  = 12'h3ff;
 
     reg clk = 1;
@@ -109,6 +110,9 @@ module tb_tests;
                 end
                 CSR_UART: begin
                     $write("\033[1;37m%c\033[0m", csr_wdata[7:0]);
+                end
+                CSR_LEDS: begin
+                    $write("\033[1;35mLED(%b)\033[0m", csr_wdata[7:0]);
                 end
             endcase
         end

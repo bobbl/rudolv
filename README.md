@@ -2,12 +2,15 @@
 
 A 32 bit RISC-V processor with 5 pipeline stages and in-order execution.
 The architecture avoids speculative components to provide a predictable timing
-as required by hard real-time systems. It is based on a submission to the 
+as required by hard real-time systems. It started as a submission to the
 [2018 RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
-RudolV participates in the [2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
+RudolV won the 
+[third prize](https://riscv.org/2019/10/announcing-the-winners-of-the-risc-v-soft-cpu-contest/)
+in the
+[2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
+.
 
-__EXCUSE:__ Due to the time consuming contest, the other parts of the
-repository currently are not up-to-date.
+__EXCUSE:__ Xilinx and Altera ports are not up-to-date.
 
 
 RISC-V SoftCPU Contest on Security
@@ -183,14 +186,14 @@ Synthesis with IceStorm
 Synthesize with Project IceStorm and flash to a Lattice iCE40 UltraPlus MDP board.
 The board must be configured to flash and run FPGA U4.
 
-    make -C sw/bootloader/
-    make -C scripts/icestorm/ DEVICE=up5k ARACHNE_DEVICE="5k -P uwg30" clean arachne prog
+    cd scripts/icestorm
+    ./make.sh uwg30 bootloader synth pnr prog
 
 Now the processor within the FPGA executes the bootloader and waits for data
 from the UART. To run the Dhrystone benchmark on the FPGA use:
 
-    make -C sw/uart-dhrystone/
-    sw/bootloader/send_elf.sh /dev/ttyUSB1 sw/uart-dhrystone/dhrystone.elf
+    make -C sw/riscv-dhrystone
+    sw/uart/send_elf.sh /dev/ttyUSB1 sw/riscv-dhrystone/dhrystone.elf
 
 This Dhrystone version is derived from the risv-tests version, but with the
 correct clock frequency of 24 MHz and 100'000 iterations. The result is 32697
