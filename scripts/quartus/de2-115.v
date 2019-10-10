@@ -5,8 +5,8 @@ Memory map
 0000'FE00h start address of boot loader
 
 CSR
-7c0h       UART
-7c1h       LEDs
+bc0h       UART
+bc1h       LEDs
 */
 
 
@@ -84,8 +84,8 @@ module top (
         .AVOID_WARNING()
     );
 
-    CsrLeds #(
-        .WIDTH(18)
+    CsrPinsOut #(
+        .COUNT(18)
     ) csr_leds (
         .clk    (CLOCK_50),
         .rstn   (rstn),
@@ -97,7 +97,7 @@ module top (
         .rdata  (LedsRData),
         .valid  (LedsValid),
 
-        .leds   (LEDR),
+        .pins   (LEDR),
 
         .AVOID_WARNING()
     );
@@ -143,7 +143,7 @@ module BRAMMemory (
     input [13:0] addr,
     output reg [31:0] rdata
 );
-//    reg [31:0] mem [0:'h3fff];
+    //reg [31:0] mem [0:'h3fff];
     reg [7:0] mem0 [0:'h3fff];
     reg [7:0] mem1 [0:'h3fff];
     reg [7:0] mem2 [0:'h3fff];
@@ -161,15 +161,13 @@ module BRAMMemory (
     end
 
     always @(posedge clk) begin
-//        rdata <= mem[addr];
+        //rdata <= mem[addr];
         rdata <= {mem3[addr], mem2[addr], mem1[addr], mem0[addr]};
         if (write) begin
-/*
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-*/
+            //if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
+            //if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
+            //if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
+            //if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
             if (wmask[0]) mem0[addr] <= wdata[7:0];
             if (wmask[1]) mem1[addr] <= wdata[15:8];
             if (wmask[2]) mem2[addr] <= wdata[23:16];
@@ -179,47 +177,4 @@ module BRAMMemory (
 endmodule
 
 
-module CsrLeds #(
-    parameter [11:0]  BASE_ADDR  = 12'h7c1, // CSR address
-    parameter [11:0]  WIDTH  = 18 // number of leds
-) (
-    input clk,
-    input rstn,
-
-    input read,
-    input [1:0] modify,
-    input [31:0] wdata,
-    input [11:0] addr,
-    output [31:0] rdata,
-    output valid,
-
-    output [WIDTH-1:0] leds,
-
-    output AVOID_WARNING
-);
-    assign AVOID_WARNING = read | |wdata;
-
-    reg [WIDTH-1:0] q_Leds;
-    reg Valid;
-    reg [31:0] RData;
-
-    always @(posedge clk) begin
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= q_Leds;
-            case (modify)
-                2'b01: q_Leds <= wdata[WIDTH-1:0]; // write 0
-                2'b10: q_Leds <= q_Leds | wdata[WIDTH-1:0]; // set
-                2'b11: q_Leds <= q_Leds &~ wdata[WIDTH-1:0]; // clear
-                default: ;
-            endcase
-        end
-        if (~rstn) q_Leds <= 'h81;
-    end
-
-    assign valid = Valid;
-    assign rdata = RData;
-    assign leds = q_Leds;
-endmodule
+// SPDX-License-Identifier: ISC

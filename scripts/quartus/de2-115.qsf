@@ -3,6 +3,7 @@ set_global_assignment -name TOP_LEVEL_ENTITY top
 set_global_assignment -name VERILOG_FILE ../de2-115.v
 set_global_assignment -name VERILOG_FILE ../../../pipeline.v
 set_global_assignment -name VERILOG_FILE ../../../src/regset33.v
+set_global_assignment -name VERILOG_FILE ../../../src/csr.v
 set_global_assignment -name SDC_FILE ../de2-115.sdc
 
 #============================================================
