@@ -1,5 +1,8 @@
 module tb_coremark;
 
+    localparam CSR_UART = 12'hbc0;
+    localparam CSR_SIM  = 12'h3ff;
+
     reg clk = 1;
     always #5 clk = !clk;
 
@@ -8,15 +11,19 @@ module tb_coremark;
         #40 rstn = 1;
     end
 
+    wire irq_timer = 1;
+
     wire mem_valid;
     wire mem_write;
     wire [3:0] mem_wmask;
     wire [31:0] mem_wdata;
+    wire mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
+    wire mem_rgrubby = 0;
 
     Memory32 #(
-        .WIDTH(13),
+        .WIDTH(13), // 4 * (2**13) = 32 KiByte
         .CONTENT(`CODE)
     ) mem (
         .clk    (clk),
@@ -29,7 +36,7 @@ module tb_coremark;
     );
 
     wire csr_read;
-    wire [1:0] csr_modify;
+    wire [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata;
@@ -48,24 +55,34 @@ module tb_coremark;
         .valid  (csr_valid)
     );
 
+    reg q_ReadUART;
+    // wire [31:0] CsrRData = q_ReadUART ? 0 : csr_rdata; 
+    //   csr_rdata is 0 anyway
+    wire CsrValid = q_ReadUART | csr_valid;
+
+
     Pipeline dut (
         .clk            (clk),
         .rstn           (rstn),
 
+        .irq_timer      (irq_timer),
         .retired        (retired),
+
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),
-        .csr_valid      (csr_valid),
+        .csr_valid      (CsrValid),
 
         .mem_valid      (mem_valid),
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (mem_rdata)
+        .mem_rdata      (mem_rdata),
+        .mem_rgrubby    (mem_rgrubby)
     );
 
 
@@ -73,59 +90,24 @@ module tb_coremark;
 
     integer i;
     always @(posedge clk) begin
-        if (mem_valid & mem_write) begin
-            case (mem_addr)
-                'h10000000: begin
-                    //if (mem_wmask[0]) $write("\033[1;37m%c\033[0m", mem_wdata[7:0]);
-                    if (mem_wmask[0]) $write("%c", mem_wdata[7:0]);
+        q_ReadUART <= csr_read & (csr_addr==CSR_UART);
+
+        if (csr_modify==1) begin
+            case (csr_addr)
+                CSR_SIM: begin
+                    $finish;
                 end
-                'h10001000: begin
-                    if (mem_wmask[0] & mem_wdata[0]) begin
-                        //$display("exit simulation (store to 0x10001000)");
-                        $finish;
-                    end
+                CSR_UART: begin
+                    $write("%c", csr_wdata[7:0]);
                 end
             endcase
         end
     end
 
     initial begin
-        #100_000_000 $display("***** TIMEOUT"); $stop;
+        #300_000_000 $display("***** TIMEOUT"); $stop;
     end
 
 
 endmodule
 
-
-
-// 32 bit single ported zero latency memory
-module Memory32 #(
-    parameter WIDTH = 13, // 32 KiByte
-    parameter CONTENT = "memory.hex"
-) (
-    input clk, 
-    input valid,
-    input write,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [WIDTH-1:0] addr,
-    output reg [31:0] rdata
-);
-    localparam integer SIZE = 1 << WIDTH;
-
-    reg [31:0] mem [0:SIZE-1];
-
-    initial begin
-        $readmemh(CONTENT, mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (valid & write) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
-endmodule

@@ -31,9 +31,8 @@ _start2:
         # a0 = 0 = mhartid
         # a1 = 1 = number of cores
 2:      jal     main
-        lui     a0, 0x10001
-        li      a1, 1
-        sw      a1, 0(a0)
+
+3:      j       3b
 
 
 .section ".tdata.begin"

@@ -196,9 +196,9 @@ module BRAMMemory (
     reg [31:0] mem [0:255];
 
     initial begin
-//        $readmemh("../../sw/uart/build/bootloader_char.hex", mem);
+        $readmemh("../../sw/uart/build/bootloader_char.hex", mem);
 //        $readmemh("../../sw/uart/build/bl_char.hex", mem);
-        $readmemh("../../sw/uart/build/test_char.hex", mem);
+//        $readmemh("../../sw/uart/build/test_char.hex", mem);
     end
 
     always @(posedge clk) begin

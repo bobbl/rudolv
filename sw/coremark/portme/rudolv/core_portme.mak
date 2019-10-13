@@ -3,7 +3,7 @@ include ../../../config_default.mk
 CC = $(RV32_PREFIX)gcc
 LD = $(RV32_PREFIX)ld
 AS = $(RV32_PREFIX)as
-PORT_CFLAGS = -O2 -march=rv32i -mabi=ilp32
+PORT_CFLAGS = -O2 -march=rv32im -mabi=ilp32
 LFLAGS_END = -nostartfiles -T$(PORT_DIR)/link.ld
 PORT_SRCS = $(PORT_DIR)/core_portme.c $(PORT_DIR)/ee_printf.c $(PORT_DIR)/crt.S
 
@@ -54,5 +54,7 @@ port_postbuild:
 	$(RV32_PREFIX)objcopy -O binary coremark.elf coremark.bin
 	printf "@0 " > coremark.hex
 	od -An -tx4 -w4 -v coremark.bin | cut -b2- >> coremark.hex
-	$(IVERILOG) -o tmp.vvp -DCODE=\"coremark.hex\" $(PORT_DIR)/tb_coremark.v ../../../pipeline.v
+	$(IVERILOG) -o tmp.vvp -DCODE=\"coremark.hex\" \
+	    $(PORT_DIR)/tb_coremark.v ../../../pipeline.v ../../../src/csr.v \
+	    ../../../src/regset33.v ../../../src/memory.v
 
