@@ -10,8 +10,8 @@ then
     echo "  tests                Run riscv-tests and riscv-compliance tests"
     echo
     echo "<file.elf>"
-    echo "  ../../sw/picorv-dhrystone/dhrystone.elf  Benchmark from picorrv32 repo"
-    echo "  ../../sw/riscv-dhrystone/dhrystone.elf   Benchmark from RISC-V repo"
+    echo "  ../../sw/picorv32-dhrystone/dhrystone.elf  Benchmark from picorv32 repo"
+    echo "  ../../sw/riscv-dhrystone/dhrystone.elf     Benchmark from RISC-V repo"
     exit 1
 fi
 

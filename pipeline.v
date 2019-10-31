@@ -276,14 +276,19 @@ module Pipeline #(
                 // d_TimerInt will be killed because it is in the delay slots
                 // of the MRET instructions.
             end
-        end
-        else if (MULDIVOpcode & ~MultiCycle & ~m_Kill)
+        end else if (MULDIVOpcode & ~MultiCycle & ~m_Kill) begin
             // start of multicycle execution
             // the next instruction is currently beeing fetched and must
             // be overwritten.
             Insn <= 32'h13; // NOP
+        end else if (d_MultiCycleCounter > 2) begin
+            // == 0 : no multi cycle instruction
+            // == 1 : last cycle, fetch next instruction
+            // == 2 : last but one cycle, fetch multicycle opcode once again
+            Insn <= 32'h13; // NOP
+
 `ifdef ENABLE_TIMER
-        else if (irq_timer & f_MModeIntEnable & ~MultiCycle) begin
+        end else if (irq_timer & f_MModeIntEnable & ~MultiCycle) begin
             // not the absoultely correct priority, but works
             TimerInt <= 1;
             MModeIntEnable <= 0;
@@ -291,11 +296,10 @@ module Pipeline #(
             Insn <= {7'b0000000, 5'b00000,
                      REG_CSR_MTVEC[4:0],
                      3'b110, 5'b00000, 7'b1100111}; // JALR
-        end
 `endif
-        else if ((d_Bubble | d_SaveFetch) & ~m_Kill)
+        end else if ((d_Bubble | d_SaveFetch) & ~m_Kill) begin
             Insn <= d_DelayedInsn;
-        else begin
+        end else begin
             DecodeGrubbyInsn <= mem_rgrubby;
             Insn <= mem_rdata;
         end
@@ -303,6 +307,7 @@ module Pipeline #(
     wire RdNo1Aux = Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn
                            | (irq_timer & f_MModeIntEnable);
 
+    wire MemValid = (d_MultiCycleCounter < 4) | m_Kill;
 
 
 
@@ -895,7 +900,7 @@ module Pipeline #(
                                                                     e_B[7:0]};
     wire MemWriteDataGrubby = e_AGrubby | e_BGrubby;
 
-    assign mem_valid = 1;
+    assign mem_valid = MemValid;
     assign mem_write = e_MemWr & ~DualKill;
     assign mem_wmask = MemSignals[3:0];
     assign mem_wdata = MemWriteData;
@@ -1138,6 +1143,7 @@ module Pipeline #(
 /*
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
+*/
 
         $display("E MCCounter=%h rem=%h %h mul=%h e_FromMul=%b e_StartMC=%b",
             d_MultiCycleCounter, q_DivRem, q_MulB, q_MulC, e_FromMul,
@@ -1146,7 +1152,6 @@ module Pipeline #(
             vMulResLo, SelDivOrMul, m_SelDivOrMul, e_DivSigned);
         $display("E div=%h e_FromDivOrRem=%b NotLastMC=%b",
             q_DivQuot, e_FromDivOrRem, NotLastMultiCycle);
-*/
 
 
         $display("X Exc UserDEM %b%b%b GInsnDEM %b%b%b GJumpFDE %b%b%b JumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",

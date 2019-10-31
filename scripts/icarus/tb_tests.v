@@ -23,7 +23,7 @@ module tb_tests;
     wire [31:0] mem_rdata;
     wire mem_rgrubby = 0;
 
-    Memory32 #(
+    Memory32Sim #(
         .WIDTH(13), // 4 * (2**13) = 32 KiByte
         .CONTENT(`CODE)
     ) mem (
