@@ -8,7 +8,9 @@ module Pipeline #(
     input  clk,
     input  rstn,
 
+    input  irq_software,
     input  irq_timer,
+    input  irq_external,
     output retired,
 
     output csr_read,            // can be ignored if there are no side-effects
@@ -183,8 +185,15 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
     reg        f_MModeIntEnable;        // mstatus.mie
     reg        f_MModePriorIntEnable;   // mstatus.mpie
-    reg        d_TimerInt;
+    reg        f_SoftwareInt;
+    reg        d_SoftwareInt;
+    reg        e_SoftwareInt;
+    reg        f_TimerInt;      // external pin high
+    reg        d_TimerInt;      // high, when insn is completed
     reg        e_TimerInt;
+    reg        f_ExternalInt;
+    reg        d_ExternalInt;
+    reg        e_ExternalInt;
 
     reg [2:0]  e_CsrModify;
     reg [31:0] e_CsrWData;
@@ -208,7 +217,9 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
     reg MModeIntEnable;
     reg MModePriorIntEnable;
+    reg SoftwareInt;
     reg TimerInt;
+    reg ExternalInt;
 `endif
 
 
@@ -216,7 +227,9 @@ module Pipeline #(
     always @* begin
         DecodeGrubbyInsn <= 0;
 `ifdef ENABLE_TIMER
+        SoftwareInt <= 0;
         TimerInt <= 0;
+        ExternalInt <= 0;
         MModeIntEnable <= f_MModeIntEnable;
         MModePriorIntEnable <= f_MModePriorIntEnable;
         if (e_CsrAddr==12'h300) begin  // mstatus
@@ -281,16 +294,24 @@ module Pipeline #(
             // the next instruction is currently beeing fetched and must
             // be overwritten.
             Insn <= 32'h13; // NOP
-        end else if (d_MultiCycleCounter > 2) begin
+        end else if ((d_MultiCycleCounter > 2) & ~m_Kill) begin
             // == 0 : no multi cycle instruction
             // == 1 : last cycle, fetch next instruction
             // == 2 : last but one cycle, fetch multicycle opcode once again
             Insn <= 32'h13; // NOP
 
 `ifdef ENABLE_TIMER
-        end else if (irq_timer & f_MModeIntEnable & ~MultiCycle) begin
+        end else if (f_MModeIntEnable & ~MultiCycle &
+            (f_SoftwareInt | f_TimerInt | f_ExternalInt))
             // not the absoultely correct priority, but works
-            TimerInt <= 1;
+        begin
+            if (f_ExternalInt)
+                ExternalInt <= 1;
+            else if (f_SoftwareInt)
+                SoftwareInt <= 1;
+            else
+                TimerInt <= 1;
+
             MModeIntEnable <= 0;
             MModePriorIntEnable <= f_MModeIntEnable;
             Insn <= {7'b0000000, 5'b00000,
@@ -305,7 +326,7 @@ module Pipeline #(
         end
     end
     wire RdNo1Aux = Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn
-                           | (irq_timer & f_MModeIntEnable);
+                   | ((ExternalInt|SoftwareInt|TimerInt) & f_MModeIntEnable);
 
     wire MemValid = (d_MultiCycleCounter < 4) | m_Kill;
 
@@ -615,13 +636,15 @@ module Pipeline #(
     wire vNotBEQ = ((e_InsnBLTorBLTU & vLess) | e_InsnJALorFENCEI) & ~DualKill;
     wire vCondResultBit = e_SetCond & vLess;
 
-    wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & ~DualKill);
+    wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & (~DualKill |
+        (e_SoftwareInt | e_TimerInt | e_ExternalInt)));
         // any jump or exception
 
 
     wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
     wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
-    wire [WORD_WIDTH-1:0] NextOrSum = ((e_MemAccess | e_InsnJALR) & ~DualKill)
+    wire [WORD_WIDTH-1:0] NextOrSum = (((e_MemAccess | e_InsnJALR) & ~DualKill)
+        | (e_SoftwareInt | e_TimerInt | e_ExternalInt))
         //? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 
@@ -633,10 +656,10 @@ module Pipeline #(
 */
 
     // within multicycle, but not the last one
-    wire NotLastMultiCycle = ~m_Kill &
-     (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2));
+    wire NotLastMultiCycle = (~m_Kill & ~e_InsnJALR &
+     (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2)));
 //     ~~~~~~~~~~~~~~~~                                         ~~~~~~~~~~
-//     first                                                 second to one befor last
+//     first                                                 second to one before last
 
     wire [WORD_WIDTH-1:0] NextOrSum_2 = NotLastMultiCycle ? d_PC : NextOrSum;
 
@@ -754,11 +777,13 @@ module Pipeline #(
 
 
     wire [4:0] Cause = m_ExcMem        ? (m_MemWr ? 5'h06 : 5'h04) :
+                      (e_SoftwareInt   ? 5'h13 :
                       (e_TimerInt      ? 5'h17 :
+                      (e_ExternalInt   ? 5'h1b :
                       (e_ExcUser       ? e_Cause1 :
                       (e_ExcGrubbyInsn ? 5'h0e : 
                       (ExcGrubbyJump   ? 5'h0a : 
-                      /* e_ExcJump */    5'h00 )))); // -> m_Cause
+                      /* e_ExcJump */    5'h00 )))))); // -> m_Cause
     wire [4:0] Cause1 = d_Insn[20] ? 5'h03 : 5'h0b; // -> e_Cause1
 
 
@@ -767,7 +792,11 @@ module Pipeline #(
                         : d_PC;         // MEPC 
     wire [WORD_WIDTH-1:0] ExcWrData =
         WriteMCAUSE     ? {m_Cause[4], {(WORD_WIDTH-5){1'b0}}, m_Cause[3:0]}  // MCAUSE
-                        : e_ExcWrData2;
+
+                        // special case if interrupt directly after branch insn
+                        : ((m_Kill & (e_SoftwareInt | e_TimerInt | e_ExternalInt))
+                            ? f_PC
+                            : e_ExcWrData2);
 
     wire [WORD_WIDTH-1:0] CsrResult =
         vExcOverwrite   ? ((e_ExcJump | e_ExcGrubbyJump) ? e_ExcWrData2 // MTVAL for jump
@@ -1047,7 +1076,8 @@ module Pipeline #(
         e_ExcWrData2        <= ExcWrData2;
         m_ExcWrData         <= ExcWrData; 
         e_ExcUser           <= ExcUser;
-        m_ExcUser           <= (e_ExcUser & ~m_Kill) | e_TimerInt;
+        m_ExcUser           <= (e_ExcUser & ~m_Kill) 
+                                | e_SoftwareInt | e_TimerInt | e_ExternalInt;
         e_ExcGrubbyInsn     <= ExcGrubbyInsn;
         m_ExcGrubbyInsn     <= (e_ExcGrubbyInsn & ~m_Kill);
         d_ExcJump           <= ExcJump;
@@ -1078,8 +1108,16 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
+
+        f_SoftwareInt       <= irq_software;
+        d_SoftwareInt       <= SoftwareInt;
+        e_SoftwareInt       <= d_SoftwareInt;
+        f_TimerInt          <= irq_timer;
         d_TimerInt          <= TimerInt;
         e_TimerInt          <= d_TimerInt;
+        f_ExternalInt       <= irq_external;
+        d_ExternalInt       <= ExternalInt;
+        e_ExternalInt       <= d_ExternalInt;
 
         e_CsrModify         <= csr_modify;
         e_CsrWData          <= csr_wdata;
@@ -1103,7 +1141,7 @@ module Pipeline #(
         e_CsrRead           <= CsrRead;
         m_CsrRead           <= e_CsrRead;
         m_CsrValid          <= csr_valid | CsrValidInternal;
-        m_CsrRdData         <= csr_rdata  | CsrRDataInternal;
+        m_CsrRdData         <= csr_rdata | CsrRDataInternal;
 
 
 
@@ -1176,14 +1214,14 @@ module Pipeline #(
 
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchPC);
 
-/*
         $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
             vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
         $display("  e_InsnBLTorBLTU=%b vLess=%b e_InsnJALorFENCEI=%b",
             e_InsnBLTorBLTU, vLess, e_InsnJALorFENCEI);
         $display("  e_InsnBEQ=%b e_InvertBranch=%b vEqual=%b",
             e_InsnBEQ, e_InvertBranch, vEqual);
-*/
+
+
 
         $display("G MemResultGrubby=%b e_AGrubby=%b",
             MemResultGrubby, e_AGrubby);
@@ -1213,11 +1251,9 @@ module Pipeline #(
             RegSet.regs[REG_CSR_MTVAL]);
 */
 
-//        $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h",
-//            AddrSum, NextOrSum, NoBranch);
+        $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h NextOrSum_2=%h",
+            AddrSum, NextOrSum, NoBranch, NextOrSum_2);
 
-
-/*
         $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b",
             vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp);
         $display("C vCsrOrALU=%h CsrResult=%h",
@@ -1229,7 +1265,6 @@ module Pipeline #(
             m_CsrRead, m_CsrValid, m_CsrRdData);
         $display("C CSR addr=%h rdata=%h valid=%b",
             csr_addr, csr_rdata, csr_valid);
-*/
 
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
@@ -1250,9 +1285,12 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b MPIE=%b d_TimerInt=%b irq_timer=%b e_InsnJALR=%b",
+        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b e_InsnJALR=%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
-            d_TimerInt, irq_timer, e_InsnJALR);
+            f_SoftwareInt, d_SoftwareInt, e_SoftwareInt,
+            f_TimerInt, d_TimerInt, e_TimerInt,
+            f_ExternalInt, d_ExternalInt, e_ExternalInt,
+            e_InsnJALR);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1295,7 +1333,9 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
+            d_SoftwareInt <= 0;
             d_TimerInt <= 0;
+            d_ExternalInt <= 0;
 `endif
 
         end

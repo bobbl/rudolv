@@ -1,8 +1,10 @@
 module tb_tests;
 
-    localparam CSR_UART = 12'hbc0;
-    localparam CSR_LEDS = 12'hbc1;
-    localparam CSR_SIM  = 12'h3ff;
+    localparam CSR_UART  = 12'hbc0;
+    localparam CSR_LEDS  = 12'hbc1;
+    localparam CSR_SWI   = 12'hbc1;
+    localparam CSR_TIMER = 12'hbc2;
+    localparam CSR_SIM   = 12'h3ff;
 
     reg clk = 1;
     always #5 clk = !clk;
@@ -12,7 +14,9 @@ module tb_tests;
         #40 rstn = 1;
     end
 
-    wire irq_timer = 1;
+    wire irq_software;
+    wire irq_timer;
+    wire irq_external = 0;
 
     wire mem_valid;
     wire mem_write;
@@ -36,12 +40,19 @@ module tb_tests;
         .rdata  (mem_rdata)
     );
 
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+    wire        PinsValid;
+    wire [31:0] PinsRData;
+    wire        TimerValid;
+    wire [31:0] TimerRData;
+
     wire csr_read;
     wire [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata;
-    wire csr_valid;
+    wire [31:0] csr_rdata = CounterRData | PinsRData | TimerRData;
+    wire        csr_valid = CounterValid | PinsValid | TimerValid;
 
     CsrCounter counter (
         .clk    (clk),
@@ -52,9 +63,46 @@ module tb_tests;
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (csr_rdata),
-        .valid  (csr_valid)
+        .rdata  (CounterRData),
+        .valid  (CounterValid)
     );
+
+    CsrPinsOut #(
+        .BASE_ADDR(CSR_SWI),
+        .COUNT(1),
+        .RESET_VALUE(0)
+    ) SoftwareInt (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (PinsRData),
+        .valid  (PinsValid),
+
+        .pins   (irq_software)
+    );
+
+    CsrTimerAdd #(
+        .BASE_ADDR(CSR_TIMER),
+        .WIDTH(32)
+    ) Timer (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (TimerRData),
+        .valid  (TimerValid),
+
+        .irq    (irq_timer)
+    );
+
+
 
     reg q_ReadUART;
     // wire [31:0] CsrRData = q_ReadUART ? 0 : csr_rdata; 
@@ -66,7 +114,9 @@ module tb_tests;
         .clk            (clk),
         .rstn           (rstn),
 
+        .irq_software   (irq_software),
         .irq_timer      (irq_timer),
+        .irq_external   (irq_external),
         .retired        (retired),
 
         .csr_read       (csr_read),
@@ -110,9 +160,6 @@ module tb_tests;
                 end
                 CSR_UART: begin
                     $write("\033[1;37m%c\033[0m", csr_wdata[7:0]);
-                end
-                CSR_LEDS: begin
-                    $write("\033[1;35mLED(%b)\033[0m", csr_wdata[7:0]);
                 end
             endcase
         end

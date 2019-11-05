@@ -160,7 +160,8 @@ endmodule
 // Write to output pins (can be used to control LEDs)
 module CsrPinsOut #(
     parameter [11:0]  BASE_ADDR  = 12'hbc1, // CSR address
-    parameter integer COUNT = 4
+    parameter integer COUNT = 4,
+    parameter [COUNT-1:0] RESET_VALUE = 'b1
 ) (
     input clk,
     input rstn,
@@ -195,7 +196,7 @@ module CsrPinsOut #(
                 default: ;
             endcase
         end
-        if (~rstn) q_Pins <= 'b1;
+        if (~rstn) q_Pins <= RESET_VALUE;
     end
 
     assign valid = Valid;
@@ -365,6 +366,68 @@ module CsrUartChar #(
     assign valid = Valid;
     assign rdata = RData;
     assign tx = q_TX;
+endmodule
+
+
+
+
+// Timer
+module CsrTimerAdd #(
+    parameter [11:0]  BASE_ADDR  = 12'hbc2,     // CSR address
+    parameter integer WIDTH = 16
+) (
+    input clk,
+    input rstn,
+
+    input read,
+    input [2:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    output irq,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = read | |wdata;
+
+
+    reg Valid;
+    reg [31:0] RData;
+    reg [WIDTH-1:0] q_Time;
+    reg [WIDTH-1:0] q_TimeCmp;
+    reg q_Enable;
+    reg q_Request;
+
+    always @(posedge clk) begin
+        q_Request <= q_Enable & (q_TimeCmp <= q_Time);
+
+        Valid <= 0;
+        RData <= 0;
+        if (addr==BASE_ADDR) begin
+            Valid <= 1;
+            RData <= q_Time;
+            case (modify)
+                3'b001: begin // write
+                    q_Enable <= 1;
+                    q_TimeCmp <= q_Time + wdata[WIDTH-1:0];
+                end
+                3'b011: begin // clear
+                    q_Enable <= 0;
+                end
+            endcase
+        end
+
+        if (!rstn) begin
+            q_Enable <= 0;
+            q_Time <= 0;
+        end
+    end
+
+    assign valid = Valid;
+    assign rdata = RData;
+    assign irq = q_Request;
 endmodule
 
 
