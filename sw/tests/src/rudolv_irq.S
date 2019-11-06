@@ -6,8 +6,9 @@
 #
 # Test interrupt handling.
 #   Tests 1-3: no trap
-#   Tests 4-6: IE permanently on, toggle SWI
-#   Tests 7-9: SWI permanently on, toggle IE
+#   Tests 11-14: IE permanently on, toggle SWI
+#   Tests 21-24: SWI permanently on, toggle IE
+#   Tests 31-32: timer interrupt and WFI
 #
 # Requires a special CSR configuration:
 #   rdcycle
@@ -19,10 +20,12 @@
 #include "riscv_test.h"
 #include "test_macros.h"
 
-#define ENABLE_SOFTINT  csrs 0xbc1, 1
-#define DISABLE_SOFTINT csrc 0xbc1, 1
+
 #define ENABLE_INTS     csrs mstatus, 8
 #define DISABLE_INTS    csrc mstatus, 8
+#define ENABLE_SOFTINT  csrs 0xbc1, 1
+#define DISABLE_SOFTINT csrc 0xbc1, 1
+#define CSR_TIMER       0xbc2
 
 
 RVTEST_RV64U
@@ -48,7 +51,6 @@ test_1:
         li      x4, 100
         bne     x7, x4, restore_fail
 
-
         #-------------------------------------------------------------
         # Test 2: IE=0 SWI=1 => no trap
         #-------------------------------------------------------------
@@ -59,7 +61,6 @@ test_2:
         jal     wait_for_int            # wait, handler should not be called
         li      x4, 100
         bne     x7, x4, restore_fail
-
 
         #-------------------------------------------------------------
         # Test 3: IE=1 SWI=0 => no trap
@@ -75,11 +76,15 @@ test_3:
         bne     x7, x4, restore_fail
 
 
+
+
+
+
         #-------------------------------------------------------------
-        # Test 4: IE=1 then SWI=1 => trap (interrupt li sequence)
+        # Test 11: IE=1 then SWI=1 => trap (interrupt li sequence)
         #-------------------------------------------------------------
-test_4:
-        li      TESTNUM, 4
+test_11:
+        li      TESTNUM, 11
         li      x7, 0x70
         ENABLE_SOFTINT
         xor     x7, x7, 0x400
@@ -90,24 +95,22 @@ test_4:
         li      x4, 0x800007f3          # cause: software interrupt
         bne     x7, x4, restore_fail
 
-
         #-------------------------------------------------------------
-        # Test 5: IE=1 then SWI=1 => trap (interrupt jal)
+        # Test 12: IE=1 then SWI=1 => trap (interrupt jal)
         #-------------------------------------------------------------
-test_5:
-        li      TESTNUM, 5
+test_12:
+        li      TESTNUM, 12
         li      x7, 0x70
         ENABLE_SOFTINT
         jal     wait_for_int            # wait, handler should modify x7
         li      x4, 0x80000073          # cause: software interrupt
         bne     x7, x4, restore_fail
 
-
         #-------------------------------------------------------------
-        # Test 6: IE=1 then SWI=1 => trap (interrupt multicycle div)
+        # Test 13: IE=1 then SWI=1 => trap (interrupt multicycle div)
         #-------------------------------------------------------------
-test_6:
-        li      TESTNUM, 6
+test_13:
+        li      TESTNUM, 13
         li      x7, 0x400
         li      x10, 1000000000
         li      x11, 1000000
@@ -118,6 +121,18 @@ test_6:
         bne     x7, x4, restore_fail
         li      x4, 1000                # division result correct?
         bne     x12, x4, restore_fail
+
+        #-------------------------------------------------------------
+        # Test 14: IE=1 then SWI=1 => trap (interrupt wfi)
+        #-------------------------------------------------------------
+test_14:
+        li      TESTNUM, 5
+        li      x7, 0x90
+        ENABLE_SOFTINT
+        wfi
+        li      x4, 0x80000093          # cause: software interrupt
+        bne     x7, x4, restore_fail
+
 
 
 
@@ -125,16 +140,16 @@ test_6:
         # alternative trap handler: clear IE after trap
         DISABLE_INTS
         la      x4, trap_disable_ie
-        csrrw   x4, mtvec, x4
+        csrw    mtvec, x4
         fence.i
         ENABLE_SOFTINT
         fence.i
 
         #-------------------------------------------------------------
-        # Test 7: SWI=1 then IE=1 => trap (interrupt li sequence)
+        # Test 21: SWI=1 then IE=1 => trap (interrupt li sequence)
         #-------------------------------------------------------------
-test_7:
-        li      TESTNUM, 12
+test_21:
+        li      TESTNUM, 21
         li      x7, 0x70
         ENABLE_INTS
         xor     x7, x7, 0x400
@@ -147,10 +162,10 @@ test_7:
 
 
         #-------------------------------------------------------------
-        # Test 8: SWI=1 then IE=1 => trap (interrupt jal)
+        # Test 22: SWI=1 then IE=1 => trap (interrupt jal)
         #-------------------------------------------------------------
-test_8:
-        li      TESTNUM, 13
+test_22:
+        li      TESTNUM, 22
         li      x7, 0x70
         ENABLE_INTS
         jal     wait_for_int            # wait, handler should modify x7
@@ -159,10 +174,10 @@ test_8:
 
 
         #-------------------------------------------------------------
-        # Test 9: SWI=1 then IE=1 => trap (interrupt multicycle div)
+        # Test 23: SWI=1 then IE=1 => trap (interrupt multicycle div)
         #-------------------------------------------------------------
-test_9:
-        li      TESTNUM, 9
+test_23:
+        li      TESTNUM, 23
         li      x7, 0x400
         li      x10, 1000000000
         li      x11, 1000000
@@ -173,6 +188,61 @@ test_9:
         bne     x7, x4, restore_fail
         li      x4, 1000                # division result correct?
         bne     x12, x4, restore_fail
+
+
+        #-------------------------------------------------------------
+        # Test 24: SWI=1 then IE=1 => trap (interrupt wfi)
+        #-------------------------------------------------------------
+test_24:
+        li      TESTNUM, 24
+        li      x7, 0x70
+        ENABLE_INTS
+        wfi
+        li      x4, 0x80000073          # cause: software interrupt
+        bne     x7, x4, restore_fail
+
+
+
+
+
+
+        # alternative trap handler: clear timer int after trap
+        DISABLE_SOFTINT
+        la      x4, trap_disable_timer
+        csrw    mtvec, x4
+
+        #-------------------------------------------------------------
+        # Test 31: IE=1 then timer int => trap (interrupt loop)
+        #-------------------------------------------------------------
+test_31:
+        li      TESTNUM, 31
+        li      x7, 0x60
+
+        ENABLE_INTS
+        li      x4, 50
+        csrw    CSR_TIMER, x4
+
+        li      x6, 200
+        jal     wait_for_int            # wait, handler should modify x7
+        li      x4, 0x80000067          # cause: timer interrupt
+        bne     x7, x4, restore_fail
+
+
+        #-------------------------------------------------------------
+        # Test 32: IE=1 then timer int => trap (interrupt wfi)
+        #-------------------------------------------------------------
+test_32:
+        li      TESTNUM, 32
+        li      x7, 0x50
+
+        ENABLE_INTS
+        li      x4, 50
+        csrw    CSR_TIMER, x4
+
+        wfi                             # does not work if wfi is just a nop
+
+        li      x4, 0x80000057          # cause: timer interrupt
+        bne     x7, x4, restore_fail
 
 
 
@@ -200,7 +270,6 @@ restore_fail:
 
 # Wait x6 cycles
 # If am interrupt occurs, x7 will be clobbered
-# Input: x5 saved mstatus, will be restored at end of subroutine
 
 wait_for_int:
         rdcycle x8
@@ -221,6 +290,13 @@ trap_disable_softint:
 trap_disable_ie:
         li      x20, 0x80       # MSTATUS.MPIE=0 disable ints after return
         csrc    mstatus, x20
+        csrr    x20, mcause
+        xor     x7, x7, x20
+        mret
+
+
+trap_disable_timer:
+        csrc    CSR_TIMER, 1
         csrr    x20, mcause
         xor     x7, x7, x20
         mret

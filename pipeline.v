@@ -185,6 +185,8 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
     reg        f_MModeIntEnable;        // mstatus.mie
     reg        f_MModePriorIntEnable;   // mstatus.mpie
+    reg        f_WaitForInt; 
+
     reg        f_SoftwareInt;
     reg        d_SoftwareInt;
     reg        e_SoftwareInt;
@@ -217,6 +219,7 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
     reg MModeIntEnable;
     reg MModePriorIntEnable;
+    reg WaitForInt;
     reg SoftwareInt;
     reg TimerInt;
     reg ExternalInt;
@@ -232,6 +235,7 @@ module Pipeline #(
         ExternalInt <= 0;
         MModeIntEnable <= f_MModeIntEnable;
         MModePriorIntEnable <= f_MModePriorIntEnable;
+        WaitForInt <= f_WaitForInt;
         if (e_CsrAddr==12'h300) begin  // mstatus
             case (e_CsrModify)
                 3'b001: begin // write
@@ -250,17 +254,21 @@ module Pipeline #(
                 end
             endcase
         end
+        if (InsnWFI & ~m_Kill) WaitForInt <= 1;
+
 `endif
         if (Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn) begin
             //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-            if (CsrPart & ~f_ExcGrubbyJump)
+            if ((CsrPart & ~f_ExcGrubbyJump) | InsnWFI) begin
 // better: SysOpcode & CsrPart 
 
                 Insn <= {7'b0000000, 5'b00000,
                          vCsrTranslate,
 //                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
                          3'b110, vCsrTranslate, 7'b0110011}; // OR
-            else if (~ExcUser & ~ExcGrubbyInsn & ~ExcJump & ~f_ExcGrubbyJump 
+
+/*
+            end else if (~ExcUser & ~ExcGrubbyInsn & ~ExcJump & ~f_ExcGrubbyJump 
                 & ~MemAccess & ~InsnMRET) begin // WFI
 
 
@@ -272,7 +280,7 @@ module Pipeline #(
 //                Insn <= {12'hbff, 5'b00001, 3'b101, 5'b00000, 7'b1110011}; 
                     // CSRWI 0xbff, 1 to signal simulation end
                     // caution: zephyt app synchronization hangs with it
-
+*/
             end else begin
                 Insn <= {7'b0000000, 5'b00000, 
                          (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
@@ -280,7 +288,7 @@ module Pipeline #(
                 if (InsnMRET) begin
                     MModeIntEnable <= f_MModePriorIntEnable;
                     MModePriorIntEnable <= 1;
-                end else begin // exception
+                end else if (!InsnWFI) begin // exception
                     MModeIntEnable <= 0;
                     MModePriorIntEnable <= f_MModeIntEnable;
                 end
@@ -314,9 +322,12 @@ module Pipeline #(
 
             MModeIntEnable <= 0;
             MModePriorIntEnable <= f_MModeIntEnable;
+            WaitForInt <= 0;
             Insn <= {7'b0000000, 5'b00000,
                      REG_CSR_MTVEC[4:0],
                      3'b110, 5'b00000, 7'b1100111}; // JALR
+        end else if (f_WaitForInt) begin
+            Insn <= 32'h13; // NOP
 `endif
         end else if ((d_Bubble | d_SaveFetch) & ~m_Kill) begin
             Insn <= d_DelayedInsn;
@@ -403,6 +414,7 @@ module Pipeline #(
     wire PrivOpcode     =  d_Insn[5] && (d_Insn[14:12]==0);
     wire InsnJALorJALR  =  d_Insn[6:4]==3'b110 && d_Insn[2];
     wire MRETOpcode     = (d_Insn[23:20]==4'b0010);
+    wire WFIOpcode      = (d_Insn[23:20]==4'b0101);
 
     wire SUBorSLL       =  d_Insn[13] | d_Insn[12] | (d_Insn[5] & d_Insn[30]);
     wire SUBandSLL      = ~d_Insn[14] & ~d_Insn[6] & d_Insn[4];
@@ -426,6 +438,7 @@ module Pipeline #(
     wire InsnBLTorBLTU  =  BranchOpcode & ~d_Insn[2] &  d_Insn[14];
     wire InsnJALorFENCEI= (d_Insn[6]==d_Insn[5]) && d_Insn[4:2]==3'b011;
 
+    wire InsnWFI        =  SysOpcode & PrivOpcode & WFIOpcode; // check more bits?
     wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
     wire InsnCSR        =  SysOpcode & CsrPart & ~m_Kill;
 
@@ -658,14 +671,21 @@ module Pipeline #(
     // within multicycle, but not the last one
     wire NotLastMultiCycle = (~m_Kill & ~e_InsnJALR &
      (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2)));
-//     ~~~~~~~~~~~~~~~~                                         ~~~~~~~~~~
+//     ^^^^^^^^^^^^^^                                          ^^^^^^^^^^^^^^^^^^^^
 //     first                                                 second to one before last
 
     wire [WORD_WIDTH-1:0] NextOrSum_2 = NotLastMultiCycle ? d_PC : NextOrSum;
 
-    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? e_PCImm : NextOrSum_2;
-    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum_2;
-    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)     ? e_PCImm : NoBranch;
+    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)    ? e_PCImm : NextOrSum_2;
+
+//    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum_2;
+    wire [WORD_WIDTH-1:0] NoBranch  = 
+        ((d_Bubble & ~m_Kill) | WaitForInt)               ? f_PC    : NextOrSum_2;
+//                              ^^^^^^^^^^
+// Maybe on the critical path f_WaitForInt would be better
+
+    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)    ? e_PCImm : NoBranch;
+
 //    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
     wire [WORD_WIDTH-1:0] DecodePC  = 
         ( (d_Bubble|NotLastMultiCycle) & ~m_Kill) ? d_PC    : f_PC;
@@ -1108,6 +1128,7 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
+        f_WaitForInt        <= WaitForInt;
 
         f_SoftwareInt       <= irq_software;
         d_SoftwareInt       <= SoftwareInt;
@@ -1285,12 +1306,12 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b e_InsnJALR=%b",
+        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI=%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             f_SoftwareInt, d_SoftwareInt, e_SoftwareInt,
             f_TimerInt, d_TimerInt, e_TimerInt,
             f_ExternalInt, d_ExternalInt, e_ExternalInt,
-            e_InsnJALR);
+            f_WaitForInt);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1333,6 +1354,7 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
+            f_WaitForInt <= 0;
             d_SoftwareInt <= 0;
             d_TimerInt <= 0;
             d_ExternalInt <= 0;

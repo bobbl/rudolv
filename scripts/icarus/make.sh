@@ -49,8 +49,8 @@ check_sig() {
 target_tests() {
 
     # build binaries
-    make -s -C ${path_tests}
-    make -s -C ${path_compliance}
+    make -s -C ${path_tests} || exit 1
+    make -s -C ${path_compliance} || exit 1
 
     # count tests
     echo "TAP version 13"

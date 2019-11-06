@@ -402,6 +402,7 @@ module CsrTimerAdd #(
 
     always @(posedge clk) begin
         q_Request <= q_Enable & (q_TimeCmp <= q_Time);
+        q_Time <= q_Time + 'b1;
 
         Valid <= 0;
         RData <= 0;
@@ -409,11 +410,11 @@ module CsrTimerAdd #(
             Valid <= 1;
             RData <= q_Time;
             case (modify)
-                3'b001: begin // write
+                3'b001: begin // write: set relative timer
                     q_Enable <= 1;
                     q_TimeCmp <= q_Time + wdata[WIDTH-1:0];
                 end
-                3'b011: begin // clear
+                3'b011: begin // clear with any value disables the timer
                     q_Enable <= 0;
                 end
             endcase
