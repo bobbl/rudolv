@@ -226,16 +226,105 @@ module Pipeline #(
 `endif
 
 
-    reg [31:0] Insn;
+
+    reg FetchDirect;
+    reg FetchDelayed;
+    reg [1:0] FetchSynth;
+
+    localparam [1:0] fsNOP = 2'b00;
+    localparam [1:0] fsCSR = 2'b01;
+    localparam [1:0] fsJumpMTVEC = 2'b10;
+    localparam [1:0] fsJumpMEPC  = 2'b11;
+
     always @* begin
-        DecodeGrubbyInsn <= 0;
-`ifdef ENABLE_TIMER
+
+        FetchDirect <= 0;
+        FetchDelayed <= 0;
+        FetchSynth <= 0;
+
         SoftwareInt <= 0;
         TimerInt <= 0;
         ExternalInt <= 0;
+        WaitForInt <= f_WaitForInt;
+        if (InsnWFI & ~m_Kill) WaitForInt <= 1;
+
+        if (m_Kill) begin
+            if (f_PC[1]) begin // ExcJump
+                FetchSynth <= fsJumpMTVEC;
+            end else begin
+                FetchDirect <= 1;
+            end
+        end else begin
+            if (f_ExcGrubbyJump | ExcGrubbyInsn) begin
+                FetchSynth <= fsJumpMTVEC;
+            end else if (SysOpcode) begin
+                if (CsrPart) begin
+                    FetchSynth <= fsCSR;
+                end else if (ExcUser) begin
+                    FetchSynth <= fsJumpMTVEC;
+                end else if (InsnMRET) begin
+                    FetchSynth <= fsJumpMEPC;
+                    // KNOWN BUG:
+                    // If irq_timer ist still 1 when the MRET restores MIE to 1,
+                    // d_TimerInt will be killed because it is in the delay slots
+                    // of the MRET instructions.
+                end else begin // WFI and other system opcodes -> nop
+                    FetchSynth <= fsNOP;
+                end
+            end else if (MemAccess) begin
+                FetchSynth <= fsJumpMTVEC;
+
+            end else begin
+                if (d_MultiCycleCounter!=0) begin
+                    // == 0 : no multi cycle instruction
+                    // == 1 : last cycle, fetch next instruction
+                    // == 2 : last but one cycle, fetch multicycle opcode once again
+                    if (d_MultiCycleCounter > 2) begin
+                        FetchSynth <= fsNOP;
+                    end else begin
+                        FetchDirect <= 1;
+                    end
+                end else begin
+                    if (MULDIVOpcode) begin
+                        // start of multicycle execution
+                        // the next instruction is currently beeing fetched and must
+                        // be overwritten.
+                        FetchSynth <= fsNOP;
+                    end else if (f_MModeIntEnable &
+                        (f_SoftwareInt | f_TimerInt | f_ExternalInt))
+                        // not the absolutely correct priority, but works
+                    begin
+                        if (f_ExternalInt)
+                            ExternalInt <= 1;
+                        else if (f_SoftwareInt)
+                            SoftwareInt <= 1;
+                        else
+                            TimerInt <= 1;
+                        WaitForInt <= 0;
+
+                        FetchSynth <= fsJumpMTVEC;
+                    end else if (f_WaitForInt) begin
+                        FetchSynth <= fsNOP;
+                    end else if (d_Bubble | d_SaveFetch) begin
+                        FetchDelayed <= 1;
+                    end else begin
+                        FetchDirect <= 1;
+                    end
+                end
+            end
+        end
+    end
+
+
+
+
+    reg [31:0] Insn;
+    always @* begin
+        Insn <= 0;
+        DecodeGrubbyInsn <= 0;
+
         MModeIntEnable <= f_MModeIntEnable;
         MModePriorIntEnable <= f_MModePriorIntEnable;
-        WaitForInt <= f_WaitForInt;
         if (e_CsrAddr==12'h300) begin  // mstatus
             case (e_CsrModify)
                 3'b001: begin // write
@@ -254,88 +343,36 @@ module Pipeline #(
                 end
             endcase
         end
-        if (InsnWFI & ~m_Kill) WaitForInt <= 1;
-
-`endif
-        if (Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn) begin
-            //if (~ExcUser & ~ExcJump & ~MemAccess & ~InsnMRET)
-            if ((CsrPart & ~f_ExcGrubbyJump) | InsnWFI) begin
-// better: SysOpcode & CsrPart 
-
-                Insn <= {7'b0000000, 5'b00000,
-                         vCsrTranslate,
-//                         3'b110, d_Insn[11:7], 7'b0110011}; // OR
-                         3'b110, vCsrTranslate, 7'b0110011}; // OR
-
-/*
-            end else if (~ExcUser & ~ExcGrubbyInsn & ~ExcJump & ~f_ExcGrubbyJump 
-                & ~MemAccess & ~InsnMRET) begin // WFI
 
 
-                Insn <= {7'b0000000, 5'b00000, 5'b00000,
-                         3'b110, 5'b00000, 7'b0110011}; // OR X0, X0, X0
-                    // nop
-
-                //Insn <= 32'hbff0d073
-//                Insn <= {12'hbff, 5'b00001, 3'b101, 5'b00000, 7'b1110011}; 
-                    // CSRWI 0xbff, 1 to signal simulation end
-                    // caution: zephyt app synchronization hangs with it
-*/
-            end else begin
-                Insn <= {7'b0000000, 5'b00000, 
-                         (InsnMRET ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]), 
-                         3'b110, 5'b00000, 7'b1100111}; // JALR
-                if (InsnMRET) begin
-                    MModeIntEnable <= f_MModePriorIntEnable;
-                    MModePriorIntEnable <= 1;
-                end else if (!InsnWFI) begin // exception
-                    MModeIntEnable <= 0;
-                    MModePriorIntEnable <= f_MModeIntEnable;
-                end
-                // KNOWN BUG:
-                // If irq_timer ist still 1 when the MRET restores MIE to 1,
-                // d_TimerInt will be killed because it is in the delay slots
-                // of the MRET instructions.
-            end
-        end else if (MULDIVOpcode & ~MultiCycle & ~m_Kill) begin
-            // start of multicycle execution
-            // the next instruction is currently beeing fetched and must
-            // be overwritten.
-            Insn <= 32'h13; // NOP
-        end else if ((d_MultiCycleCounter > 2) & ~m_Kill) begin
-            // == 0 : no multi cycle instruction
-            // == 1 : last cycle, fetch next instruction
-            // == 2 : last but one cycle, fetch multicycle opcode once again
-            Insn <= 32'h13; // NOP
-
-`ifdef ENABLE_TIMER
-        end else if (f_MModeIntEnable & ~MultiCycle &
-            (f_SoftwareInt | f_TimerInt | f_ExternalInt))
-            // not the absoultely correct priority, but works
-        begin
-            if (f_ExternalInt)
-                ExternalInt <= 1;
-            else if (f_SoftwareInt)
-                SoftwareInt <= 1;
-            else
-                TimerInt <= 1;
-
-            MModeIntEnable <= 0;
-            MModePriorIntEnable <= f_MModeIntEnable;
-            WaitForInt <= 0;
-            Insn <= {7'b0000000, 5'b00000,
-                     REG_CSR_MTVEC[4:0],
-                     3'b110, 5'b00000, 7'b1100111}; // JALR
-        end else if (f_WaitForInt) begin
-            Insn <= 32'h13; // NOP
-`endif
-        end else if ((d_Bubble | d_SaveFetch) & ~m_Kill) begin
-            Insn <= d_DelayedInsn;
-        end else begin
-            DecodeGrubbyInsn <= mem_rgrubby;
+        if (FetchDirect) begin
             Insn <= mem_rdata;
+            DecodeGrubbyInsn <= mem_rgrubby;
+        end else begin
+            if (FetchDelayed) begin
+                Insn <= d_DelayedInsn;
+            end else begin
+                if (~FetchSynth[1]) begin
+                    Insn <= {7'b0000000, 5'b00000,
+                             vCsrTranslate,
+                             3'b110, 
+                             (FetchSynth[0] ? vCsrTranslate : 5'b0),
+                             7'b0110011}; // OR X0/CSR, CSR, X0
+                end else begin
+                    Insn <= {7'b0000000, 5'b00000,
+                             (FetchSynth[0] ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
+                             3'b110,
+                             5'b00000,
+                             7'b1100111}; // JALR X0, MTVEC/MEPC, 0
+                    MModeIntEnable <= f_MModePriorIntEnable & FetchSynth[0];
+                    MModePriorIntEnable <= f_MModeIntEnable | FetchSynth[0];
+                end
+            end
         end
     end
+
+
+
     wire RdNo1Aux = Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn
                    | ((ExternalInt|SoftwareInt|TimerInt) & f_MModeIntEnable);
 
@@ -440,7 +477,7 @@ module Pipeline #(
 
     wire InsnWFI        =  SysOpcode & PrivOpcode & WFIOpcode; // check more bits?
     wire InsnMRET       =  SysOpcode & PrivOpcode & MRETOpcode; // check more bits?
-    wire InsnCSR        =  SysOpcode & CsrPart & ~m_Kill;
+    wire InsnCSR        =  SysOpcode & CsrPart;
 
     // control signals for the ALU that are set in the decode stage
     wire SelSum         = ArithOpcode & ~MULDIVPart
@@ -455,7 +492,7 @@ module Pipeline #(
         ? (MULDIVPart ? 2'b01 : d_Insn[13:12])
         : {1'b0, ~InsnBEQ};
 
-    wire CsrFromExt     = InsnCSR & ~CsrFromReg;
+    wire CsrFromExt     = InsnCSR & ~m_Kill & ~CsrFromReg;
     wire CsrRead        = CsrFromExt & ~(DestReg0Part & ~d_Insn[7]);
 
     wire MemWr          = MemAccess & d_Insn[5];
@@ -484,7 +521,7 @@ module Pipeline #(
     // external CSR interface
     assign retired    = ~d_Bubble & ~m_Kill & ~w_Kill;
     assign csr_read   = CsrRead;
-    assign csr_modify = {Kill, (InsnCSR & (~d_Insn[13] | (d_Insn[19:15]!=0))) ? d_Insn[13:12] : 2'b00};
+    assign csr_modify = {Kill, (InsnCSR & ~m_Kill & (~d_Insn[13] | (d_Insn[19:15]!=0))) ? d_Insn[13:12] : 2'b00};
     assign csr_wdata  = d_Insn[14] ? d_Insn[19:15] : ForwardAE;
     assign csr_addr   = d_Insn[31:20];
 
@@ -844,7 +881,7 @@ module Pipeline #(
     end
 */
     wire [4:0] vCsrTranslate = {d_Insn[26], d_Insn[23:20]};
-    wire CsrFromReg = InsnCSR && (d_Insn[31:27]==5'b00110) && 
+    wire CsrFromReg = (InsnCSR & ~m_Kill) && (d_Insn[31:27]==5'b00110) && 
         (d_Insn[25:23]==3'b0) &&
         (
          (d_Insn[22:20]==3'b100) || // mie, mip
