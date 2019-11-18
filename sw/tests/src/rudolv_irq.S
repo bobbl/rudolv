@@ -273,6 +273,8 @@ restore_fail:
 
 wait_for_int:
         rdcycle x8
+        la      x9, tdat
+        sw      x8, 0(x9)       # check if SW clears IE
 loop:
         rdcycle x9
         sub     x9, x9, x8
@@ -310,6 +312,8 @@ RVTEST_CODE_END
 RVTEST_DATA_BEGIN
 
   TEST_DATA
+
+tdat:   .word 0
 
 RVTEST_DATA_END
 

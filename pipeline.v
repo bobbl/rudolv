@@ -202,7 +202,6 @@ module Pipeline #(
     reg [11:0] e_CsrAddr;
 `endif
 
-    reg DecodeGrubbyInsn;
     reg d_GrubbyInsn;
 
 
@@ -217,8 +216,6 @@ module Pipeline #(
     // fetch
 
 `ifdef ENABLE_TIMER
-    reg MModeIntEnable;
-    reg MModePriorIntEnable;
     reg WaitForInt;
     reg SoftwareInt;
     reg TimerInt;
@@ -230,6 +227,8 @@ module Pipeline #(
     reg FetchDirect;
     reg FetchDelayed;
     reg [1:0] FetchSynth;
+    reg MstatusExcEnter;
+    reg MstatusExcLeave;
 
     localparam [1:0] fsNOP = 2'b00;
     localparam [1:0] fsCSR = 2'b01;
@@ -241,6 +240,8 @@ module Pipeline #(
         FetchDirect <= 0;
         FetchDelayed <= 0;
         FetchSynth <= 0;
+        MstatusExcEnter <= 0;
+        MstatusExcLeave <= 0;
 
         SoftwareInt <= 0;
         TimerInt <= 0;
@@ -251,19 +252,23 @@ module Pipeline #(
         if (m_Kill) begin
             if (f_PC[1]) begin // ExcJump
                 FetchSynth <= fsJumpMTVEC;
+                MstatusExcEnter <= 1;
             end else begin
                 FetchDirect <= 1;
             end
         end else begin
             if (f_ExcGrubbyJump | ExcGrubbyInsn) begin
                 FetchSynth <= fsJumpMTVEC;
+                MstatusExcEnter <= 1;
             end else if (SysOpcode) begin
                 if (CsrPart) begin
                     FetchSynth <= fsCSR;
                 end else if (ExcUser) begin
                     FetchSynth <= fsJumpMTVEC;
+                    MstatusExcEnter <= 1;
                 end else if (InsnMRET) begin
                     FetchSynth <= fsJumpMEPC;
+                    MstatusExcLeave <= 1;
                     // KNOWN BUG:
                     // If irq_timer ist still 1 when the MRET restores MIE to 1,
                     // d_TimerInt will be killed because it is in the delay slots
@@ -273,6 +278,12 @@ module Pipeline #(
                 end
             end else if (MemAccess) begin
                 FetchSynth <= fsJumpMTVEC;
+                // MstatusExcEnter <= 1;
+                // KNOWN BUG:
+                // Without this line, MSTATUS.IE is not cleared when a memory
+                // misaligned exception is raised, i.e. such an exception can be
+                // interrupted by an external event.
+                // With this line each load/store will clear MSTATUS.IE.
 
             end else begin
                 if (d_MultiCycleCounter!=0) begin
@@ -290,6 +301,8 @@ module Pipeline #(
                         // the next instruction is currently beeing fetched and must
                         // be overwritten.
                         FetchSynth <= fsNOP;
+
+`ifdef ENABLE_TIMER
                     end else if (f_MModeIntEnable &
                         (f_SoftwareInt | f_TimerInt | f_ExternalInt))
                         // not the absolutely correct priority, but works
@@ -303,6 +316,9 @@ module Pipeline #(
                         WaitForInt <= 0;
 
                         FetchSynth <= fsJumpMTVEC;
+                        MstatusExcEnter <= 1;
+`endif
+
                     end else if (f_WaitForInt) begin
                         FetchSynth <= fsNOP;
                     end else if (d_Bubble | d_SaveFetch) begin
@@ -316,13 +332,50 @@ module Pipeline #(
     end
 
 
-
-
+    // set instruction word for decode
     reg [31:0] Insn;
+    reg DecodeGrubbyInsn;
+    reg RdNo1Aux;
     always @* begin
         Insn <= 0;
         DecodeGrubbyInsn <= 0;
+        RdNo1Aux <= 0;
+        if (FetchDirect) begin
+            Insn <= mem_rdata;
+            DecodeGrubbyInsn <= mem_rgrubby;
+        end else begin
+            if (FetchDelayed) begin
+                Insn <= d_DelayedInsn;
+            end else begin
+                RdNo1Aux <= (FetchSynth != fsNOP);
+                if (~FetchSynth[1]) begin
+                    Insn <= {7'b0000000, 5'b00000,
+                             vCsrTranslate,
+                             3'b110, 
+                             (FetchSynth[0] ? vCsrTranslate : 5'b0),
+                             7'b0110011}; // OR X0/CSR, CSR, X0
+                end else begin
+                    Insn <= {7'b0000000, 5'b00000,
+                             (FetchSynth[0] ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
+                             3'b110,
+                             5'b00000,
+                             7'b1100111}; // JALR X0, MTVEC/MEPC, 0
+                end
+            end
+        end
+    end
 
+    wire MemValid = (d_MultiCycleCounter < 4) | m_Kill;
+
+
+
+
+
+`ifdef ENABLE_TIMER
+    // modify MSTATUS
+    reg MModeIntEnable;
+    reg MModePriorIntEnable;
+    always @* begin
         MModeIntEnable <= f_MModeIntEnable;
         MModePriorIntEnable <= f_MModePriorIntEnable;
         if (e_CsrAddr==12'h300) begin  // mstatus
@@ -343,40 +396,17 @@ module Pipeline #(
                 end
             endcase
         end
-
-
-        if (FetchDirect) begin
-            Insn <= mem_rdata;
-            DecodeGrubbyInsn <= mem_rgrubby;
-        end else begin
-            if (FetchDelayed) begin
-                Insn <= d_DelayedInsn;
-            end else begin
-                if (~FetchSynth[1]) begin
-                    Insn <= {7'b0000000, 5'b00000,
-                             vCsrTranslate,
-                             3'b110, 
-                             (FetchSynth[0] ? vCsrTranslate : 5'b0),
-                             7'b0110011}; // OR X0/CSR, CSR, X0
-                end else begin
-                    Insn <= {7'b0000000, 5'b00000,
-                             (FetchSynth[0] ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
-                             3'b110,
-                             5'b00000,
-                             7'b1100111}; // JALR X0, MTVEC/MEPC, 0
-                    MModeIntEnable <= f_MModePriorIntEnable & FetchSynth[0];
-                    MModePriorIntEnable <= f_MModeIntEnable | FetchSynth[0];
-                end
-            end
+        if (MstatusExcEnter) begin
+            MModeIntEnable <= 0;
+            MModePriorIntEnable <= f_MModeIntEnable;
+        end
+        if (MstatusExcLeave) begin
+            MModeIntEnable <= f_MModePriorIntEnable;
+            MModePriorIntEnable <= 1;
         end
     end
+`endif
 
-
-
-    wire RdNo1Aux = Bubble | ExcJump | f_ExcGrubbyJump | ExcGrubbyInsn
-                   | ((ExternalInt|SoftwareInt|TimerInt) & f_MModeIntEnable);
-
-    wire MemValid = (d_MultiCycleCounter < 4) | m_Kill;
 
 
 
