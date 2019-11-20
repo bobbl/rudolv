@@ -337,25 +337,25 @@ module Pipeline #(
     reg DecodeGrubbyInsn;
     reg RdNo1Aux;
     always @* begin
-        Insn <= 0;
-        DecodeGrubbyInsn <= 0;
-        RdNo1Aux <= 0;
+        Insn = 0;
+        DecodeGrubbyInsn = 0;
+        RdNo1Aux = 0;
         if (FetchDirect) begin
-            Insn <= mem_rdata;
-            DecodeGrubbyInsn <= mem_rgrubby;
+            Insn = mem_rdata;
+            DecodeGrubbyInsn = mem_rgrubby;
         end else begin
             if (FetchDelayed) begin
-                Insn <= d_DelayedInsn;
+                Insn = d_DelayedInsn;
             end else begin
-                RdNo1Aux <= (FetchSynth != fsNOP);
+                RdNo1Aux = (FetchSynth != fsNOP);
                 if (~FetchSynth[1]) begin
-                    Insn <= {7'b0000000, 5'b00000,
+                    Insn = {7'b0000000, 5'b00000,
                              vCsrTranslate,
                              3'b110, 
                              (FetchSynth[0] ? vCsrTranslate : 5'b0),
                              7'b0110011}; // OR X0/CSR, CSR, X0
                 end else begin
-                    Insn <= {7'b0000000, 5'b00000,
+                    Insn = {7'b0000000, 5'b00000,
                              (FetchSynth[0] ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
                              3'b110,
                              5'b00000,
