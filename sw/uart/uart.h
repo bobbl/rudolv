@@ -3,23 +3,6 @@
 
 #include <stdint.h>
 
-/*
-#define read_csr(reg) ({ unsigned long __tmp; \
-  asm volatile ("csrr %0, " #reg : "=r"(__tmp)); \
-  __tmp; })
-
-#define write_csr(reg, val) ({ \
-  asm volatile ("csrw " #reg ", %0" :: "rK"(val)); })
-
-#define swap_csr(reg, val) ({ unsigned long __tmp; \
-  asm volatile ("csrrw %0, " #reg ", %1" : "=r"(__tmp) : "rK"(val)); \
-  __tmp; })
-
-#define set_csr(r, v) \
-    ({long t; asm volatile ("csrrs %0," #r ",%1" : "=r"(t) : "rK"(v)); t;})
-#define clear_csr(r, v) \
-    ({long t; asm volatile ("csrrc %0," #r ",%1" : "=r"(t) : "rK"(v)); t;})
-*/
 #define read_csr(r) ({ unsigned long t; \
   asm volatile ("csrr %0, %1" : "=r"(t) : "i"(r)); t; })
 
@@ -30,10 +13,10 @@
   asm volatile ("csrrw %0, %1, %2" : "=r"(t) : "i"(r), "rK"(v)); t; })
 
 #define set_csr(r, v) ({ unsigned long t; \
-  asm volatile ("csrrw %0, %1, %2" : "=r"(t) : "i"(r), "rK"(v)); t; })
+  asm volatile ("csrrs %0, %1, %2" : "=r"(t) : "i"(r), "rK"(v)); t; })
 
 #define clear_csr(r, v) ({ unsigned long t; \
-  asm volatile ("csrrw %0, %1, %2" : "=r"(t) : "i"(r), "rK"(v)); t; })
+  asm volatile ("csrrc %0, %1, %2" : "=r"(t) : "i"(r), "rK"(v)); t; })
 
 
 
@@ -102,7 +85,7 @@ void uart_send(unsigned ch)
 
 static inline unsigned long read_cycle()
 {
-    return read_csr(UART_CSR);
+    return read_csr(0xc00); // cycle
 }
 
 int uart_nonblocking_receive()

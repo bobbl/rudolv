@@ -4,11 +4,12 @@ if [ $# -eq 0 ]
 then
     echo "Usage: $0 all"
     echo
-    echo "Build 3 firmware images for 3 uart interfaces"
+    echo "Build 4 firmware images for 3 uart interfaces"
     echo
     echo "firmware"
     echo "  bootloader  large bootloader with prompt and LED output"
     echo "  bl          minimal bootloader"
+    echo "  grubby      slightly larger bootloader with sw instead of sb"
     echo "  test        UART test program to be used instead of bootloader"
     echo
     echo "interface"
@@ -40,6 +41,8 @@ build() {
         test.c -o build/test_$2.elf
     ${RV_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
         bl.S -o build/bl_$2.elf
+    ${RV_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
+        grubby.S -o build/grubby_$2.elf
 }
 
 
