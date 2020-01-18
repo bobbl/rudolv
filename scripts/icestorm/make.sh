@@ -5,8 +5,8 @@ then
     echo "Usage: $0 <device> <target> ..."
     echo
     echo "<device>"
-    echo "  hx8k        Lattice HX8K"
-    echo "  uwg30       Lattice UP5K package UWG30"
+    echo "  hx8k        Lattice HX8K (e.g. breakout board)"
+    echo "  uwg30       Lattice UP5K package UWG30 (e.g. iCE40 UltraPlus MDP)"
     echo "  sg48        Lattice UP5K package SG48"
     echo
     echo "<target>"

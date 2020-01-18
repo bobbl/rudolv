@@ -54,6 +54,9 @@ int main(int argc, char **argv)
 {
     char ff_leds = 0;
     unsigned long wait;
+    unsigned long one_second = read_csr(0xFC0) << 10;
+        // RudolV provides clock freqency in kHz = ticks/millisecond
+        // => one_second = 1024 ms
     int ch;
 
     set_leds(1);
@@ -66,7 +69,9 @@ int main(int argc, char **argv)
         print_str(" Hello5\r\n");
 
         wait = read_cycle();
-        while (read_cycle() - wait < 12000000) { // one second
+        while (read_cycle() - wait < one_second) {
+//        while (read_cycle() - wait < 12000000) { // one second
+//        while (read_cycle() - wait < 100000000) { // one second
             ch = uart_nonblocking_receive();
             if (ch>0) uart_send(ch+1);
         }

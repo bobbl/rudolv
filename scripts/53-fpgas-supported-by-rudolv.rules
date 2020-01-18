@@ -1,5 +1,5 @@
 # Copy this file to /etc/udec/rules.d/ to enable non-rooot access to the USB
-# programming and UART connection of all FPGAs supported by Danzig
+# programming and UART connection of all FPGAs supported by RudolV
 
 # Lattice
 ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="0660", GROUP="plugdev", TAG+="uaccess"
@@ -7,3 +7,6 @@ ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", MODE="0660", GROUP="plugdev",
 
 # Genesys2 (Xilinx)
 ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# IGLOO2 (Microsemi)
+ATTRS{idVendor}=="1514", ATTRS{idProduct}=="2008", MODE="0660", GROUP="plugdev", TAG+="uaccess"

@@ -5,8 +5,8 @@ Memory map
 0000'FE00h start address of boot loader
 
 CSR
-7c0h       UART
-7c1h       LEDs
+BC0h       UART
+BC1h       LEDs
 */
 
 
@@ -43,6 +43,8 @@ module top (
     wire        mem_rgrubby = 0;
 
 
+    wire        IDsValid;
+    wire [31:0] IDsRData;
     wire        CounterValid;
     wire [31:0] CounterRData;
     wire        UartValid;
@@ -58,8 +60,25 @@ module top (
     wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = CounterRData | UartRData;
-    wire        csr_valid = CounterValid | UartValid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData;
+    wire        csr_valid = IDsValid | CounterValid | UartValid;
+
+    CsrIDs #(
+        .BASE_ADDR(12'hFC0),
+        .KHZ(CLOCK_RATE/1000)
+    ) csr_ids (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (IDsRData),
+        .valid  (IDsValid),
+
+        .AVOID_WARNING()
+    );
 
     CsrCounter counter (
         .clk    (clk),
@@ -78,6 +97,7 @@ module top (
     );
 
     CsrUartChar #(
+        .BASE_ADDR(12'hBC0),
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
@@ -98,7 +118,7 @@ module top (
     );
 
     CsrPinsOut #(
-        .BASE_ADDR(12'hbc1),
+        .BASE_ADDR(12'hBC1),
         .COUNT(8)
     ) csr_leds (
         .clk    (clk),
@@ -182,3 +202,6 @@ module BRAMMemory (
         end
     end
 endmodule
+
+
+// SPDX-License-Identifier: ISC

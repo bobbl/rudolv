@@ -52,20 +52,41 @@ module top (
         q_SelBootMem <= rstn ? mem_addr[17] : 0;
     end
 
+    wire        IDsValid;
+    wire [31:0] IDsRData;
     wire        CounterValid;
     wire [31:0] CounterRData;
     wire        UartValid;
     wire [31:0] UartRData;
 
     wire        retired;
-    wire        irq_timer=0;
+    wire        irq_software = 0;
+    wire        irq_timer = 0;
+    wire        irq_external = 0;
 
     wire        csr_read;
     wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = CounterRData | UartRData;
-    wire        csr_valid = CounterValid | UartValid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData;
+    wire        csr_valid = IDsValid | CounterValid | UartValid;
+
+    CsrIDs #(
+        .BASE_ADDR(12'hFC0),
+        .KHZ(CLOCK_RATE/1000)
+    ) csr_ids (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (IDsRData),
+        .valid  (IDsValid),
+
+        .AVOID_WARNING()
+    );
 
     CsrCounter counter (
         .clk    (clk),
@@ -106,7 +127,9 @@ module top (
         .rstn           (rstn),
 
         .retired        (retired),
+        .irq_software   (irq_software),
         .irq_timer      (irq_timer),
+        .irq_external   (irq_external),
 
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
