@@ -10,8 +10,6 @@ in the
 [2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
 .
 
-__EXCUSE:__ Xilinx and Altera ports are not up-to-date.
-
 
 RISC-V SoftCPU Contest on Security
 ----------------------------------

@@ -83,21 +83,6 @@ module top (
         .tx     (uart_tx)
     );
 
-/*
-    CsrLeds csr_leds (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (LedsRData),
-        .valid  (LedsValid),
-
-        .leds   (leds)
-    );
-*/
     CsrPinsOut #(
         .BASE_ADDR(12'hbc1),
         .COUNT(8)
@@ -180,45 +165,3 @@ module BRAMMemory (
         end
     end
 endmodule
-
-/*
-module CsrLeds #(
-    parameter [11:0]  BASE_ADDR  = 12'hbc1 // CSR address
-) (
-    input clk,
-    input rstn,
-
-    input read,
-    input [2:0] modify,
-    input [31:0] wdata,
-    input [11:0] addr,
-    output [31:0] rdata,
-    output valid,
-
-    output [7:0] leds
-);
-
-    reg [7:0] q_Leds;
-    reg Valid;
-    reg [31:0] RData;
-
-    always @(posedge clk) begin
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= q_Leds;
-            case (modify)
-                3'b001: q_Leds <= wdata[7:0]; // write
-                3'b010: q_Leds <= q_Leds | wdata[7:0]; // set
-                3'b011: q_Leds <= q_Leds &~ wdata[7:0]; // clear
-            endcase
-        end
-        if (~rstn) q_Leds <= 'h81;
-    end
-
-    assign valid = Valid;
-    assign rdata = RData;
-    assign leds = q_Leds;
-endmodule
-*/

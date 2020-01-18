@@ -33,12 +33,14 @@ module top (
         reset_counter <= reset_counter + !rstn;
     end
 
-    wire mem_valid;
-    wire mem_write;
+    wire        mem_valid;
+    wire        mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
+    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
+    wire        mem_rgrubby = 0;
 
 
     wire        CounterValid;
@@ -48,9 +50,12 @@ module top (
     wire        LedsValid;
     wire [31:0] LedsRData;
 
+    wire        irq_software = 0;
+    wire        irq_timer = 0;
+    wire        irq_external = 0;
     wire        retired;
     wire        csr_read;
-    wire [1:0]  csr_modify;
+    wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata = CounterRData | UartRData;
@@ -72,7 +77,7 @@ module top (
         .AVOID_WARNING()
     );
 
-    CsrUart #(
+    CsrUartChar #(
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
@@ -92,7 +97,10 @@ module top (
         .AVOID_WARNING()
     );
 
-    CsrLeds csr_leds (
+    CsrPinsOut #(
+        .BASE_ADDR(12'hbc1),
+        .COUNT(8)
+    ) csr_leds (
         .clk    (clk),
         .rstn   (rstn),
 
@@ -103,7 +111,7 @@ module top (
         .rdata  (LedsRData),
         .valid  (LedsValid),
 
-        .leds   (leds),
+        .pins   (leds),
 
         .AVOID_WARNING()
     );
@@ -114,7 +122,11 @@ module top (
         .clk            (clk),
         .rstn           (rstn),
 
+        .irq_software   (irq_software),
+        .irq_timer      (irq_timer),
+        .irq_external   (irq_external),
         .retired        (retired),
+
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
         .csr_wdata      (csr_wdata),
@@ -126,8 +138,10 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (mem_rdata)
+        .mem_rdata      (mem_rdata),
+        .mem_rgrubby    (mem_rgrubby)
     );
 
     BRAMMemory mem (
@@ -167,49 +181,4 @@ module BRAMMemory (
             if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
         end
     end
-endmodule
-
-
-module CsrLeds #(
-    parameter [11:0]  BASE_ADDR  = 12'h7c1 // CSR address
-) (
-    input clk,
-    input rstn,
-
-    input read,
-    input [1:0] modify,
-    input [31:0] wdata,
-    input [11:0] addr,
-    output [31:0] rdata,
-    output valid,
-
-    output [7:0] leds,
-
-    output AVOID_WARNING
-);
-    assign AVOID_WARNING = read | |wdata;
-
-    reg [7:0] q_Leds;
-    reg Valid;
-    reg [31:0] RData;
-
-    always @(posedge clk) begin
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= q_Leds;
-            case (modify)
-                2'b01: q_Leds <= wdata[7:0]; // write 0
-                2'b10: q_Leds <= q_Leds | wdata[7:0]; // set
-                2'b11: q_Leds <= q_Leds &~ wdata[7:0]; // clear
-                default: ;
-            endcase
-        end
-        if (~rstn) q_Leds <= 'h81;
-    end
-
-    assign valid = Valid;
-    assign rdata = RData;
-    assign leds = q_Leds;
 endmodule

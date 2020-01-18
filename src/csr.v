@@ -323,6 +323,7 @@ module CsrUartChar #(
                 3'b010: begin // set
                     q_UartRecvEmpty <= 1;
                 end
+                default:;
             endcase
         end
 
