@@ -59,7 +59,7 @@ module top (
         .BASE_ADDR(12'hFC0),
         .KHZ(CLOCK_RATE/1000)
     ) csr_ids (
-        .clk    (clk),
+        .clk    (CLOCK_50),
         .rstn   (rstn),
 
         .read   (csr_read),

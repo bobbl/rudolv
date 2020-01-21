@@ -196,7 +196,8 @@ module CsrPinsOut #(
                 default: ;
             endcase
         end
-        if (~rstn) q_Pins <= RESET_VALUE;
+        //if (~rstn) q_Pins <= RESET_VALUE;
+        // not synthesisable with Quartus
     end
 
     assign valid = Valid;

@@ -43,3 +43,7 @@ export ICETIME
 
 ICEPROG=iceprog
 export ICEPROG
+
+# path (with trailing slash) to Quartus bin directory (or nothing if in $PATH)
+#QUARTUS_BIN=
+#export QUARTUS_BIN
