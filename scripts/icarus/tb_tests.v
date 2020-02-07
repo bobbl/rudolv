@@ -142,17 +142,31 @@ module tb_tests;
 `endif
 
     integer i;
+    integer sig_begin;
+    integer sig_end;
     always @(posedge clk) begin
         q_ReadUART <= csr_read & (csr_addr==CSR_UART);
 
         if (csr_modify==1) begin
             case (csr_addr)
+                (CSR_SIM-2): begin
+                    sig_begin <= csr_wdata / 4;
+                end
+                (CSR_SIM-1): begin
+                    sig_end <= csr_wdata / 4;
+                end
                 CSR_SIM: begin
                     case (csr_wdata)
                         2: begin // signature from compliance tests
+                            while (sig_begin < sig_end) begin
+                                $display("%h", mem.mem[sig_begin]);
+                                sig_begin = sig_begin + 1;
+                            end
+/*
                             for (i=0; i<64; i=i+1) begin
                                 $display("%h", mem.mem['h1FC0+i]);
                             end
+*/
                         end
                         default: $display("exit due to write to CSR 0x3ff");
                     endcase

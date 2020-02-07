@@ -1,10 +1,11 @@
 #ifndef _ENV_RUDOLV_TEST_H
 #define _ENV_RUDOLV_TEST_H
 
+//#define TESTNUM x28     // register where test number is stored
+#define TESTNUM x3     // register where test number is stored
+
 #define RVTEST_RV32U
 #define RVTEST_RV64U
-#define TESTNUM x28     // register where test number is stored
-
 
 #define RVTEST_CODE_BEGIN       \
     .section .text.crt;         \

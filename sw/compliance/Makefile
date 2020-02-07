@@ -4,8 +4,8 @@ FILES_S = $(wildcard src/*.S)
 FILES_HEX = $(FILES_S:src/%.S=build/%.hex)
 
 
-build/%.elf: src/%.S ../riscv_test.h ../test_macros.h ../rudolv.ld
-	$(RV32I_PREFIX)gcc -march=rv32im -mabi=ilp32 -I. -I.. -nostdlib -T../rudolv.ld -o $@ $<
+build/%.elf: src/%.S ../rudolv.ld riscv_test.h aw_test_macros.h test_macros.h riscv_test_macros.h
+	$(RV32I_PREFIX)gcc -march=rv32im -mabi=ilp32 -I. -nostdlib -T../rudolv.ld -o $@ $<
 
 %.bin: %.elf
 	$(RV32I_PREFIX)objcopy -O binary $< $@
