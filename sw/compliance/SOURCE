@@ -1,0 +1,16 @@
+Compliance tests from riscv-compliance/riscv-test-suite/
+--------------------------------------------------------
+
+rv32Zicsr/
+rv32Zifence/
+rv32i/
+rv32im/
+rv32ui/rv64ui/
+
+
+Macros from riscv-compliance/riscv-test-env/
+--------------------------------------------
+
+aw_test_macros.h
+test_macros.h
+riscv_test_macros.h
