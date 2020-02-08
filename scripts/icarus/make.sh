@@ -62,7 +62,7 @@ target_tests() {
 
     for test in ${path_tests}/build/*.hex
     do
-        check_sig ${test} ok.sig
+        check_sig ${test} ${path_tests}/ok.sig
     done
 
     for test in ${path_compliance}/build/*.hex

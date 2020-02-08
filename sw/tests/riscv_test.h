@@ -32,28 +32,24 @@ _start2:
 1:  j 1b                        ;
 
 #define RVTEST_PASS             \
-        la x11, begin_signature;\
-        li x10, 0x6b6f;         \
-        sw x10, 0(x11);         \
-        RVTEST_EXIT
+    la x11, begin_signature     ;\
+    li x10, 0x6b6f              ;\
+    sw x10, 0(x11)              ;\
+    RVTEST_EXIT
 
 #define RVTEST_FAIL             \
-        la x11, begin_signature;\
-        li x10, 0x4c494146;     \
-        sw x10, 0(x11);         \
-        RVTEST_EXIT
+    la x11, begin_signature     ;\
+    li x10, 0x4c494146          ;\
+    sw x10, 0(x11)              ;\
+    RVTEST_EXIT
 
-#define RVTEST_DATA_BEGIN        \
+#define RVTEST_DATA_BEGIN
+
+#define RVTEST_DATA_END         \
     .align 4                    ;\
     .global begin_signature     ;\
     begin_signature:            ;\
-    .word -1                     ;\
-    .word -1                     ;\
-    .word -1                     ;\
-    .word -1                     ;\
-
-#define RVTEST_DATA_END          \
-    .align 4                    ;\
+    .word -1                    ;\
     .global end_signature       ;\
     end_signature:
 
