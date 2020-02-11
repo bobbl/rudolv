@@ -13,7 +13,7 @@
 
 
 # any gcc for risc-v, libs are not used
-RV32_PREFIX=riscv32i-unknown-elf-
+RV_PREFIX=riscv64-linux-gnu-
 export RV32_PREFIX
 
 # gcc with libs compiled for RV32I

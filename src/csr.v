@@ -28,24 +28,28 @@ module CsrIDs #(
 );
     assign AVOID_WARNING = rstn | read | |modify | |wdata;
 
-    reg Valid;
-    reg [31:0] RData;
+    reg q_enVendor;
+    reg q_enArch;
+    reg q_enImp;
+    reg q_enHart;
+    reg q_enKHz;
 
+    // sequential one cycle earlier: check CSR address
     always @(posedge clk) begin
-        Valid <= 1;
-        RData <= 0;
-        case (addr)
-            12'hF11: RData <= VENDORID;
-            12'hF12: RData <= ARCHID;
-            12'hF13: RData <= IMPID;
-            12'hF14: RData <= HARTID;
-            BASE_ADDR: RData <= KHZ;
-            default: Valid <= 0;
-        endcase
+        q_enVendor <= (addr == 12'hF11);
+        q_enArch   <= (addr == 12'hF12);
+        q_enImp    <= (addr == 12'hF13);
+        q_enHart   <= (addr == 12'hF14);
+        q_enKHz    <= (addr == BASE_ADDR);
     end
 
-    assign valid = Valid;
-    assign rdata = RData;
+    // combinational read
+    assign valid = q_enVendor | q_enArch | q_enImp | q_enHart | q_enKHz;
+    assign rdata = (q_enVendor ? VENDORID : 32'b0)
+                 | (q_enArch   ? ARCHID   : 32'b0)
+                 | (q_enImp    ? IMPID    : 32'b0)
+                 | (q_enHart   ? HARTID   : 32'b0)
+                 | (q_enKHz    ? KHZ      : 32'b0);
 endmodule
 
 
@@ -70,30 +74,13 @@ module CsrCounter (
 );
     assign AVOID_WARNING = read | |modify | |wdata;
 
-    reg Valid;
-    reg [31:0] RData;
     reg [32:0] q_CounterCYCLE;
     reg [31:0] q_CounterCYCLEH;
     reg [32:0] q_CounterINSTRET;
     reg [31:0] q_CounterINSTRETH;
 
+    // increment counters (sequential)
     always @(posedge clk) begin
-        Valid <= 1;
-        RData <= 0;
-        case (addr)
-            12'hB00: RData <= q_CounterCYCLE[31:0];     // MCYCLE
-            12'hB02: RData <= q_CounterINSTRET[31:0];   // MINSTRET
-            12'hB80: RData <= q_CounterCYCLEH;          // MCYCLEH
-            12'hB82: RData <= q_CounterINSTRETH;        // MINSRETH
-            12'hC00: RData <= q_CounterCYCLE[31:0];     // CYCLE
-            12'hC80: RData <= q_CounterCYCLEH;          // CYCLEH
-            12'hC01: RData <= q_CounterCYCLE[31:0];     // TIME
-            12'hC81: RData <= q_CounterCYCLEH;          // TIMEH
-            12'hC02: RData <= q_CounterINSTRET[31:0];   // INSTRET
-            12'hC82: RData <= q_CounterINSTRETH;        // INSRETH
-            default: Valid <= 0;
-        endcase
-
         q_CounterCYCLE    <= {1'b0, q_CounterCYCLE[31:0]} + 1;
         q_CounterCYCLEH   <= q_CounterCYCLEH + q_CounterCYCLE[32];
         q_CounterINSTRET  <= {1'b0, q_CounterINSTRET[31:0]} + {32'b0, retired};
@@ -107,8 +94,31 @@ module CsrCounter (
         end
     end
 
-    assign valid = Valid;
-    assign rdata = RData;
+    reg q_enCycleL;
+    reg q_enCycleH;
+    reg q_enInstRetL;
+    reg q_enInstRetH;
+
+    //  check CSR address (sequential and one cycle earlier)
+    always @(posedge clk) begin
+        q_enCycleL   <= (addr == 12'hB00) |     // MCYCLE
+                        (addr == 12'hC00) |     // CYCLE
+                        (addr == 12'hC01);      // TIME
+        q_enCycleH   <= (addr == 12'hB80) |     // MCYCLEH
+                        (addr == 12'hC80) |     // CYCLEH
+                        (addr == 12'hC81);      // TIMEH
+        q_enInstRetL <= (addr == 12'hB02) |     // MINSTRET
+                        (addr == 12'hC02);      // INSTRET
+        q_enInstRetH <= (addr == 12'hB82) |     // MINSTRETH
+                        (addr == 12'hC82);      // INSRETH
+    end
+
+    // combinational read
+    assign valid = q_enCycleL | q_enCycleH | q_enInstRetL | q_enInstRetH;
+    assign rdata = (q_enCycleL   ? q_CounterCYCLE[31:0]   : 32'b0)
+                 | (q_enCycleH   ? q_CounterCYCLEH        : 32'b0)
+                 | (q_enInstRetL ? q_CounterINSTRET[31:0] : 32'b0)
+                 | (q_enInstRetH ? q_CounterINSTRETH      : 32'b0);
 endmodule
 
 
@@ -136,21 +146,15 @@ module CsrPinsIn #(
 );
     assign AVOID_WARNING = rstn | read | |modify | |wdata;
 
-    reg Valid;
-    reg [31:0] RData;
-
+    // check CSR address (sequential and one cycle earlier)
+    reg q_Enable;
     always @(posedge clk) begin
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= pins;
-        end else begin
-            Valid <= 0;
-            RData <= 0;
-        end
+        q_Enable <= (addr == BASE_ADDR);
     end
 
-    assign valid = Valid;
-    assign rdata = RData;
+    // combinational read
+    assign valid = q_Enable;
+    assign rdata = (q_Enable ? pins : 32'b0);
 endmodule
 
 
@@ -180,15 +184,10 @@ module CsrPinsOut #(
     assign AVOID_WARNING = read;
 
     reg [COUNT-1:0] q_Pins;
-    reg Valid;
-    reg [31:0] RData;
+    assign pins = q_Pins;
 
     always @(posedge clk) begin
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= q_Pins;
+        if (q_Enable) begin
             case (modify)
                 3'b001: q_Pins <= wdata[COUNT-1:0]; // write
                 3'b010: q_Pins <= q_Pins | wdata[COUNT-1:0]; // set
@@ -200,9 +199,15 @@ module CsrPinsOut #(
         // not synthesisable with Quartus
     end
 
-    assign valid = Valid;
-    assign rdata = RData;
-    assign pins = q_Pins;
+    // check CSR address (sequential and one cycle earlier)
+    reg q_Enable;
+    always @(posedge clk) begin
+        q_Enable <= (addr == BASE_ADDR);
+    end
+
+    // combinational read
+    assign valid = q_Enable;
+    assign rdata = (q_Enable ? q_Pins : 32'b0);
 endmodule
 
 
@@ -253,10 +258,10 @@ module CsrUartBitbang #(
         end
         if (~rstn) q_TX <= 1;
     end
+    assign tx = q_TX;
 
     assign valid = Valid;
     assign rdata = RData;
-    assign tx = q_TX;
 endmodule
 
 
@@ -289,9 +294,6 @@ module CsrUartChar #(
     localparam [15:0] CLOCK_DIV = CLOCK_RATE / BAUD_RATE;
         // 16 bit is enough for up to 7.5 GHz (at 115200 baud)
 
-    reg Valid;
-    reg [31:0] RData;
-
     reg  [3:0] q_UartRecvBitCounter;
     reg [15:0] q_UartRecvClkCounter;
     reg  [6:0] q_UartRecvBits;
@@ -306,12 +308,9 @@ module CsrUartChar #(
 
     wire UartSendFull = (q_UartSendBitCounter!=0);
 
+    // sequential write
     always @(posedge clk) begin
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= {UartSendFull, q_UartRecvEmpty, q_UartRecvChar};
+        if (q_Enable) begin
             case (modify)
                 3'b001: begin // write
                     if (!UartSendFull) begin
@@ -364,10 +363,17 @@ module CsrUartChar #(
             q_TX <= 1;
         end
     end
-
-    assign valid = Valid;
-    assign rdata = RData;
     assign tx = q_TX;
+
+    // check CSR address (sequential and one cycle earlier)
+    reg q_Enable;
+    always @(posedge clk) begin
+        q_Enable <= (addr == BASE_ADDR);
+    end
+
+    // combinational read
+    assign valid = q_Enable;
+    assign rdata = (q_Enable ? {22'b0, UartSendFull, q_UartRecvEmpty, q_UartRecvChar} : 32'b0);
 endmodule
 
 
@@ -394,43 +400,43 @@ module CsrTimerAdd #(
 );
     assign AVOID_WARNING = read | |wdata;
 
-
-    reg Valid;
-    reg [31:0] RData;
     reg [WIDTH-1:0] q_Time;
     reg [WIDTH-1:0] q_TimeCmp;
-    reg q_Enable;
+    reg q_TimerOn;
     reg q_Request;
 
     always @(posedge clk) begin
-        q_Request <= q_Enable & (q_TimeCmp <= q_Time);
+        q_Request <= q_TimerOn & (q_TimeCmp <= q_Time);
         q_Time <= q_Time + 'b1;
 
-        Valid <= 0;
-        RData <= 0;
-        if (addr==BASE_ADDR) begin
-            Valid <= 1;
-            RData <= q_Time;
+        if (q_Enable) begin
             case (modify)
                 3'b001: begin // write: set relative timer
-                    q_Enable <= 1;
+                    q_TimerOn <= 1;
                     q_TimeCmp <= q_Time + wdata[WIDTH-1:0];
                 end
                 3'b011: begin // clear with any value disables the timer
-                    q_Enable <= 0;
+                    q_TimerOn <= 0;
                 end
             endcase
         end
 
         if (!rstn) begin
-            q_Enable <= 0;
+            q_TimerOn <= 0;
             q_Time <= 0;
         end
     end
-
-    assign valid = Valid;
-    assign rdata = RData;
     assign irq = q_Request;
+
+    // check CSR address (sequential and one cycle earlier)
+    reg q_Enable;
+    always @(posedge clk) begin
+        q_Enable <= (addr == BASE_ADDR);
+    end
+
+    // combinational read
+    assign valid = q_Enable;
+    assign rdata = (q_Enable ? q_Time : 32'b0);
 endmodule
 
 

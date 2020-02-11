@@ -260,7 +260,7 @@ restore_pass:
 
 
 restore_fail:
-        csrw    mtvec, x4
+        csrw    mtvec, x11
         j       fail
 
 

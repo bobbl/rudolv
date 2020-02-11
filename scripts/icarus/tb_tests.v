@@ -47,8 +47,8 @@ module tb_tests;
     wire        TimerValid;
     wire [31:0] TimerRData;
 
-    wire csr_read;
-    wire [2:0] csr_modify;
+    wire        csr_read;
+    wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata = CounterRData | PinsRData | TimerRData;
@@ -141,14 +141,17 @@ module tb_tests;
     always #10 $monitor("  time %t", $time);
 `endif
 
+
+    reg [11:0] q_CsrAddr = 0;
     integer i;
     integer sig_begin;
     integer sig_end;
     always @(posedge clk) begin
-        q_ReadUART <= csr_read & (csr_addr==CSR_UART);
+        q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
+        q_CsrAddr  <= csr_addr;
 
         if (csr_modify==1) begin
-            case (csr_addr)
+            case (q_CsrAddr)
                 (CSR_SIM-2): begin
                     sig_begin <= csr_wdata / 4;
                 end
@@ -162,11 +165,6 @@ module tb_tests;
                                 $display("%h", mem.mem[sig_begin]);
                                 sig_begin = sig_begin + 1;
                             end
-/*
-                            for (i=0; i<64; i=i+1) begin
-                                $display("%h", mem.mem['h1FC0+i]);
-                            end
-*/
                         end
                         default: $display("exit due to write to CSR 0x3ff");
                     endcase

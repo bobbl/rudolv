@@ -196,10 +196,6 @@ module Pipeline #(
     reg        f_ExternalInt;
     reg        d_ExternalInt;
     reg        e_ExternalInt;
-
-    reg [2:0]  e_CsrModify;
-    reg [31:0] e_CsrWData;
-    reg [11:0] e_CsrAddr;
 `endif
 
     reg d_GrubbyInsn;
@@ -303,9 +299,15 @@ module Pipeline #(
                         FetchSynth <= fsNOP;
 
 `ifdef ENABLE_TIMER
+                    // not the absolutely correct priority, but works:
                     end else if (f_MModeIntEnable &
-                        (f_SoftwareInt | f_TimerInt | f_ExternalInt))
-                        // not the absolutely correct priority, but works
+                        (f_SoftwareInt | f_TimerInt | f_ExternalInt) &
+                        ~e_ReturnPC // In the 2nd cycle after a JAL or JALR d_PC
+                                    // is not yet set to the destination, thus
+                                    // MEPC will be set to the wrong return
+                                    // address when a interrupt is raised
+                                    // => delay interrupt for 1 cycle 
+                        )
                     begin
                         if (f_ExternalInt)
                             ExternalInt <= 1;
@@ -543,16 +545,29 @@ module Pipeline #(
 
 
 
-
-
-
-
-
     // external CSR interface
+    //
+    // demux CSR number in decode (csr_addr)
+    // read  CSR in execute (csr_rdata, combinational)
+    // write CSR in mem stage (csr_modify, csr_wdata)
+
+    reg  [2:0] e_CsrModify;
+    reg [31:0] e_CsrWData;
+    reg [11:0] e_CsrAddr;
+
+    always @(posedge clk) begin
+        e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~d_Insn[13] | (d_Insn[19:15]!=0))) 
+            ? d_Insn[13:12] : 2'b00};
+        e_CsrWData  <= d_Insn[14] ? d_Insn[19:15] : ForwardAE;
+
+        // for internal CSRs
+        e_CsrAddr   <= d_Insn[31:20];
+    end
+
     assign retired    = ~d_Bubble & ~m_Kill & ~w_Kill;
-    assign csr_read   = CsrRead;
-    assign csr_modify = {Kill, (InsnCSR & ~m_Kill & (~d_Insn[13] | (d_Insn[19:15]!=0))) ? d_Insn[13:12] : 2'b00};
-    assign csr_wdata  = d_Insn[14] ? d_Insn[19:15] : ForwardAE;
+    assign csr_read   = e_CsrRead;
+    assign csr_modify = e_CsrModify;
+    assign csr_wdata  = e_CsrWData;
     assign csr_addr   = d_Insn[31:20];
 
 
@@ -1206,10 +1221,6 @@ module Pipeline #(
         f_ExternalInt       <= irq_external;
         d_ExternalInt       <= ExternalInt;
         e_ExternalInt       <= d_ExternalInt;
-
-        e_CsrModify         <= csr_modify;
-        e_CsrWData          <= csr_wdata;
-        e_CsrAddr           <= csr_addr;
 `endif
 
 
@@ -1230,7 +1241,6 @@ module Pipeline #(
         m_CsrRead           <= e_CsrRead;
         m_CsrValid          <= csr_valid | CsrValidInternal;
         m_CsrRdData         <= csr_rdata | CsrRDataInternal;
-
 
 
 
@@ -1304,8 +1314,8 @@ module Pipeline #(
 
         $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
             vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
-        $display("  e_InsnBLTorBLTU=%b vLess=%b e_InsnJALorFENCEI=%b",
-            e_InsnBLTorBLTU, vLess, e_InsnJALorFENCEI);
+        $display("  e_InsnBLTorBLTU=%b vLess=%b e_InsnJALorFENCEI=%b InsnJALorJALR=%b",
+            e_InsnBLTorBLTU, vLess, e_InsnJALorFENCEI, InsnJALorJALR);
         $display("  e_InsnBEQ=%b e_InvertBranch=%b vEqual=%b",
             e_InsnBEQ, e_InvertBranch, vEqual);
 

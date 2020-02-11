@@ -2,4 +2,4 @@
 bootloader.hex
 design.bit
 *.log
-
+my_*

@@ -24,13 +24,23 @@ path_compliance="../../sw/compliance"
 
 
 
+# compile Icarus Verilog simulation
+#   $1 ELF filename
+#   $2 arguments for iverilog
+compile() {
+    ${RV_PREFIX}objcopy -O binary $1 tmp.bin
+    printf "@0 " > tmp.hex
+    od -An -tx4 -w4 -v tmp.bin | cut -b2- >> tmp.hex
+    $IVERILOG -o tmp.vvp -DCODE=\"tmp.hex\" $2 $verilog_files || exit 1
+}
+
+
 
 # run binary image and compare signature
-#   $1 filename of binary image
+#   $1 filename of ELF image
 #   $2 filename of expected signature
 check_sig() {
-    name=$(basename $1 .hex)
-    $IVERILOG -o tmp.vvp -DCODE=\"$1\" tb_tests.v $verilog_files
+    compile $1 tb_tests.v
     $VVP -N tmp.vvp | sed -e '/^xxxxxxxx$/d' > tmp.sig
 
     diff --strip-trailing-cr $2 tmp.sig > tmp.diff
@@ -39,6 +49,7 @@ check_sig() {
         printf "not "
         failed=$(($failed + 1))
     fi
+    name=$(basename $1 .elf)
     echo "ok - $name"
 }
 
@@ -54,20 +65,20 @@ target_tests() {
 
     # count tests
     echo "TAP version 13"
-    count_tests=$(ls -afq ${path_tests}/build/*.hex | wc -l)
-    count_compliance=$(ls -afq ${path_compliance}/build/*.hex | wc -l)
+    count_tests=$(ls -afq ${path_tests}/build/*.elf | wc -l)
+    count_compliance=$(ls -afq ${path_compliance}/build/*.elf | wc -l)
     total=$(( $count_tests + $count_compliance ))
     echo "1..${total}"
     failed=0
 
-    for test in ${path_tests}/build/*.hex
+    for test in ${path_tests}/build/*.elf
     do
         check_sig ${test} ${path_tests}/ok.sig
     done
 
-    for test in ${path_compliance}/build/*.hex
+    for test in ${path_compliance}/build/*.elf
     do
-        name=$(basename $test .hex)
+        name=$(basename $test .elf)
         check_sig $test ${path_compliance}/references/${name}.reference_output
     done 
 
@@ -80,35 +91,28 @@ target_tests() {
 }
 
 
-# run Icarus Verilog simulation
-#   $1 arguments for iverilog
-#   $2 ELF filename
-sim() {
-    ${RV_PREFIX}objcopy -O binary $2 tmp.bin
-    printf "@0 " > tmp.hex
-    od -An -tx4 -w4 -v tmp.bin | cut -b2- >> tmp.hex
-    $IVERILOG -o tmp.vvp -DCODE=\"tmp.hex\" $1 $verilog_files
-    $VVP -N tmp.vvp
-}
-
 
 while [ $# -ne 0 ]
 do
     case $1 in
         run)
-            sim "tb_tests.v" $2
+            compile $2 "tb_tests.v"
+            $VVP -N tmp.vvp
             shift
             ;;
         debug)
-            sim "-DDEBUG tb_tests.v" $2
+            compile $2 "-DDEBUG tb_tests.v"
+            $VVP -N tmp.vvp
             shift
             ;;
         miv-run)
-            sim "tb_miv.v" $2
+            compile $2 "tb_miv.v"
+            $VVP -N tmp.vvp
             shift
             ;;
         miv-debug)
-            sim "-DDEBUG tb_miv.v" $2
+            compile $2 "-DDEBUG tb_miv.v"
+            $VVP -N tmp.vvp
             shift
             ;;
         tests)
