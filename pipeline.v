@@ -547,9 +547,9 @@ module Pipeline #(
 
     // external CSR interface
     //
-    // demux CSR number in decode (csr_addr)
-    // read  CSR in execute (csr_rdata, combinational)
-    // write CSR in mem stage (csr_modify, csr_wdata)
+    // D stage: decode tree for CSR number (csr_addr)
+    // E stage: read (csr_read) and write (csr_modify, csr_wdata) CSR
+    // M stage: mux tree for csr_rdata
 
     reg  [2:0] e_CsrModify;
     reg [31:0] e_CsrWData;
@@ -621,11 +621,11 @@ module Pipeline #(
         // get the wrong value, because the forwarding condition for the execute
         // bypass was fulfilled.
 
-////    wire ExecuteWrEn = ~m_Kill & (e_WrEn | e_CsrFromReg);
-//    wire ExecuteWrEn = ~m_Kill & (e_WrEn);
-    wire ExecuteWrEn   = ~m_Kill & 
-        ((e_CsrRead & (csr_valid | CsrValidInternal)) ? 1'b1 : e_WrEn); 
-        // part of the regset, even if rd=0 and therefore e_WrEn==0
+//////    wire ExecuteWrEn = ~m_Kill & (e_WrEn | e_CsrFromReg);
+////    wire ExecuteWrEn = ~m_Kill & (e_WrEn);
+//    wire ExecuteWrEn = ((e_CsrRead & (csr_valid | CsrValidInternal)) ? 1'b1 : e_WrEn); 
+//        // part of the regset, even if rd=0 and therefore e_WrEn==0
+    wire ExecuteWrEn   = ~m_Kill & (e_CsrRead | e_WrEn);
 
 
 
@@ -943,19 +943,13 @@ module Pipeline #(
             // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
             // e_A is a bypass from the execute stage of the next cycle
 
-
-/*
-    wire [WORD_WIDTH-1:0] vCsrOrALU =  
-        m_CsrFromReg ? e_A 
-                     : (w_CsrFromReg ? m_CsrModified 
-                                     : ((m_CsrRead & m_CsrValid) ? m_CsrRdData 
-                                                                 : m_WrData));
-*/
     wire [WORD_WIDTH-1:0] vCsrOrALU_2 =
         (m_CsrFromReg             ? e_A           : 0) |
         (w_CsrFromReg             ? m_CsrModified : 0) |
         ((m_CsrRead & m_CsrValid) ? m_CsrRdData   : 0) |
-        ((m_CsrFromReg | w_CsrFromReg | (m_CsrRead & m_CsrValid)) ? 0 : m_WrData);
+        ((m_CsrRead & csr_valid)  ? csr_rdata     : 0) |
+        ((m_CsrFromReg | w_CsrFromReg | m_CsrRead)
+            ? 0 : m_WrData);
     wire [WORD_WIDTH-1:0] vCsrOrALU = 
         vCsrOrALU_2;
 
@@ -1239,8 +1233,8 @@ module Pipeline #(
         e_CsrFromExt        <= CsrFromExt;
         e_CsrRead           <= CsrRead;
         m_CsrRead           <= e_CsrRead;
-        m_CsrValid          <= csr_valid | CsrValidInternal;
-        m_CsrRdData         <= csr_rdata | CsrRDataInternal;
+        m_CsrValid          <= CsrValidInternal;
+        m_CsrRdData         <= CsrRDataInternal;
 
 
 

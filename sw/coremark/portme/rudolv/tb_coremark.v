@@ -88,12 +88,14 @@ module tb_coremark;
 
     //always #1000000 $monitor("  time %t", $time);
 
+    reg [11:0] q_CsrAddr = 0;
     integer i;
     always @(posedge clk) begin
-        q_ReadUART <= csr_read & (csr_addr==CSR_UART);
+        q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
+        q_CsrAddr  <= csr_addr;
 
         if (csr_modify==1) begin
-            case (csr_addr)
+            case (q_CsrAddr)
                 CSR_SIM: begin
                     $finish;
                 end
