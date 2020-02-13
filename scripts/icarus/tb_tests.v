@@ -40,6 +40,8 @@ module tb_tests;
         .rdata  (mem_rdata)
     );
 
+    wire        IDsValid;
+    wire [31:0] IDsRData;
     wire        CounterValid;
     wire [31:0] CounterRData;
     wire        PinsValid;
@@ -51,8 +53,25 @@ module tb_tests;
     wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = CounterRData | PinsRData | TimerRData;
-    wire        csr_valid = CounterValid | PinsValid | TimerValid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData | PinsRData | TimerRData;
+    wire        csr_valid = IDsValid | CounterValid | PinsValid | TimerValid;
+
+    CsrIDs #(
+        .BASE_ADDR(12'hFC0),
+        .KHZ(1000) // assume 1 MHz
+    ) csr_ids (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (IDsRData),
+        .valid  (IDsValid),
+
+        .AVOID_WARNING()
+    );
 
     CsrCounter counter (
         .clk    (clk),

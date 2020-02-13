@@ -15,11 +15,6 @@ typedef intptr_t        ee_ptr_int;
 
 
 
-// set to 1 Mhz to print CoreMark/MHz
-//#define CYCLES_PER_SEC 1000000
-#include "cycles_per_sec.h"
-
-
 #define SEED_METHOD SEED_VOLATILE
 #define MEM_METHOD MEM_STACK
 

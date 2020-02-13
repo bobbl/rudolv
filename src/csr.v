@@ -203,7 +203,7 @@ module CsrPinsOut #(
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = read;
+    assign AVOID_WARNING = rstn | read | |wdata;
 
     reg q_Valid;
     reg [31:0] q_RData;

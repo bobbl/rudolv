@@ -30,7 +30,17 @@ ee_u32 default_num_contexts=1;
 #define read_csr(r) \
     ({ unsigned long t; asm volatile ("csrr %0, " #r : "=r"(t)); t; })
 
-#define rdcycle() read_csr(cycle)
+
+static inline unsigned long long rdcycle()
+{
+    unsigned long h1, h2, l;
+    do {
+        h1 = read_csr(cycleh);
+        l  = read_csr(cycle);
+        h2 = read_csr(cycleh);
+    } while (h1 != h2);
+    return ((unsigned long long)h2 << 32) | l;
+}
 
 void portable_init(core_portable *p, int *argc, char *argv[])
 {
@@ -44,7 +54,7 @@ void portable_fini(core_portable *p)
     while (1);
 }
 
-static unsigned timestamp_start, timestamp_stop;
+static unsigned long long timestamp_start, timestamp_stop;
 
 void start_time()
 {
@@ -58,12 +68,14 @@ void stop_time()
 
 CORE_TICKS get_time()
 {
-    return timestamp_stop - timestamp_start;
+    return (timestamp_stop - timestamp_start) / 1000;
+        // divide because result must fit in 32 bits
 }
 
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
-    return (secs_ret)ticks / (secs_ret)CYCLES_PER_SEC;
+    return (secs_ret)ticks / (secs_ret)read_csr(0xFC0);
+        // read clock frequency in KHz from CSR 0xFC0 (RudolV feature)
 }
 
 void uart_send_char(unsigned ch)

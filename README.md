@@ -218,19 +218,26 @@ CoreMark EEMBC benchmark scores
 
 Run one iteration of [EEMBC CoreMark](https://www.eembc.org/coremark/) with Icarus Verilog:
 
-    make -C sw/coremark/ run-icarus
+    cd sw/coremark/
+    ./make.sh icarus
 
 The results can be found in `sw/coremark/coremark/run1.log`. Since this is a
 simulation, the error message can be ignored and the computed iterations/sec
 corresponds to CoreMark/MHz.
 
-To get the CoreMark of an FPGA implementation, build an image with UART output
-and send it to the bootloader:
+To get the CoreMark of an FPGA implementation, build an ELF image with UART
+output that executes 1000 iterations and send it to the bootloader:
 
-    make -C sw/coremark/ build-uart
-    sw/bootloader/send_elf.sh /dev/ttyUSB1 sw/coremark/coremark_uart.elf
+    cd sw/coremark/
+    ./make.sh elf 1000
+    ../bootloader/send_elf.sh /dev/ttyUSB1 build/coremark_iter_1000.elf
 
-The CoreMark/MHz of RudolV is 0.892.
+CoreMark requires the benchmark to run for at least 10 seconds. If RudolV is too
+fast, build an ELF file image with more iterations and send this one to the
+bootloader.
+
+The CoreMark/MHz of RudolV is 1.295 and 0.892 without bitwise multiplier and
+divider.
 
 
 

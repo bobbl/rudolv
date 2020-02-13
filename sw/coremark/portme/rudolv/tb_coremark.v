@@ -11,7 +11,9 @@ module tb_coremark;
         #40 rstn = 1;
     end
 
-    wire irq_timer = 1;
+    wire irq_software;
+    wire irq_timer;
+    wire irq_external = 0;
 
     wire mem_valid;
     wire mem_write;
@@ -35,12 +37,34 @@ module tb_coremark;
         .rdata  (mem_rdata)
     );
 
-    wire csr_read;
-    wire [2:0] csr_modify;
+    wire        IDsValid;
+    wire [31:0] IDsRData;
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+
+    wire        csr_read;
+    wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata;
-    wire csr_valid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData;
+    wire        csr_valid = IDsValid | CounterValid;
+
+    CsrIDs #(
+        .BASE_ADDR(12'hFC0),
+        .KHZ(1000) // assume 1 MHz
+    ) csr_ids (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (IDsRData),
+        .valid  (IDsValid),
+
+        .AVOID_WARNING()
+    );
 
     CsrCounter counter (
         .clk    (clk),
@@ -51,8 +75,8 @@ module tb_coremark;
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (csr_rdata),
-        .valid  (csr_valid)
+        .rdata  (CounterRData),
+        .valid  (CounterValid)
     );
 
     reg q_ReadUART;
@@ -65,7 +89,9 @@ module tb_coremark;
         .clk            (clk),
         .rstn           (rstn),
 
+        .irq_software   (irq_software),
         .irq_timer      (irq_timer),
+        .irq_external   (irq_external),
         .retired        (retired),
 
         .csr_read       (csr_read),
@@ -85,8 +111,6 @@ module tb_coremark;
         .mem_rgrubby    (mem_rgrubby)
     );
 
-
-    //always #1000000 $monitor("  time %t", $time);
 
     reg [11:0] q_CsrAddr = 0;
     integer i;
