@@ -9,6 +9,7 @@
 #   Tests 11-14: IE permanently on, toggle SWI
 #   Tests 21-24: SWI permanently on, toggle IE
 #   Tests 31-32: timer interrupt and WFI
+#   Tests 41-43: WFI in branch delay slot
 #
 # Requires a special CSR configuration:
 #   rdcycle
@@ -92,7 +93,7 @@ test_11:
         xor     x7, x7, 0x100
         xor     x7, x7, 0x080
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x800007f3          # cause: software interrupt
+        li      x4, 0x800007f4          # cause: software interrupt
         bne     x7, x4, restore_fail
 
         #-------------------------------------------------------------
@@ -103,7 +104,7 @@ test_12:
         li      x7, 0x70
         ENABLE_SOFTINT
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x80000073          # cause: software interrupt
+        li      x4, 0x80000074          # cause: software interrupt
         bne     x7, x4, restore_fail
 
         #-------------------------------------------------------------
@@ -117,7 +118,7 @@ test_13:
         ENABLE_SOFTINT
         div     x12, x10, x11
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x80000403          # cause: software interrupt
+        li      x4, 0x80000404          # cause: software interrupt
         bne     x7, x4, restore_fail
         li      x4, 1000                # division result correct?
         bne     x12, x4, restore_fail
@@ -130,7 +131,7 @@ test_14:
         li      x7, 0x90
         ENABLE_SOFTINT
         wfi
-        li      x4, 0x80000093          # cause: software interrupt
+        li      x4, 0x80000094          # cause: software interrupt
         bne     x7, x4, restore_fail
 
 
@@ -157,7 +158,7 @@ test_21:
         xor     x7, x7, 0x100
         xor     x7, x7, 0x080
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x800007f3          # cause: software interrupt
+        li      x4, 0x800007f4          # cause: software interrupt
         bne     x7, x4, restore_fail
 
 
@@ -169,7 +170,7 @@ test_22:
         li      x7, 0x70
         ENABLE_INTS
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x80000073          # cause: software interrupt
+        li      x4, 0x80000074          # cause: software interrupt
         bne     x7, x4, restore_fail
 
 
@@ -184,7 +185,7 @@ test_23:
         ENABLE_INTS
         div     x12, x10, x11
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x80000403          # cause: software interrupt
+        li      x4, 0x80000404          # cause: software interrupt
         bne     x7, x4, restore_fail
         li      x4, 1000                # division result correct?
         bne     x12, x4, restore_fail
@@ -198,7 +199,7 @@ test_24:
         li      x7, 0x70
         ENABLE_INTS
         wfi
-        li      x4, 0x80000073          # cause: software interrupt
+        li      x4, 0x80000074          # cause: software interrupt
         bne     x7, x4, restore_fail
 
 
@@ -224,7 +225,7 @@ test_31:
 
         li      x6, 200
         jal     wait_for_int            # wait, handler should modify x7
-        li      x4, 0x80000067          # cause: timer interrupt
+        li      x4, 0x80000068          # cause: timer interrupt
         bne     x7, x4, restore_fail
 
 
@@ -241,7 +242,66 @@ test_32:
 
         wfi                             # does not work if wfi is just a nop
 
-        li      x4, 0x80000057          # cause: timer interrupt
+        li      x4, 0x80000058          # cause: timer interrupt
+        bne     x7, x4, restore_fail
+
+
+
+
+
+
+        #-------------------------------------------------------------
+        # Test 41: wfi in branch delay slot of branch => no trap
+        #-------------------------------------------------------------
+test_41:
+        li      TESTNUM, 41
+        li      x7, 0x50
+
+        ENABLE_INTS
+        li      x4, 50
+        csrw    CSR_TIMER, x4
+
+        nop
+        nop
+        nop
+        li      x4, 3
+        li      x5, 3
+        beq     x4, x5, test_42
+        wfi
+        wfi
+        j       restore_fail
+        nop
+        nop
+
+
+        #-------------------------------------------------------------
+        # Test 42: wfi in branch delay slot of jal => no trap
+        #-------------------------------------------------------------
+test_42:
+        li      TESTNUM, 42
+        j       test_43
+        wfi
+        wfi
+        j       restore_fail
+        nop
+        nop
+
+
+        #-------------------------------------------------------------
+        # Test 43: wfi in branch delay slot of jalr => no trap
+        #-------------------------------------------------------------
+test_43:
+        li      TESTNUM, 43
+        la      x4, check_43
+        jr      x4
+        wfi
+        wfi
+        j       restore_fail
+        nop
+        nop
+
+check_43:
+        li      x4, 0x50
         bne     x7, x4, restore_fail
 
 
@@ -286,6 +346,7 @@ trap_disable_softint:
         DISABLE_SOFTINT
         csrr    x20, mcause
         xor     x7, x7, x20
+        add     x7, x7, 1
         mret
 
 
@@ -294,6 +355,7 @@ trap_disable_ie:
         csrc    mstatus, x20
         csrr    x20, mcause
         xor     x7, x7, x20
+        add     x7, x7, 1
         mret
 
 
@@ -301,6 +363,7 @@ trap_disable_timer:
         csrc    CSR_TIMER, 1
         csrr    x20, mcause
         xor     x7, x7, x20
+        add     x7, x7, 1
         mret
 
 

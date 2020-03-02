@@ -243,7 +243,9 @@ module Pipeline #(
         TimerInt <= 0;
         ExternalInt <= 0;
         WaitForInt <= f_WaitForInt;
-        if (InsnWFI & ~m_Kill) WaitForInt <= 1;
+        if (InsnWFI & ~m_Kill & ~Kill) WaitForInt <= 1;
+        //                      ^^^^^
+        // maybe on the critical path
 
         if (m_Kill) begin
             if (f_PC[1]) begin // ExcJump
@@ -764,7 +766,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] NoBranch  = 
         ((d_Bubble & ~m_Kill) | WaitForInt)               ? f_PC    : NextOrSum_2;
 //                              ^^^^^^^^^^
-// Maybe on the critical path f_WaitForInt would be better
+// Maybe on the critical path! f_WaitForInt would be better.
 
     wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)    ? e_PCImm : NoBranch;
 
@@ -1377,12 +1379,12 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI=%b",
+        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI_F=%b%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             f_SoftwareInt, d_SoftwareInt, e_SoftwareInt,
             f_TimerInt, d_TimerInt, e_TimerInt,
             f_ExternalInt, d_ExternalInt, e_ExternalInt,
-            f_WaitForInt);
+            WaitForInt, f_WaitForInt);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
