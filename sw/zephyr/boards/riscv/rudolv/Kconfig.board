@@ -1,0 +1,19 @@
+# RudolV board implementation
+#
+# Copyright (c) 2020 Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_RUDOLV
+	bool "RudolV RISC-V core"
+	depends on SOC_RISCV32_MIV
+	select SERIAL_HAS_DRIVER
+	select TIMER_READS_ITS_FREQUENCY_AT_RUNTIME
+
+config TIMER_RUDOLV_32BIT
+	bool "Use smaller 32 bit timer"
+	default 1
+	depends on BOARD_RUDOLV
+	help
+	  Use the fast 32 bit timer instead of the full-blown 64 bit timer.
+	  Sufficient for most cases, except when a tick is longer than
+	  1'000'000'000 cycles or the ticks are often delayed for many ticks.

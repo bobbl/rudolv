@@ -28,7 +28,7 @@ module tb_tests;
     wire mem_rgrubby = 0;
 
     Memory32Sim #(
-        .WIDTH(13), // 4 * (2**13) = 32 KiByte
+        .WIDTH(14), // 4 * (2**13) = 64 KiByte
         .CONTENT(`CODE)
     ) mem (
         .clk    (clk),
@@ -36,7 +36,7 @@ module tb_tests;
         .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
-        .addr   (mem_addr[14:2]),
+        .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata)
     );
 
@@ -166,6 +166,13 @@ module tb_tests;
     integer sig_begin;
     integer sig_end;
     always @(posedge clk) begin
+
+
+`ifdef DEBUG
+$display("MEMd8=%h", mem.mem['h36]);
+`endif
+
+
         q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
         q_CsrAddr  <= csr_addr;
 
@@ -190,9 +197,18 @@ module tb_tests;
                     $finish;
                 end
                 CSR_UART: begin
+`ifdef DEBUG
+                    $write("\033[1;37mputchar '%c'\033[0m\n", csr_wdata[7:0]);
+`else
                     $write("\033[1;37m%c\033[0m", csr_wdata[7:0]);
+                    //$write("%c", csr_wdata[7:0]);
+`endif
                 end
             endcase
+        end
+        if (dut.d_Insn == 'h006F) begin
+            $display("exit due to write to infinite loop");
+            $finish;
         end
 
     end

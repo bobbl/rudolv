@@ -1,0 +1,47 @@
+# RudolV board implementation
+#
+# Copyright (c) 2020 Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: Apache-2.0
+
+
+# There is an environment variable SOC_ROOT to support out-of-tree SoC
+# definitions, but it does not work (as of zephyr 2.2.0-rc3).
+# Therefore use an existing SoC definition for another RISC-V platform.
+# SOC_RISCV32_MIV 
+#
+# Additionally, an existing UART driver must be chosen and only drivers that
+# match the SoC definition are allowed.
+# The driver won't be used, but it is necessary to choose one, otherwise no
+# file from zephyr/drivers/serial/ will be linked and this gives a build
+# error if CONFIG_SERIAL_HAS_DRIVER is set.
+#
+# SOC_RISCV32_MIV is chosen because it has a very small UART driver without a
+# PLIC.
+
+CONFIG_SOC_SERIES_RISCV32_MIV=y
+CONFIG_SOC_RISCV32_MIV=y
+CONFIG_UART_MIV=y
+
+
+CONFIG_BOARD_RUDOLV=y
+CONFIG_TIMER_RUDOLV_32BIT=y
+
+# if CONFIG_TIMER_RUDOLV_32BIT=n
+# CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / CONFIG_SYS_CLOCK_TICKS_PER_SEC
+# should be a power of 2, otherwise the timer interrupt has to compute a
+# divison remainder that wastes a lot of time.
+# For CONFIG_TIMER_RUDOLV_32BIT=y this is not so important
+CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=1048576
+CONFIG_SYS_CLOCK_TICKS_PER_SEC=128
+
+# Use UART as standard i/o
+CONFIG_SERIAL=y
+CONFIG_CONSOLE=y
+CONFIG_UART_CONSOLE=y
+
+# No RISC-V Platform Level Interrupt Controller
+CONFIG_RISCV_HAS_PLIC=n
+CONFIG_PLIC=n
+
+# No separate ROM and RAM
+CONFIG_XIP=n

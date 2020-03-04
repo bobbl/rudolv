@@ -1,0 +1,67 @@
+/* RudolV board implementation
+ *
+ * Copyright (c) 2020 Jörg Mische <bobbl@gmx.de>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	model = "RudolV";
+	compatible = "sifive,hifive1";
+	aliases {
+	};
+
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,sram = &sram0;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 {
+			clock-frequency = <0>;
+			compatible = "microsemi,miv", "riscv";
+			device_type = "cpu";
+			reg = <0>;
+			riscv,isa = "rv32im";
+		};
+	};
+
+	soc {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "microsemi,miv-soc", "simple-bus";
+		ranges;
+
+		sram0: memory@0 {
+			compatible = "mmio-sram";
+			reg = <0x00000000 0x10000>;
+		};
+
+/* uart0 is only required to get a binding from UART to console.
+ * No configuration or address mapping is needed.
+ * The string of compatible="FOO" corresponds to a FOO.yaml file in
+ * dts/bindings/serial. Something in this file magically connects
+ * the UART and the console.
+ */
+
+		uart0: uart@fffff000 {
+			compatible = "microsemi,coreuart";
+			reg = <0xfffff000 4>;
+			label = "uart_0";
+		};
+
+/*
+		uart0: uart {
+			compatible = "rudolv,csruart";
+			label = "uart_0";
+		};
+*/
+	};
+};

@@ -5,13 +5,10 @@ BUILDDIR=build
 
 
 target_zephyr() {
-    pip3 install --user west
-    west init zephyrproject --mr v1.14.1-rc1
+    #pip3 install --user west
+    west init zephyrproject --mr v2.2.0-rc3
     cd zephyrproject
     west update
-
-    # patch: hub was renamed to git-spindle
-    sed -i 's/hub==/git-spindle==/' zephyr/scripts/requirements.txt 
 
     pip3 install --user -r zephyr/scripts/requirements.txt
     ZEPHYR_TOOLCHAIN_VARIANT=zephyr
@@ -21,31 +18,12 @@ target_zephyr() {
     cd ..
 }
 
-# $1 attack number 1..5
-target_ripe() {
-    srcfile=src/ripe_attack_generator.c
-    mkdir -p $BUILDDIR
-    cd apps/ripe
-
-    # set attack number
-    sed -i.bak "s/^#define ATTACK_NR   .*/#define ATTACK_NR   $1/" ${srcfile}
-
-    rm -rf build
-    west build -p -b m2gl025_miv
-    cp build/zephyr/zephyr.elf ../../$BUILDDIR/ripe$1.elf
-    mv ${srcfile}.bak ${srcfile}
-    cd ../..
-}
-
-# $1 app name = subdir
+# $1 path to app directory
 west_build() {
-    mkdir -p $BUILDDIR
-    cd apps/$1
-    rm -rf build
+    west build -p -b rudolv $1 -- -DBOARD_ROOT=$(pwd)
 
-    west build -p -b m2gl025_miv
-    cp build/zephyr/zephyr.elf ../../build/$1.elf
-    cd ../..
+    mkdir -p elf
+    cp build/zephyr/zephyr.elf elf/$(basename $1).elf
 }
 
 
@@ -53,20 +31,21 @@ west_build() {
 
 
 # ---------------------------------------------
-# main loop: process one target after the other
+# check dependencies
 # ---------------------------------------------
 
 if [ $# -eq 0 ] 
 then
     echo "Please give a make target:"
-    echo "  zephyr   clone, patch and build Zephyr RTOS 1.14.1-rc1"
-    echo "  ripe     build all 5 ripe attack scenarios for the RISC-V IoT contest"
+    echo "  zephyr     clone, patch and build Zephyr RTOS 2.2.0-rc3"
+    echo "  elf <dir>  build Zephyr application in <dir> and copy ELF to ./elf/"
+#    echo "  ripe     build all 5 ripe attack scenarios for the RISC-V IoT contest"
     exit 1
 fi
 
 if [ -z "$ZEPHYR_SDK_INSTALL_DIR" ]
 then
-    echo "ZEPHY_SDK_INSTALL_DIR must be set"
+    echo "ZEPHYR_SDK_INSTALL_DIR must be set"
     exit 2
 fi
 
@@ -85,29 +64,21 @@ fi
 
 
 
-apps=$(cd apps; echo * | sed 's/SOURCE//')
+# ---------------------------------------------
+# main loop: process one target after the other
+# ---------------------------------------------
 
 while [ $# -ne 0 ]
 do
     case $1 in
-        ripe)
-            target_ripe 1
-            target_ripe 2
-            target_ripe 3
-            target_ripe 4
-            target_ripe 5
-            ;;
-        test)            west_build $1 ;;
-        hello_world)     west_build $1 ;;
-        synchronization) west_build $1 ;;
-        philosophers)    west_build $1 ;;
-        zephyr)          target_zephyr ;;
-        all)
-#            target_zephyr
-            for a in $apps ; do west_build $a ; done
+        zephyr)         target_zephyr ;;
+        elf)
+            west_build $2
+            shift
             ;;
         clean)
-            for p in $apps ; do rm -rf $a/build ; done
+            rm -rf elf
+            rm -rf build
             ;;
         *)
             echo "Unknown target $1. Stop."
@@ -116,4 +87,3 @@ do
     esac
     shift
 done
-

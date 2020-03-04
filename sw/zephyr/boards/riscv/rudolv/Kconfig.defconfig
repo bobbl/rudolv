@@ -1,0 +1,8 @@
+# RudolV board implementation
+#
+# Copyright (c) 2020 Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD
+	default "rudolv"
+	depends on BOARD_RUDOLV
