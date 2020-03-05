@@ -5,16 +5,24 @@ Memory map
 0002'0000h  1KiB boot loader (BRAM)
 
 CSR
-bc0h       UART
+BC0h       UART
 */
+
 
 module top (
     input uart_rx,
     output uart_tx
 );
-//    localparam integer CLOCK_RATE = 24_000_000;
+    //localparam integer CLOCK_RATE = 24_000_000;
     localparam integer CLOCK_RATE = 12_000_000;
     localparam integer BAUD_RATE = 115200;
+
+    localparam CSR_SIM   = 12'h3FF;
+    localparam CSR_UART  = 12'hBC0;
+    localparam CSR_LEDS  = 12'hBC1;
+    localparam CSR_SWI   = 12'hBC1;
+    localparam CSR_TIMER = 12'hBC2;
+    localparam CSR_KHZ   = 12'hFC0;
 
 
     wire clk;
@@ -58,21 +66,23 @@ module top (
     wire [31:0] CounterRData;
     wire        UartValid;
     wire [31:0] UartRData;
+    wire        TimerValid;
+    wire [31:0] TimerRData;
 
-    wire        retired;
     wire        irq_software = 0;
-    wire        irq_timer = 0;
+    wire        irq_timer;
     wire        irq_external = 0;
+    wire        retired;
 
     wire        csr_read;
     wire [2:0]  csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData;
-    wire        csr_valid = IDsValid | CounterValid | UartValid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData | TimerRData;
+    wire        csr_valid = IDsValid | CounterValid | UartValid | TimerValid;
 
     CsrIDs #(
-        .BASE_ADDR(12'hFC0),
+        .BASE_ADDR(CSR_KHZ),
         .KHZ(CLOCK_RATE/1000)
     ) csr_ids (
         .clk    (clk),
@@ -99,10 +109,13 @@ module top (
         .rdata  (CounterRData),
         .valid  (CounterValid),
 
-        .retired(retired)
+        .retired(retired),
+
+        .AVOID_WARNING()
     );
 
     CsrUartChar #(
+        .BASE_ADDR(CSR_UART),
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
@@ -117,7 +130,28 @@ module top (
         .valid  (UartValid),
 
         .rx     (uart_rx),
-        .tx     (uart_tx)
+        .tx     (uart_tx),
+
+        .AVOID_WARNING()
+    );
+
+    CsrTimerAdd #(
+        .BASE_ADDR(CSR_TIMER),
+        .WIDTH(32)
+    ) Timer (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (TimerRData),
+        .valid  (TimerValid),
+
+        .irq    (irq_timer),
+
+        .AVOID_WARNING()
     );
 
     Pipeline #(
@@ -126,10 +160,10 @@ module top (
         .clk            (clk),
         .rstn           (rstn),
 
-        .retired        (retired),
         .irq_software   (irq_software),
         .irq_timer      (irq_timer),
         .irq_external   (irq_external),
+        .retired        (retired),
 
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
@@ -235,3 +269,5 @@ module BRAMMemory (
     end
 endmodule
 
+
+// SPDX-License-Identifier: ISC

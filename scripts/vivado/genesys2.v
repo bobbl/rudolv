@@ -20,6 +20,14 @@ module top (
     localparam integer CLOCK_RATE = 200_000_000;
     localparam integer BAUD_RATE = 115200;
 
+    localparam CSR_SIM   = 12'h3FF;
+    localparam CSR_UART  = 12'hBC0;
+    localparam CSR_LEDS  = 12'hBC1;
+    localparam CSR_SWI   = 12'hBC1;
+    localparam CSR_TIMER = 12'hBC2;
+    localparam CSR_KHZ   = 12'hFC0;
+
+
     wire clk;
     IBUFGDS clk_inst (
         .O(clk),
@@ -51,20 +59,23 @@ module top (
     wire [31:0] UartRData;
     wire        LedsValid;
     wire [31:0] LedsRData;
+    wire        TimerValid;
+    wire [31:0] TimerRData;
 
     wire        irq_software = 0;
-    wire        irq_timer = 0;
+    wire        irq_timer;
     wire        irq_external = 0;
     wire        retired;
+
     wire        csr_read;
-    wire [2:0]  csr_modify;
+    wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData;
-    wire        csr_valid = IDsValid | CounterValid | UartValid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData | TimerRData;
+    wire        csr_valid = IDsValid | CounterValid | UartValid | TimerValid;
 
     CsrIDs #(
-        .BASE_ADDR(12'hFC0),
+        .BASE_ADDR(CSR_KHZ),
         .KHZ(CLOCK_RATE/1000)
     ) csr_ids (
         .clk    (clk),
@@ -97,7 +108,7 @@ module top (
     );
 
     CsrUartChar #(
-        .BASE_ADDR(12'hBC0),
+        .BASE_ADDR(CSR_UART),
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
@@ -118,7 +129,7 @@ module top (
     );
 
     CsrPinsOut #(
-        .BASE_ADDR(12'hBC1),
+        .BASE_ADDR(CSR_LEDS),
         .COUNT(8)
     ) csr_leds (
         .clk    (clk),
@@ -132,6 +143,25 @@ module top (
         .valid  (LedsValid),
 
         .pins   (leds),
+
+        .AVOID_WARNING()
+    );
+
+    CsrTimerAdd #(
+        .BASE_ADDR(CSR_TIMER),
+        .WIDTH(32)
+    ) Timer (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (TimerRData),
+        .valid  (TimerValid),
+
+        .irq    (irq_timer),
 
         .AVOID_WARNING()
     );

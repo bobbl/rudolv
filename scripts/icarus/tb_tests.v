@@ -1,10 +1,11 @@
 module tb_tests;
 
-    localparam CSR_UART  = 12'hbc0;
-    localparam CSR_LEDS  = 12'hbc1;
-    localparam CSR_SWI   = 12'hbc1;
-    localparam CSR_TIMER = 12'hbc2;
-    localparam CSR_SIM   = 12'h3ff;
+    localparam CSR_SIM   = 12'h3FF;
+    localparam CSR_UART  = 12'hBC0;
+    localparam CSR_LEDS  = 12'hBC1;
+    localparam CSR_SWI   = 12'hBC1;
+    localparam CSR_TIMER = 12'hBC2;
+    localparam CSR_KHZ   = 12'hFC0;
 
     reg clk = 1;
     always #5 clk = !clk;
@@ -13,10 +14,6 @@ module tb_tests;
     initial begin
         #40 rstn = 1;
     end
-
-    wire irq_software;
-    wire irq_timer;
-    wire irq_external = 0;
 
     wire mem_valid;
     wire mem_write;
@@ -27,19 +24,6 @@ module tb_tests;
     wire [31:0] mem_rdata;
     wire mem_rgrubby = 0;
 
-    Memory32Sim #(
-        .WIDTH(14), // 4 * (2**13) = 64 KiByte
-        .CONTENT(`CODE)
-    ) mem (
-        .clk    (clk),
-        .valid  (mem_valid),
-        .write  (mem_write),
-        .wmask  (mem_wmask),
-        .wdata  (mem_wdata),
-        .addr   (mem_addr[15:2]),
-        .rdata  (mem_rdata)
-    );
-
     wire        IDsValid;
     wire [31:0] IDsRData;
     wire        CounterValid;
@@ -49,6 +33,11 @@ module tb_tests;
     wire        TimerValid;
     wire [31:0] TimerRData;
 
+    wire        irq_software;
+    wire        irq_timer;
+    wire        irq_external = 0;
+    wire        retired;
+
     wire        csr_read;
     wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
@@ -57,7 +46,7 @@ module tb_tests;
     wire        csr_valid = IDsValid | CounterValid | PinsValid | TimerValid;
 
     CsrIDs #(
-        .BASE_ADDR(12'hFC0),
+        .BASE_ADDR(CSR_KHZ),
         .KHZ(1000) // assume 1 MHz
     ) csr_ids (
         .clk    (clk),
@@ -76,14 +65,17 @@ module tb_tests;
     CsrCounter counter (
         .clk    (clk),
         .rstn   (rstn),
-        .retired(retired),
 
         .read   (csr_read),
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (CounterRData),
-        .valid  (CounterValid)
+        .valid  (CounterValid),
+
+        .retired(retired),
+
+        .AVOID_WARNING()
     );
 
     CsrPinsOut #(
@@ -101,7 +93,9 @@ module tb_tests;
         .rdata  (PinsRData),
         .valid  (PinsValid),
 
-        .pins   (irq_software)
+        .pins   (irq_software),
+
+        .AVOID_WARNING()
     );
 
     CsrTimerAdd #(
@@ -118,7 +112,9 @@ module tb_tests;
         .rdata  (TimerRData),
         .valid  (TimerValid),
 
-        .irq    (irq_timer)
+        .irq    (irq_timer),
+
+        .AVOID_WARNING()
     );
 
 
@@ -153,6 +149,19 @@ module tb_tests;
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
         .mem_rgrubby    (mem_rgrubby)
+    );
+
+    Memory32Sim #(
+        .WIDTH(14), // 4 * (2**13) = 64 KiByte
+        .CONTENT(`CODE)
+    ) mem (
+        .clk    (clk),
+        .valid  (mem_valid),
+        .write  (mem_write),
+        .wmask  (mem_wmask),
+        .wdata  (mem_wdata),
+        .addr   (mem_addr[15:2]),
+        .rdata  (mem_rdata)
     );
 
 
@@ -224,3 +233,5 @@ $display("MEMd8=%h", mem.mem['h36]);
 
 endmodule
 
+
+// SPDX-License-Identifier: ISC
