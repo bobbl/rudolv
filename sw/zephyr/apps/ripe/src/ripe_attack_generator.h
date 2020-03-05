@@ -42,7 +42,7 @@
 #include <setjmp.h>
 
 #include <zephyr.h>
-#include <misc/printk.h>
+#include <sys/printk.h>
 
 #include "ripe_attack_parameters.h"
 #define fprintf(dest,str...) printk(str)

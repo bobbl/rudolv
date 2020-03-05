@@ -1,8 +1,28 @@
 #!/bin/sh
 
-BUILDDIR=build
+if [ $# -eq 0 ] 
+then
+    echo "Usage: $0 <targets> ..."
+    echo "  zephyr     clone, patch and build Zephyr RTOS 2.2.0-rc3"
+    echo "  elf <dir>  build Zephyr application in <dir> and copy ELF to ./elf/"
+    echo "  ripe       build all 5 ripe attack scenarios for the RISC-V IoT contest"
+    echo
+    echo "<dir>"
+    echo "  zephyrproject/zephyr/samples/hello_world"
+    echo "  zephyrproject/zephyr/samples/synchronization"
+    echo "  zephyrproject/zephyr/samples/philosophers"
+    echo "  apps/ripe"
+    exit 1
+fi
+
+# Read configuration for external tools
+. ../../config_default.sh ; [ ! -e ../../config.sh ] || . ../../config.sh
 
 
+
+# ---------------------------------------------
+# targets
+# ---------------------------------------------
 
 target_zephyr() {
     #pip3 install --user west
@@ -18,8 +38,20 @@ target_zephyr() {
     cd ..
 }
 
+# $1 attack number 1...5
+target_ripe() {
+    srcfile=apps/ripe/src/ripe_attack_generator.c
+
+    # set attack number
+    sed -i.bak "s/^#define ATTACK_NR   .*/#define ATTACK_NR   $1/" ${srcfile}
+
+    west build -p -b rudolv apps/ripe/ -- -DBOARD_ROOT=$(pwd)
+    cp build/zephyr/zephyr.elf elf/ripe$1.elf
+    mv ${srcfile}.bak ${srcfile}
+}
+
 # $1 path to app directory
-west_build() {
+target_elf() {
     west build -p -b rudolv $1 -- -DBOARD_ROOT=$(pwd)
 
     mkdir -p elf
@@ -28,20 +60,9 @@ west_build() {
 
 
 
-
-
 # ---------------------------------------------
 # check dependencies
 # ---------------------------------------------
-
-if [ $# -eq 0 ] 
-then
-    echo "Please give a make target:"
-    echo "  zephyr     clone, patch and build Zephyr RTOS 2.2.0-rc3"
-    echo "  elf <dir>  build Zephyr application in <dir> and copy ELF to ./elf/"
-#    echo "  ripe     build all 5 ripe attack scenarios for the RISC-V IoT contest"
-    exit 1
-fi
 
 if [ -z "$ZEPHYR_SDK_INSTALL_DIR" ]
 then
@@ -71,10 +92,19 @@ fi
 while [ $# -ne 0 ]
 do
     case $1 in
-        zephyr)         target_zephyr ;;
+        zephyr)
+            target_zephyr
+            ;;
         elf)
-            west_build $2
+            target_elf $2
             shift
+            ;;
+        ripe)
+            target_ripe 1
+            target_ripe 2
+            target_ripe 3
+            target_ripe 4
+            target_ripe 5
             ;;
         clean)
             rm -rf elf
