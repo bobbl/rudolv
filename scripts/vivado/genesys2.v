@@ -1,7 +1,7 @@
 /* wrapper for Digilent Genesys 2 board
 
 Memory map
-0001'0000h main memory (BRAM, 64 KiByte)
+0000'0000h main memory (BRAM, 64 KiByte)
 0000'FE00h start address of boot loader
 
 CSR

@@ -19,9 +19,17 @@ module top (
     localparam integer CLOCK_RATE = 50_000_000;
     localparam integer BAUD_RATE = 115200;
 
+    localparam CSR_SIM   = 12'h3FF;
+    localparam CSR_UART  = 12'hBC0;
+    localparam CSR_LEDS  = 12'hBC1;
+    localparam CSR_SWI   = 12'hBC1;
+    localparam CSR_TIMER = 12'hBC2;
+    localparam CSR_KHZ   = 12'hFC0;
+
+    wire clk = CLOCK_50;
     reg [5:0] reset_counter = 0;
     wire rstn = &reset_counter;
-    always @(posedge CLOCK_50) begin
+    always @(posedge clk) begin
         reset_counter <= reset_counter + !rstn;
     end
 
@@ -43,23 +51,26 @@ module top (
     wire [31:0] UartRData;
     wire        LedsValid;
     wire [31:0] LedsRData;
+    wire        TimerValid;
+    wire [31:0] TimerRData;
 
     wire        irq_software = 0;
-    wire        irq_timer = 0;
+    wire        irq_timer;
     wire        irq_external = 0;
     wire        retired;
+
     wire        csr_read;
-    wire [2:0]  csr_modify;
+    wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData;
-    wire        csr_valid = IDsValid | CounterValid | UartValid;
+    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData | TimerRData;
+    wire        csr_valid = IDsValid | CounterValid | UartValid | TimerValid;
 
     CsrIDs #(
-        .BASE_ADDR(12'hFC0),
+        .BASE_ADDR(CSR_KHZ),
         .KHZ(CLOCK_RATE/1000)
     ) csr_ids (
-        .clk    (CLOCK_50),
+        .clk    (clk),
         .rstn   (rstn),
 
         .read   (csr_read),
@@ -73,7 +84,7 @@ module top (
     );
 
     CsrCounter counter (
-        .clk    (CLOCK_50),
+        .clk    (clk),
         .rstn   (rstn),
 
         .read   (csr_read),
@@ -89,11 +100,11 @@ module top (
     );
 
     CsrUartChar #(
-        .BASE_ADDR(12'hBC0),
+        .BASE_ADDR(CSR_UART),
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE)
     ) uart (
-        .clk    (CLOCK_50),
+        .clk    (clk),
         .rstn   (rstn),
 
         .read   (csr_read),
@@ -110,10 +121,10 @@ module top (
     );
 
     CsrPinsOut #(
-        .BASE_ADDR(12'hBC1),
+        .BASE_ADDR(CSR_LEDS),
         .COUNT(18)
     ) csr_leds (
-        .clk    (CLOCK_50),
+        .clk    (clk),
         .rstn   (rstn),
 
         .read   (csr_read),
@@ -128,10 +139,29 @@ module top (
         .AVOID_WARNING()
     );
 
+    CsrTimerAdd #(
+        .BASE_ADDR(CSR_TIMER),
+        .WIDTH(32)
+    ) Timer (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .modify (csr_modify),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (TimerRData),
+        .valid  (TimerValid),
+
+        .irq    (irq_timer),
+
+        .AVOID_WARNING()
+    );
+
     Pipeline #(
         .START_PC       (32'h_0000_fe00)
     ) pipe (
-        .clk            (CLOCK_50),
+        .clk            (clk),
         .rstn           (rstn),
 
         .irq_software   (irq_software),
@@ -157,7 +187,7 @@ module top (
     );
 
     BRAMMemory mem (
-        .clk    (CLOCK_50),
+        .clk    (clk),
         .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),

@@ -10,7 +10,7 @@ then
     echo "<target>"
     echo "  bootloader  Build bootloader"
     echo "  synth       Synthesize with Quartus"
-    echo "  prog        Program the device with iceprog"
+    echo "  prog        Program the device"
     echo "  jtag        If programming does not work, try this"
     echo
     echo "Set QUARTUS_BIN (with trailing slash) if Quartus is not in the search path"
