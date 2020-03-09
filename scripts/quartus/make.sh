@@ -22,8 +22,6 @@ fi
 
 
 
-proj=de2-115
-
 
 one_column()
 {
@@ -34,6 +32,34 @@ one_column()
 }
 
 
+target_bootloader()
+{
+    back=$(pwd)
+    cd $(dirname $0)/../../sw/uart
+    if [ ! -e build/bootloader_char.bin ] || \
+        [ $(find bootloader.c -newer build/bootloader_char.bin) ]
+    then
+        ./make.sh all
+    fi
+    cd $back
+
+    # 4 columns of the bytes
+    od -An -tx1 -v -w4 ../../sw/uart/build/bootloader_char.bin > mem32.tmp
+    i=$(wc -l < mem32.tmp)
+
+    # align to 512 bytes
+    while [ $i -lt 128 ]
+    do
+        echo " 00 00 00 00" >> mem32.tmp
+        i=$((i+1))
+    done
+
+    mkdir -p build
+    one_column 2 build/bootloader.byte0.hex
+    one_column 3 build/bootloader.byte1.hex
+    one_column 4 build/bootloader.byte2.hex
+    one_column 5 build/bootloader.byte3.hex
+}
 
 
 
@@ -53,43 +79,27 @@ while [ $# -ne 0 ]
 do
     case $1 in
         bootloader)
-            back=$(pwd)
-            cd $(dirname $0)/../../sw/uart
-            ./make.sh all
-            cd $back
-
-            # 4 columns of the bytes
-            od -An -tx1 -v -w4 ../../sw/uart/build/bootloader_char.bin > mem32.tmp
-            i=$(wc -l < mem32.tmp)
-
-            # align to 512 bytes
-            while [ $i -lt 128 ]
-            do
-                echo " 00 00 00 00" >> mem32.tmp
-                i=$((i+1))
-            done
-
-            one_column 2 mem0.hex
-            one_column 3 mem1.hex
-            one_column 4 mem2.hex
-            one_column 5 mem3.hex
+            target_bootloader
             ;;
         synth)
+            target_bootloader
+
             mkdir -p build
-            cp ${proj}.qsf build/
+            cp ${device}.qsf build/
             cd build
 
-            ${QUARTUS_BIN}quartus_map ${proj}.qsf
-            ${QUARTUS_BIN}quartus_fit --read_settings_files=off -write_settings_files=off ${proj} -c ${proj}
-            ${QUARTUS_BIN}quartus_sta ${proj} -c ${proj}
-            ${QUARTUS_BIN}quartus_asm ${proj}
+            ${QUARTUS_BIN}quartus_map ${device}.qsf && \
+            ${QUARTUS_BIN}quartus_fit --read_settings_files=off \
+                -write_settings_files=off ${device} -c ${device} && \
+            ${QUARTUS_BIN}quartus_sta ${device} -c ${device} && \
+            ${QUARTUS_BIN}quartus_asm ${device}
 
-            grep -A3 "Total logic elements" output_files/${proj}.fit.summary
-            grep -B2 -A2 "Restricted Fmax" output_files/${proj}.sta.rpt
+            grep -A3 "Total logic elements" output_files/${device}.fit.summary
+            grep -B2 -A2 "Restricted Fmax" output_files/${device}.sta.rpt
             cd ..
             ;;
         prog)
-            ${QUARTUS_BIN}/quartus_pgm -m jtag -o "p;build/output_files/${proj}.sof"
+            ${QUARTUS_BIN}/quartus_pgm -m jtag -o "p;build/output_files/${device}.sof"
             ;;
         jtag)
             # try if programming does not work

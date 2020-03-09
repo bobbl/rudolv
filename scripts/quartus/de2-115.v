@@ -12,6 +12,7 @@ BC1h       LEDs
 
 module top (
     input CLOCK_50,
+    input [3:3] KEY,
     input UART_RXD,
     output UART_TXD,
     output [17:0] LEDR
@@ -28,10 +29,12 @@ module top (
 
     wire clk = CLOCK_50;
     reg [5:0] reset_counter = 0;
-    wire rstn = &reset_counter;
+    reg reset_button;
     always @(posedge clk) begin
         reset_counter <= reset_counter + !rstn;
+        reset_button <= KEY[3];
     end
+    wire rstn = &reset_counter & reset_button;
 
     wire        mem_valid;
     wire        mem_write;
@@ -40,7 +43,7 @@ module top (
     wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire        mem_rgrubby = 0;
+    wire        mem_rgrubby;
 
 
     wire        IDsValid;
@@ -186,6 +189,30 @@ module top (
         .mem_rgrubby    (mem_rgrubby)
     );
 
+    Memory4x9 #(
+        .ADDR_WIDTH(14),
+        .CONTENT_BYTE0("bootloader.byte0.hex"),
+        .CONTENT_BYTE1("bootloader.byte1.hex"),
+        .CONTENT_BYTE2("bootloader.byte2.hex"),
+        .CONTENT_BYTE3("bootloader.byte3.hex")
+/*
+        .CONTENT_BYTE0("../scripts/quartus/mem0.hex"),
+        .CONTENT_BYTE1("mem1.hex"),
+        .CONTENT_BYTE2("mem2.hex"),
+        .CONTENT_BYTE3("mem3.hex")
+*/
+    ) mem (
+        .clk    (clk),
+        .write  (mem_write),
+        .wmask  (mem_wmask),
+        .wdata  (mem_wdata),
+        .wgrubby(mem_wgrubby),
+        .addr   (mem_addr[15:2]),
+        .rdata  (mem_rdata),
+        .rgrubby(mem_rgrubby)
+    );
+
+/*
     BRAMMemory mem (
         .clk    (clk),
         .write  (mem_write),
@@ -194,6 +221,7 @@ module top (
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata)
     );
+*/
 endmodule
 
 
