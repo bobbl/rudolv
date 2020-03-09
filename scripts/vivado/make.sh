@@ -37,7 +37,14 @@ do
     case $1 in
         synth)
             # CAUTION: offset is a word (4 byte) address, not a byte address
-            sed -e 's/@0 /@3f80 /' ../../sw/uart/build/bootloader_char.hex > bootloader.hex
+#            sed -e 's/@0 /@3f80 /' ../../sw/uart/build/bootloader_char.hex > bootloader.hex
+
+            od -An -tx1 -v -w4 ../../sw/uart/build/bootloader_char.bin > tmp.bytes.hex
+            for i in 0 1 2 3
+            do
+                printf "@3f80 " > bootloader.byte$i.hex
+                cut -d' ' -f$((i + 2)) tmp.bytes.hex >> bootloader.byte$i.hex
+            done
 
             $VIVADO -nojournal -mode batch -source genesys2_synth.tcl
             ;;

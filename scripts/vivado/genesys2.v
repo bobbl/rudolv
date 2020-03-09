@@ -48,7 +48,7 @@ module top (
     wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire        mem_rgrubby = 0;
+    wire        mem_rgrubby;
 
 
     wire        IDsValid;
@@ -194,43 +194,23 @@ module top (
         .mem_rgrubby    (mem_rgrubby)
     );
 
-    BRAMMemory mem (
+    Memory4x9 #(
+        .ADDR_WIDTH(14),
+        .CONTENT_BYTE0("bootloader.byte0.hex"),
+        .CONTENT_BYTE1("bootloader.byte1.hex"),
+        .CONTENT_BYTE2("bootloader.byte2.hex"),
+        .CONTENT_BYTE3("bootloader.byte3.hex")
+    ) mem (
         .clk    (clk),
         .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
+        .wgrubby(mem_wgrubby),
         .addr   (mem_addr[15:2]),
-        .rdata  (mem_rdata)
+        .rdata  (mem_rdata),
+        .rgrubby(mem_rgrubby)
     );
-endmodule
 
-
-module BRAMMemory (
-    input clk, 
-    input write,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [13:0] addr,
-    output reg [31:0] rdata
-);
-    reg [31:0] mem [0:'h3fff];
-
-    initial begin
-        $readmemh("bootloader.hex", mem);
-            // bootloader code is the same as on other platforms, but at the
-            // beginning there must be '@3f80' to load the code at the correct
-            // start adress
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (write) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
 endmodule
 
 

@@ -22,7 +22,7 @@ module tb_tests;
     wire mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire mem_rgrubby = 0;
+    wire mem_rgrubby;
 
     wire        IDsValid;
     wire [31:0] IDsRData;
@@ -151,17 +151,19 @@ module tb_tests;
         .mem_rgrubby    (mem_rgrubby)
     );
 
-    Memory32Sim #(
-        .WIDTH(14), // 4 * (2**13) = 64 KiByte
+    Memory33Sim #(
+        .WIDTH(14), // 4 * (2**14) = 64 KiByte
         .CONTENT(`CODE)
     ) mem (
         .clk    (clk),
         .valid  (mem_valid),
         .write  (mem_write),
         .wmask  (mem_wmask),
+        .wgrubby(mem_wgrubby),
         .wdata  (mem_wdata),
         .addr   (mem_addr[15:2]),
-        .rdata  (mem_rdata)
+        .rdata  (mem_rdata),
+        .rgrubby(mem_rgrubby)
     );
 
 
@@ -215,10 +217,12 @@ $display("MEMd8=%h", mem.mem['h36]);
                 end
             endcase
         end
+/*
         if (dut.d_Insn == 'h006F) begin
             $display("exit due to write to infinite loop");
             $finish;
         end
+*/
 
     end
 

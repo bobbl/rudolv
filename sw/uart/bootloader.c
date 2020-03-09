@@ -5,7 +5,10 @@ static inline void set_leds(unsigned long leds)
     write_csr(0xbc1, leds);
 }
 
-int main(int argc, char **argv)
+void main(int argc, char **argv) __attribute__ ((noreturn));
+// _Noreturn gives a warning with main()
+
+void main(int argc, char **argv)
 {
     unsigned long i;
     unsigned long length = 0;
@@ -27,16 +30,31 @@ int main(int argc, char **argv)
     }
     set_leds(0x03);
 
+/*
     char *p = 0;
     for (i=0; i<length; i++) {
         *p++ = uart_blocking_receive();
+    }
+*/
+    unsigned long *p = 0;
+    unsigned long word = 0;
+    for (i=0; i<length; i++) {
+        word = (word >> 8) | (uart_blocking_receive() << 24);
+        if ((i&3)==3) *p++ = word;
+    }
+    if ((i&3)!=0) {
+        // length is not a multiple of 4
+        uart_send('!');
+        // fill last word correctly (not done in grubby.S)
+        *p = word >> (8*(4-(i&3)));
     }
 
     set_leds(0x04);
     uart_send(13);
     uart_send(10);
 
-    asm volatile ("jalr 0(x0)");
+    asm volatile ("jr x0");
+    while (1); // avoid warning
 }
 
 // SPDX-License-Identifier: ISC

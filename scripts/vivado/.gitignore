@@ -1,5 +1,5 @@
 .Xil/
-bootloader.hex
+*.hex
 design.bit
 *.log
 my_*

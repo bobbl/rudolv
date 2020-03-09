@@ -54,6 +54,7 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] d_PC;
     reg [31:0] d_DelayedInsn;
+    reg d_DelayedInsnGrubby;
     reg d_SaveFetch;
     reg d_Bubble;
 
@@ -248,14 +249,14 @@ module Pipeline #(
         // maybe on the critical path
 
         if (m_Kill) begin
-            if (f_PC[1]) begin // ExcJump
+            if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
                 FetchSynth <= fsJumpMTVEC;
                 MstatusExcEnter <= 1;
             end else begin
                 FetchDirect <= 1;
             end
         end else begin
-            if (f_ExcGrubbyJump | ExcGrubbyInsn) begin
+            if (ExcGrubbyInsn) begin
                 FetchSynth <= fsJumpMTVEC;
                 MstatusExcEnter <= 1;
             end else if (SysOpcode) begin
@@ -350,6 +351,7 @@ module Pipeline #(
         end else begin
             if (FetchDelayed) begin
                 Insn = d_DelayedInsn;
+                DecodeGrubbyInsn = d_DelayedInsnGrubby;
             end else begin
                 RdNo1Aux = (FetchSynth != fsNOP);
                 if (~FetchSynth[1]) begin
@@ -1086,7 +1088,10 @@ module Pipeline #(
         d_Insn <= Insn;
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
-        if (SaveFetch) d_DelayedInsn <= mem_rdata;
+        if (SaveFetch) begin
+            d_DelayedInsn <= mem_rdata;
+            d_DelayedInsnGrubby <= mem_rgrubby;
+        end
         d_SaveFetch <= SaveFetch;
         d_Bubble <= Bubble;
 
@@ -1260,11 +1265,12 @@ module Pipeline #(
         $display("R 24 %h %h %h %h %h %h %h %h", 
             RegSet.regs[24], RegSet.regs[25], RegSet.regs[26], RegSet.regs[27], 
             RegSet.regs[28], RegSet.regs[29], RegSet.regs[30], RegSet.regs[31]);
+
         $display("R grubby %b%b%b%b %b%b%b%b %b%b%b%b %b%b%b%b",
-            RegSet.regs[0][32], RegSet.regs[1][32], RegSet.regs[2][32], RegSet.regs[3][32], 
-            RegSet.regs[4][32], RegSet.regs[5][32], RegSet.regs[6][32], RegSet.regs[7][32], 
-            RegSet.regs[8][32], RegSet.regs[9][32], RegSet.regs[10][32], RegSet.regs[11][32], 
-            RegSet.regs[12][32], RegSet.regs[13][32], RegSet.regs[14][32], RegSet.regs[15][32]);
+            RegSet.grubby[0], RegSet.grubby[1], RegSet.grubby[2], RegSet.grubby[3],
+            RegSet.grubby[4], RegSet.grubby[5], RegSet.grubby[6], RegSet.grubby[7],
+            RegSet.grubby[8], RegSet.grubby[9], RegSet.grubby[10], RegSet.grubby[11],
+            RegSet.grubby[12], RegSet.grubby[13], RegSet.grubby[14], RegSet.grubby[15]);
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, RdData1, d_RdNo2, RdData2);
@@ -1317,8 +1323,8 @@ module Pipeline #(
 
 
 
-        $display("G MemResultGrubby=%b e_AGrubby=%b",
-            MemResultGrubby, e_AGrubby);
+        $display("G MemResultGrubby=%b e_AGrubby=%b ExcGrubbyJump",
+            MemResultGrubby, e_AGrubby, ExcGrubbyJump);
         $display("G FwdAEGrubby=%b d_RdNo1[5]=%b w_WrGrubby=%b RdGrubby1=%b",
             ForwardAEGrubby, d_RdNo1[5], w_WrGrubby, RdGrubby1);
 
@@ -1378,7 +1384,6 @@ module Pipeline #(
 
 
 
-
         $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI_F=%b%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             f_SoftwareInt, d_SoftwareInt, e_SoftwareInt,
@@ -1402,6 +1407,7 @@ module Pipeline #(
             d_SaveFetch <= 0;
             d_Bubble <= 0;
             d_DelayedInsn <= 0;
+            d_DelayedInsnGrubby <= 0;
 
             d_MultiCycleCounter <= 0;
             e_StartMC <= 0;

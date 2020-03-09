@@ -33,16 +33,16 @@ fi
 #   $1 macro name
 #   $2 executable name suffix
 build() {
-    ${RV_PREFIX}gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
+    ${RV32I_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
+        bl.S -o build/bl_$2.elf
+    ${RV32I_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
+        grubby.S -o build/grubby_$2.elf
+    ${RV32I_PREFIX}gcc -Os -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
         -Tbootloader.ld -D$1 crt.S \
         bootloader.c -o build/bootloader_$2.elf
-    ${RV_PREFIX}gcc -O2 -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
+    ${RV32I_PREFIX}gcc -Os -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
         -Tbootloader.ld -D$1 crt.S \
         test.c -o build/test_$2.elf
-    ${RV_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
-        bl.S -o build/bl_$2.elf
-    ${RV_PREFIX}gcc -nostartfiles -Tbootloader.ld -D$1 \
-        grubby.S -o build/grubby_$2.elf
 }
 
 
@@ -55,10 +55,17 @@ build UART_MIV miv
 # build .bin and .hex images
 for elf in build/*.elf
 do
-    bin=$(echo $elf | sed 's/elf$/bin/')
-    hex=$(echo $elf | sed 's/elf$/hex/')
+    name=$(echo $elf | sed 's/.elf$//')
 
-    ${RV32I_PREFIX}objcopy -O binary $elf $bin
-    printf "@0 " > $hex
-    od -An -tx4 -w4 -v $bin | cut -b2- >> $hex
+    ${RV32I_PREFIX}objcopy -O binary $name.elf $name.bin
+    printf "@0 " > $name.hex
+    od -An -tx4 -w4 -v $name.bin | cut -b2- >> $name.hex
+
+    od -An -tx1 -v -w4 $name.bin > tmp.bytes.hex
+    for i in 0 1 2 3
+    do
+        printf "@0 " > $name.byte$i.hex
+        cut -d' ' -f$((i + 2)) tmp.bytes.hex >> $name.byte$i.hex
+    done
+
 done
