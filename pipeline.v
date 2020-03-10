@@ -163,18 +163,6 @@ module Pipeline #(
 
 
 
-`ifdef ENABLE_COUNTER
-    // CSRs for counters
-    reg        e_CarryCYCLE;
-    reg [32:0] e_CounterCYCLE;
-    reg [31:0] e_CounterCYCLEH;
-    reg        e_CarryINSTRET;
-    reg [32:0] e_CounterINSTRET;
-    reg [31:0] e_CounterINSTRETH;
-    reg        e_CsrSelHighWord;
-    reg        m_CsrSelHighWord;
-`endif
-
     reg        e_CsrFromExt;
     reg        e_CsrRead;
     reg        m_CsrRead;
@@ -187,6 +175,7 @@ module Pipeline #(
     reg        f_MModeIntEnable;        // mstatus.mie
     reg        f_MModePriorIntEnable;   // mstatus.mpie
     reg        f_WaitForInt; 
+    reg        d_WaitForInt; 
 
     reg        f_SoftwareInt;
     reg        d_SoftwareInt;
@@ -213,7 +202,8 @@ module Pipeline #(
     // fetch
 
 `ifdef ENABLE_TIMER
-    reg WaitForInt;
+    wire WaitForInt = (InsnWFI & ~m_Kill) | d_WaitForInt;
+    reg ClearWaitForInt;
     reg SoftwareInt;
     reg TimerInt;
     reg ExternalInt;
@@ -243,10 +233,7 @@ module Pipeline #(
         SoftwareInt <= 0;
         TimerInt <= 0;
         ExternalInt <= 0;
-        WaitForInt <= f_WaitForInt;
-        if (InsnWFI & ~m_Kill & ~Kill) WaitForInt <= 1;
-        //                      ^^^^^
-        // maybe on the critical path
+        ClearWaitForInt <= 0;
 
         if (m_Kill) begin
             if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
@@ -318,13 +305,13 @@ module Pipeline #(
                             SoftwareInt <= 1;
                         else
                             TimerInt <= 1;
-                        WaitForInt <= 0;
+                        ClearWaitForInt <= 1;
 
                         FetchSynth <= fsJumpMTVEC;
                         MstatusExcEnter <= 1;
 `endif
 
-                    end else if (f_WaitForInt) begin
+                    end else if (f_WaitForInt | d_WaitForInt) begin
                         FetchSynth <= fsNOP;
                     end else if (d_Bubble | d_SaveFetch) begin
                         FetchDelayed <= 1;
@@ -747,13 +734,6 @@ module Pipeline #(
         //? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
         ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 
-/*
-    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)     ? e_PCImm : NextOrSum;
-    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum;
-    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)     ? e_PCImm : NoBranch;
-    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
-*/
-
     // within multicycle, but not the last one
     wire NotLastMultiCycle = (~m_Kill & ~e_InsnJALR &
      (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2)));
@@ -766,9 +746,12 @@ module Pipeline #(
 
 //    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum_2;
     wire [WORD_WIDTH-1:0] NoBranch  = 
-        ((d_Bubble & ~m_Kill) | WaitForInt)               ? f_PC    : NextOrSum_2;
-//                              ^^^^^^^^^^
-// Maybe on the critical path! f_WaitForInt would be better.
+        ((d_Bubble & ~m_Kill) | (WaitForInt & ~e_InsnJALR)) ? f_PC    : NextOrSum_2;
+    //                           ^^^^^^^^^^
+    // A WFI instruction must immediately stop to increment the PC, otherwise
+    // the MEPC will be wrong in the trap handler.
+    //                                      ^^^^^^^^^^^^^
+    // But not when the WFI is in the first delay slot of a JALR
 
     wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)    ? e_PCImm : NoBranch;
 
@@ -1211,7 +1194,8 @@ module Pipeline #(
 `ifdef ENABLE_TIMER
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
-        f_WaitForInt        <= WaitForInt;
+        f_WaitForInt        <= WaitForInt & ~ClearWaitForInt;
+        d_WaitForInt        <= (d_WaitForInt | f_WaitForInt) & ~m_Kill & ~ClearWaitForInt;
 
         f_SoftwareInt       <= irq_software;
         d_SoftwareInt       <= SoftwareInt;
@@ -1224,18 +1208,6 @@ module Pipeline #(
         e_ExternalInt       <= d_ExternalInt;
 `endif
 
-
-`ifdef ENABLE_COUNTER
-        // counters
-        e_CarryCYCLE        <= CounterCYCLE[32];
-        e_CounterCYCLE      <= CounterCYCLE[31:0];
-        e_CounterCYCLEH     <= CounterCYCLEH;
-        e_CarryINSTRET      <= CounterINSTRET[32];
-        e_CounterINSTRET    <= CounterINSTRET[31:0];
-        e_CounterINSTRETH   <= CounterINSTRETH;
-        e_CsrSelHighWord    <= d_Insn[27];
-        m_CsrSelHighWord    <= e_CsrSelHighWord;
-`endif
 
         e_CsrFromExt        <= CsrFromExt;
         e_CsrRead           <= CsrRead;
@@ -1266,11 +1238,19 @@ module Pipeline #(
             RegSet.regs[24], RegSet.regs[25], RegSet.regs[26], RegSet.regs[27], 
             RegSet.regs[28], RegSet.regs[29], RegSet.regs[30], RegSet.regs[31]);
 
+/*
         $display("R grubby %b%b%b%b %b%b%b%b %b%b%b%b %b%b%b%b",
             RegSet.grubby[0], RegSet.grubby[1], RegSet.grubby[2], RegSet.grubby[3],
             RegSet.grubby[4], RegSet.grubby[5], RegSet.grubby[6], RegSet.grubby[7],
             RegSet.grubby[8], RegSet.grubby[9], RegSet.grubby[10], RegSet.grubby[11],
             RegSet.grubby[12], RegSet.grubby[13], RegSet.grubby[14], RegSet.grubby[15]);
+*/
+
+        $display("R grubby %b%b%b%b %b%b%b%b %b%b%b%b %b%b%b%b",
+            RegSet.regs[0][32], RegSet.regs[1][32], RegSet.regs[2][32], RegSet.regs[3][32],
+            RegSet.regs[4][32], RegSet.regs[5][32], RegSet.regs[6][32], RegSet.regs[7][32],
+            RegSet.regs[8][32], RegSet.regs[9][32], RegSet.regs[10][32], RegSet.regs[11][32],
+            RegSet.regs[12][32], RegSet.regs[13][32], RegSet.regs[14][32], RegSet.regs[15][32]);
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, RdData1, d_RdNo2, RdData2);
@@ -1384,12 +1364,12 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI_F=%b%b",
+        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI_FD=%b%b%b ClearWFI=%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             f_SoftwareInt, d_SoftwareInt, e_SoftwareInt,
             f_TimerInt, d_TimerInt, e_TimerInt,
             f_ExternalInt, d_ExternalInt, e_ExternalInt,
-            WaitForInt, f_WaitForInt);
+            WaitForInt, f_WaitForInt, d_WaitForInt, ClearWaitForInt);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1414,16 +1394,6 @@ module Pipeline #(
             e_FromMul <= 0;
             e_FromMulH <= 0;
 
-`ifdef ENABLE_COUNTER
-            // clear performance counters
-            e_CarryCYCLE <= 0;
-            e_CounterCYCLE <= 0;
-            e_CounterCYCLEH <= 0;
-            e_CarryINSTRET <= 0;
-            e_CounterINSTRET <= 0;
-            e_CounterINSTRETH <= 0;
-`endif
-
             // fake a jump to address 0 on reset
             m_Kill <= 0;
             w_Kill <= 0;
@@ -1434,6 +1404,7 @@ module Pipeline #(
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
             f_WaitForInt <= 0;
+            d_WaitForInt <= 0;
             d_SoftwareInt <= 0;
             d_TimerInt <= 0;
             d_ExternalInt <= 0;
