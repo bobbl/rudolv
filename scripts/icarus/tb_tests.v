@@ -22,7 +22,13 @@ module tb_tests;
     wire mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire mem_rgrubby;
+
+    wire mem_rgrubby_from_mem;
+`ifdef ENABLE_GRUBBY
+    wire mem_rgrubby_to_pipe = mem_rgrubby_from_mem;
+`else
+    wire mem_rgrubby_to_pipe = 0;
+`endif
 
     wire        IDsValid;
     wire [31:0] IDsRData;
@@ -148,8 +154,10 @@ module tb_tests;
         .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby)
+        .mem_rgrubby    (mem_rgrubby_to_pipe)
     );
+
+
 
     Memory33Sim #(
         .WIDTH(14), // 4 * (2**14) = 64 KiByte
@@ -163,7 +171,7 @@ module tb_tests;
         .wdata  (mem_wdata),
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata),
-        .rgrubby(mem_rgrubby)
+        .rgrubby(mem_rgrubby_from_mem)
     );
 
 
@@ -177,12 +185,6 @@ module tb_tests;
     integer sig_begin;
     integer sig_end;
     always @(posedge clk) begin
-
-
-`ifdef DEBUG
-$display("MEMd8=%h", mem.mem['h36]);
-`endif
-
 
         q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
         q_CsrAddr  <= csr_addr;
@@ -199,7 +201,7 @@ $display("MEMd8=%h", mem.mem['h36]);
                     case (csr_wdata)
                         2: begin // signature from compliance tests
                             while (sig_begin < sig_end) begin
-                                $display("%h", mem.mem[sig_begin]);
+                                $display("%h", mem.mem[sig_begin][31:0]);
                                 sig_begin = sig_begin + 1;
                             end
                         end

@@ -1,7 +1,6 @@
 /* Register set implementation for RudolV
  *
- * with grubby bit
- * for BRAM with preinit for x0
+ * for BRAM with preinit for x0 and parity for grubby bit
  */
 
 module RegisterSet(
@@ -17,23 +16,18 @@ module RegisterSet(
     output reg [31:0] rd2,
     output reg rg2
 );
-    reg [31:0] regs [0:63];
-    reg grubby[0:63];
+    reg [32:0] regs [0:63];
 
     initial begin
         regs[0] <= 0;
     end
 
     always @(posedge clk) begin
-        if (we) regs[wa] <= wd;
-        rd1 <= regs[ra1];
-        rd2 <= regs[ra2];
-    end
-
-    always @(posedge clk) begin
-        if (we) grubby[wa] <= wg;
-        rg1 <= grubby[ra1];
-        rg2 <= grubby[ra2];
+        if (we) regs[wa] <= {wg, wd};
+        rd1 <= regs[ra1][31:0];
+        rg1 <= regs[ra1][32];
+        rd2 <= regs[ra2][31:0];
+        rg2 <= regs[ra2][32];
     end
 
 endmodule

@@ -5,6 +5,8 @@ then
     echo "Usage: $0 <targets> ..."
     echo "  run <file.elf>       Simulate without logging"
     echo "  debug <file.elf>     Simulate with extensive logging"
+    echo "  gy-run <file.elf>    Enable grubby, no log"
+    echo "  gy-debug <file.elf>  Enable grubby, log"
     echo "  miv-run <file.elf>   Simulate Microsemi Mi-V memory map"
     echo "  miv-debug <file.elf> Simulate Micorsemi Mi-V with logging"
     echo "  tests                Run riscv-tests and riscv-compliance tests"
@@ -102,6 +104,16 @@ do
             ;;
         debug)
             compile $2 "-DDEBUG tb_tests.v"
+            $VVP -N tmp.vvp
+            shift
+            ;;
+        gy-run)
+            compile $2 "-DENABLE_GRUBBY tb_tests.v"
+            $VVP -N tmp.vvp
+            shift
+            ;;
+        gy-debug)
+            compile $2 "-DENABLE_GRUBBY -DDEBUG tb_tests.v"
             $VVP -N tmp.vvp
             shift
             ;;
