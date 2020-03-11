@@ -7,12 +7,17 @@ Memory map
 CSR
 BC0h       UART
 BC1h       LEDs
+
+press button BTN1 to reset
+switch SW7 enables grubby security feature
 */
 
 
 module top (
     input clk_p,
     input clk_n,
+    input cpu_resetn,
+    input [7:7] sw,
     input uart_rx,
     output uart_tx,
     output [7:0] leds
@@ -36,10 +41,13 @@ module top (
     );
 
     reg [5:0] reset_counter = 0;
-    wire rstn = &reset_counter;
+    reg reset_button;
     always @(posedge clk) begin
         reset_counter <= reset_counter + !rstn;
+        reset_button <= cpu_resetn;
     end
+    wire rstn = &reset_counter & reset_button;
+
 
     wire        mem_valid;
     wire        mem_write;
@@ -48,8 +56,17 @@ module top (
     wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire        mem_rgrubby;
+    wire        mem_rgrubby_from_mem;
 
+    reg grubby_switch;
+    always @(posedge clk) begin
+        grubby_switch <= sw[7];
+    end
+`ifdef ENABLE_GRUBBY
+    wire mem_rgrubby_to_pipe = mem_rgrubby_from_mem & grubby_switch;
+`else
+    wire mem_rgrubby_to_pipe = 0;
+`endif
 
     wire        IDsValid;
     wire [31:0] IDsRData;
@@ -191,7 +208,7 @@ module top (
         .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby)
+        .mem_rgrubby    (mem_rgrubby_to_pipe)
     );
 
     Memory4x9 #(
@@ -208,7 +225,7 @@ module top (
         .wgrubby(mem_wgrubby),
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata),
-        .rgrubby(mem_rgrubby)
+        .rgrubby(mem_rgrubby_from_mem)
     );
 
 endmodule

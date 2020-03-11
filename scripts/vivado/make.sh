@@ -9,6 +9,7 @@ then
     echo
     echo "<target>"
     echo "  synth       Synthesize with Vivado"
+    echo "  gy-synth    Synthesize with Vivado and enable grubby"
     echo "  prog        Program the device"
     echo "              Set VIVADO_HW_TARGET in config.sh for reliable programming"
     echo '              e.g. VIVADO_HW_TARGET="*/xilinx_tcf/Digilent/100200300400Z"'
@@ -31,22 +32,50 @@ esac
 shift
 
 
+target_bootloader() {
+    od -An -tx1 -v -w4 ../../sw/uart/build/bootloader_char.bin > tmp.bytes.hex
+    for i in 0 1 2 3
+    do
+        printf "@3f80 " > bootloader.byte$i.hex
+        cut -d' ' -f$((i + 2)) tmp.bytes.hex >> bootloader.byte$i.hex
+    done
+}
+
+
+target_report() {
+    printf "\033[33m"
+    awk '/1. Slice Logic/,/1.1 Summary of Registers by Type/ { \
+          if ($2=="Slice") { \
+            if ($3=="LUTs") {lut=$5} \
+            if ($3=="Registers") {ff=$5} \
+          } \
+        } \
+        /^\| Slice   / {slice=$4} \
+        /^Slack \(MET\)/ {slack=$4} \
+        /  Requirement:  / {period=$2} \
+        END { printf("SYNTHESIS RESULTS: %d slices, %d LUTs, %d FFs, %s clock period, %s slack\n", \
+                     slice, lut, ff, period, slack)}' \
+        < vivado.log
+    printf "\033[0m"
+}
+
 
 while [ $# -ne 0 ]
 do
     case $1 in
+        report)
+            target_report
+            ;;
         synth)
-            # CAUTION: offset is a word (4 byte) address, not a byte address
-#            sed -e 's/@0 /@3f80 /' ../../sw/uart/build/bootloader_char.hex > bootloader.hex
-
-            od -An -tx1 -v -w4 ../../sw/uart/build/bootloader_char.bin > tmp.bytes.hex
-            for i in 0 1 2 3
-            do
-                printf "@3f80 " > bootloader.byte$i.hex
-                cut -d' ' -f$((i + 2)) tmp.bytes.hex >> bootloader.byte$i.hex
-            done
-
+            target_bootloader
             $VIVADO -nojournal -mode batch -source genesys2_synth.tcl
+            target_report
+            ;;
+        gy-synth)
+            target_bootloader
+            $VIVADO -nojournal -mode batch -source genesys2_synth.tcl \
+                -tclargs -verilog_define ENABLE_GRUBBY=1
+            target_report
             ;;
         prog)
             $VIVADO -nojournal -mode batch -source prog.tcl
