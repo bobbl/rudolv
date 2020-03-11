@@ -418,12 +418,10 @@ module CsrUartChar #(
 endmodule
 
 
-
-
-// Timer
+// simple timer that raises an interrupt after a specified number of cycles
 module CsrTimerAdd #(
     parameter [11:0]  BASE_ADDR  = 12'hbc2,     // CSR address
-    parameter integer WIDTH = 16
+    parameter integer WIDTH = 32
 ) (
     input clk,
     input rstn,
@@ -441,30 +439,22 @@ module CsrTimerAdd #(
 );
     assign AVOID_WARNING = read | |wdata;
 
-    reg q_Valid;
-    reg [31:0] q_RData;
-    assign valid = q_Valid;
-    assign rdata = q_RData;
-
-    reg [WIDTH-1:0] q_Time;
-    reg [WIDTH-1:0] q_TimeCmp;
+    reg [WIDTH-1:0] q_Counter;
     reg q_TimerOn;
     reg q_Request;
     assign irq = q_Request;
+    assign valid = 0;
+    assign rdata = 0;
 
     reg q_enTimer;
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        q_Valid = q_enTimer;
-        q_RData = (q_enTimer ? q_Time : 32'b0);
-
         // E stage: write CSR
         if (q_enTimer) begin
             case (modify)
                 3'b001: begin // write: set relative timer
                     q_TimerOn <= 1;
-                    q_TimeCmp <= q_Time + wdata[WIDTH-1:0];
+                    q_Counter <= wdata[WIDTH-1:0];
                 end
                 3'b011: begin // clear with any value disables the timer
                     q_TimerOn <= 0;
@@ -476,18 +466,166 @@ module CsrTimerAdd #(
         q_enTimer <= (addr==BASE_ADDR);
 
         // increment timer
-        q_Request <= q_TimerOn & (q_TimeCmp <= q_Time);
-        q_Time <= q_Time + 'b1;
+        if (q_Counter==0) begin
+            q_Request <= q_TimerOn;
+        end else begin
+            q_Request <= 0;
+            q_Counter <= q_Counter - 'b1;
+        end
 
         if (!rstn) begin
             q_TimerOn <= 0;
-            q_Time <= 0;
+            q_Counter <= 0;
         end
     end
 endmodule
 
 
 
+// Combines the usally used CSR: ID, Counter, UART, Timer, LEDs
+module CsrDefault #(
+    parameter [31:0] VENDORID = 0,
+    parameter [31:0] ARCHID = 0,
+    parameter [31:0] IMPID = 0,
+    parameter [31:0] HARTID = 0,
+
+    parameter integer OUTPINS_COUNT = 4,
+    parameter integer CLOCK_RATE    = 12_000_000,
+    parameter integer BAUD_RATE     = 115200,
+    parameter integer TIMER_WIDTH   = 32,
+
+    parameter integer CSR_UART  = 12'hBC0,
+    parameter integer CSR_LEDS  = 12'hBC1,
+    parameter integer CSR_TIMER = 12'hBC2,
+    parameter integer CSR_KHZ   = 12'hFC0
+) (
+    input         clk,
+    input         rstn,
+
+    input         read,
+    input   [2:0] modify,
+    input  [31:0] wdata,
+    input  [11:0] addr,
+    output [31:0] rdata,
+    output        valid,
+
+    input         retired,
+    output [OUTPINS_COUNT-1:0] outpins,
+    input         rx,
+    output        tx,
+    output        irq_timer,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = rstn | read | |modify | |wdata;
+
+
+    wire        IDsValid;
+    wire [31:0] IDsRData;
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+    wire        PinsOutValid;
+    wire [31:0] PinsOutRData;
+    wire        UartValid;
+    wire [31:0] UartRData;
+    wire        TimerValid;
+    wire [31:0] TimerRData;
+
+    assign rdata = IDsRData | CounterRData | UartRData | TimerRData;
+    assign valid = IDsValid | CounterValid | UartValid | TimerValid;
+
+    CsrIDs #(
+        .BASE_ADDR(CSR_KHZ),
+        .KHZ(CLOCK_RATE/1000)
+    ) IDs (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (IDsRData),
+        .valid  (IDsValid),
+
+        .AVOID_WARNING()
+    );
+
+    CsrCounter Counter (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (CounterRData),
+        .valid  (CounterValid),
+
+        .retired(retired),
+
+        .AVOID_WARNING()
+    );
+
+    CsrPinsOut #(
+        .BASE_ADDR(CSR_LEDS),
+        .COUNT(OUTPINS_COUNT)
+    ) Pins (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (PinsOutRData),
+        .valid  (PinsOutValid),
+
+        .pins   (outpins),
+
+        .AVOID_WARNING()
+    );
+
+    CsrUartChar #(
+        .BASE_ADDR(CSR_UART),
+        .CLOCK_RATE(CLOCK_RATE),
+        .BAUD_RATE(BAUD_RATE)
+    ) UART (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (UartRData),
+        .valid  (UartValid),
+
+        .rx     (rx),
+        .tx     (tx),
+
+        .AVOID_WARNING()
+    );
+
+    CsrTimerAdd #(
+        .BASE_ADDR(CSR_TIMER),
+        .WIDTH(32)
+    ) Timer (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (TimerRData),
+        .valid  (TimerValid),
+
+        .irq    (irq_timer),
+
+        .AVOID_WARNING()
+    );
+endmodule
 
 
 // SPDX-License-Identifier: ISC

@@ -5,8 +5,9 @@ Memory map
 0000'FE00h start address of boot loader
 
 CSR
-BC0h       UART
-BC1h       LEDs
+BC0h    UART
+BC1h    LEDs
+BC2h    Timer
 
 press button BTN1 to reset
 switch SW7 enables grubby security feature
@@ -24,14 +25,6 @@ module top (
 );
     localparam integer CLOCK_RATE = 200_000_000;
     localparam integer BAUD_RATE = 115200;
-
-    localparam CSR_SIM   = 12'h3FF;
-    localparam CSR_UART  = 12'hBC0;
-    localparam CSR_LEDS  = 12'hBC1;
-    localparam CSR_SWI   = 12'hBC1;
-    localparam CSR_TIMER = 12'hBC2;
-    localparam CSR_KHZ   = 12'hFC0;
-
 
     wire clk;
     IBUFGDS clk_inst (
@@ -68,17 +61,6 @@ module top (
     wire mem_rgrubby_to_pipe = 0;
 `endif
 
-    wire        IDsValid;
-    wire [31:0] IDsRData;
-    wire        CounterValid;
-    wire [31:0] CounterRData;
-    wire        UartValid;
-    wire [31:0] UartRData;
-    wire        LedsValid;
-    wire [31:0] LedsRData;
-    wire        TimerValid;
-    wire [31:0] TimerRData;
-
     wire        irq_software = 0;
     wire        irq_timer;
     wire        irq_external = 0;
@@ -88,46 +70,14 @@ module top (
     wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData | TimerRData;
-    wire        csr_valid = IDsValid | CounterValid | UartValid | TimerValid;
+    wire [31:0] csr_rdata;
+    wire        csr_valid;
 
-    CsrIDs #(
-        .BASE_ADDR(CSR_KHZ),
-        .KHZ(CLOCK_RATE/1000)
-    ) csr_ids (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (IDsRData),
-        .valid  (IDsValid),
-
-        .AVOID_WARNING()
-    );
-
-    CsrCounter counter (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (CounterRData),
-        .valid  (CounterValid),
-
-        .retired(retired),
-
-        .AVOID_WARNING()
-    );
-
-    CsrUartChar #(
-        .BASE_ADDR(CSR_UART),
+    CsrDefault #(
+        .OUTPINS_COUNT(8),
         .CLOCK_RATE(CLOCK_RATE),
-        .BAUD_RATE(BAUD_RATE)
+        .BAUD_RATE(BAUD_RATE),
+        .TIMER_WIDTH(16)
     ) uart (
         .clk    (clk),
         .rstn   (rstn),
@@ -136,55 +86,20 @@ module top (
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (UartRData),
-        .valid  (UartValid),
+        .rdata  (csr_rdata),
+        .valid  (csr_valid),
 
+        .retired(retired),
         .rx     (uart_rx),
         .tx     (uart_tx),
-
-        .AVOID_WARNING()
-    );
-
-    CsrPinsOut #(
-        .BASE_ADDR(CSR_LEDS),
-        .COUNT(8)
-    ) csr_leds (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (LedsRData),
-        .valid  (LedsValid),
-
-        .pins   (leds),
-
-        .AVOID_WARNING()
-    );
-
-    CsrTimerAdd #(
-        .BASE_ADDR(CSR_TIMER),
-        .WIDTH(32)
-    ) Timer (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (TimerRData),
-        .valid  (TimerValid),
-
-        .irq    (irq_timer),
+        .outpins(leds),
+        .irq_timer(irq_timer),
 
         .AVOID_WARNING()
     );
 
     Pipeline #(
-        .START_PC       (32'h_0000_fe00)
+        .START_PC       (32'h_0000_FE00)
     ) pipe (
         .clk            (clk),
         .rstn           (rstn),
