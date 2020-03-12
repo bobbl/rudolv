@@ -27,7 +27,19 @@ module Pipeline #(
     output mem_wgrubby,
     output [31:0] mem_addr,
     input [31:0] mem_rdata,
-    input mem_rgrubby
+    input mem_rgrubby,
+
+    output        regset_we,
+    output  [5:0] regset_wa,
+    output [31:0] regset_wd,
+    output        regset_wg,
+    output  [5:0] regset_ra1,
+    output  [5:0] regset_ra2,
+    input  [31:0] regset_rd1,
+    input         regset_rg1,
+    input  [31:0] regset_rd2,
+    input         regset_rg2
+
 );
     localparam integer WORD_WIDTH = 32;
 
@@ -1010,13 +1022,11 @@ module Pipeline #(
          e_MemWidth[1] ? e_B[23:16]                               : e_B[7:0],
         (e_MemWidth[1] |               e_MemWidth[0]) ? e_B[15:8] : e_B[7:0],
                                                                     e_B[7:0]};
-    wire MemWriteDataGrubby = e_AGrubby | e_BGrubby;
-
     assign mem_valid = MemValid;
     assign mem_write = e_MemWr & ~DualKill;
     assign mem_wmask = MemSignals[3:0];
     assign mem_wdata = MemWriteData;
-    assign mem_wgrubby = MemWriteDataGrubby;
+    assign mem_wgrubby = (e_MemWidth!=2'b10) | e_AGrubby | e_BGrubby;
     assign mem_addr  = MemAddr;
 
 
@@ -1033,6 +1043,22 @@ module Pipeline #(
 
 
 
+    wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
+    wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
+
+    assign regset_we = MemWrEn;
+    assign regset_wa = MemWrNo;
+    assign regset_wd = MemResult;
+    assign regset_wg = MemResultGrubby;
+    assign regset_ra1 = RdNo1;
+    assign regset_ra2 = RdNo2;
+
+    wire [WORD_WIDTH-1:0] RdData1 = regset_rd1;
+    wire [WORD_WIDTH-1:0] RdData2 = regset_rd2;
+    wire RdGrubby1 = regset_rg1;
+    wire RdGrubby2 = regset_rg2;
+
+/*
     wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
     wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
     wire [WORD_WIDTH-1:0] RdData1;
@@ -1053,18 +1079,11 @@ module Pipeline #(
         .rd2(RdData2),
         .rg2(RdGrubby2)
     );
-/*
-    RegisterSet RegSet(
-        .clk(clk),
-        .we(MemWrEn),
-        .wa(MemWrNo),
-        .wd(MemResult),
-        .ra1(RdNo1),
-        .ra2(RdNo2),
-        .rd1(RdData1),
-        .rd2(RdData2)
-    );
 */
+
+
+
+
     always @(posedge clk) begin
 
         // fetch

@@ -21,7 +21,38 @@ fi
 # Read configuration for external tools
 . ../../config_default.sh ; [ ! -e ../../config.sh ] || . ../../config.sh
 
-verilog_files="../../src/regset33.v ../../src/csr.v ../../pipeline.v"
+verilog_files="../../src/regset.v ../../src/memory.v ../../src/csr.v ../../pipeline.v"
+
+
+
+
+report_yosys() {
+    printf "\033[33m"
+    awk '/^     SB_CARRY / {carry=$2} \
+         /^     SB_DFF/    {dff+=$2} \
+         /^     SB_LUT4 /  {lut=$2} \
+        END { printf("SYNTHESIS RESULTS: %d LUTs, %d DFFs, %s carries\n", \
+                     lut, dff, carry)}' \
+        < tmp.yosys.log
+    printf "\033[0m"
+}
+
+
+report_nextpnr() {
+    printf "\033[33m"
+    awk '/ LCs used as LUT4 only$/    {lut=$2} \
+         / LCs used as LUT4 and DFF$/ {lutdff=$2} \
+         / LCs used as DFF only$/     {dff=$2} \
+         / LCs used as CARRY only$/   {carry=$2} \
+         / ICESTORM_LC: /             {lc=substr($3, 1, length($3)-1)} \
+         /^Info: Max frequency for clock / {mhz=$7} # last is best\
+        END { printf("SYNTHESIS RESULTS: %s LCs, %d LUTs, %d DFFs, %d carries, %s MHz\n", \
+                     lc, lut+lutdff, lutdff+dff, carry, mhz)}' \
+        < tmp.nextpnr.log
+    printf "\033[0m"
+}
+
+
 
 
 
@@ -50,17 +81,24 @@ do
                 > hx8k_bootloader.hex
             ;;
         synth)
-            $YOSYS -ql tmp.log -p 'synth_ice40 -top top -json tmp.json' \
+            $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -top top -json tmp.json' \
                 $verilog_files $chip.v
+            report_yosys
+            ;;
+        gy-synth)
+            $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -top top -json tmp.json' \
+                -D ENABLE_GRUBBY $verilog_files $chip.v
+            report_yosys
             ;;
         miv-synth)
-            $YOSYS -ql tmp.log -p 'synth_ice40 -top top -json tmp.json' \
+            $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -top top -json tmp.json' \
                 $verilog_files ${chip}_miv.v ../../src/memory.v
             ;;
         pnr)
-            $NEXTPNR_ICE40 $args --json tmp.json --pcf $chip.pcf --asc \
-                tmp.asc
+            $NEXTPNR_ICE40 $args -ql tmp.nextpnr.log --json tmp.json \
+                --pcf $chip.pcf --asc tmp.asc --placer sa
             $ICEPACK tmp.asc $device.bin
+            report_nextpnr
             ;;
         prog)
             iceprog $device.bin

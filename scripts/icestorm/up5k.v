@@ -5,7 +5,8 @@ Memory map
 0002'0000h  1KiB boot loader (BRAM)
 
 CSR
-BC0h       UART
+BC0h    UART
+BC2h    Timer
 */
 
 
@@ -16,14 +17,6 @@ module top (
     //localparam integer CLOCK_RATE = 24_000_000;
     localparam integer CLOCK_RATE = 12_000_000;
     localparam integer BAUD_RATE = 115200;
-
-    localparam CSR_SIM   = 12'h3FF;
-    localparam CSR_UART  = 12'hBC0;
-    localparam CSR_LEDS  = 12'hBC1;
-    localparam CSR_SWI   = 12'hBC1;
-    localparam CSR_TIMER = 12'hBC2;
-    localparam CSR_KHZ   = 12'hFC0;
-
 
     wire clk;
 
@@ -53,71 +46,41 @@ module top (
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
     wire [31:0] mem_rdata = q_SelBootMem ? mem_rdata_boot : mem_rdata_main;
-    wire        mem_rgrubby = 0;
 
     reg q_SelBootMem;
     always @(posedge clk) begin
         q_SelBootMem <= rstn ? mem_addr[17] : 0;
     end
 
-    wire        IDsValid;
-    wire [31:0] IDsRData;
-    wire        CounterValid;
-    wire [31:0] CounterRData;
-    wire        UartValid;
-    wire [31:0] UartRData;
-    wire        TimerValid;
-    wire [31:0] TimerRData;
+    wire        regset_we;
+    wire  [5:0] regset_wa;
+    wire [31:0] regset_wd;
+    wire        regset_wg;
+    wire  [5:0] regset_ra1;
+    wire  [5:0] regset_ra2;
+    wire [31:0] regset_rd1;
+    wire        regset_rg1;
+    wire [31:0] regset_rd2;
+    wire        regset_rg2;
 
     wire        irq_software = 0;
     wire        irq_timer;
     wire        irq_external = 0;
     wire        retired;
+    wire        leds;
 
     wire        csr_read;
-    wire [2:0]  csr_modify;
+    wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData | TimerRData;
-    wire        csr_valid = IDsValid | CounterValid | UartValid | TimerValid;
+    wire [31:0] csr_rdata;
+    wire        csr_valid;
 
-    CsrIDs #(
-        .BASE_ADDR(CSR_KHZ),
-        .KHZ(CLOCK_RATE/1000)
-    ) csr_ids (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (IDsRData),
-        .valid  (IDsValid),
-
-        .AVOID_WARNING()
-    );
-
-    CsrCounter counter (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (CounterRData),
-        .valid  (CounterValid),
-
-        .retired(retired),
-
-        .AVOID_WARNING()
-    );
-
-    CsrUartChar #(
-        .BASE_ADDR(CSR_UART),
+    CsrDefault #(
+        .OUTPINS_COUNT(0),
         .CLOCK_RATE(CLOCK_RATE),
-        .BAUD_RATE(BAUD_RATE)
+        .BAUD_RATE(BAUD_RATE),
+        .TIMER_WIDTH(32)
     ) uart (
         .clk    (clk),
         .rstn   (rstn),
@@ -126,30 +89,14 @@ module top (
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (UartRData),
-        .valid  (UartValid),
+        .rdata  (csr_rdata),
+        .valid  (csr_valid),
 
+        .retired(retired),
         .rx     (uart_rx),
         .tx     (uart_tx),
-
-        .AVOID_WARNING()
-    );
-
-    CsrTimerAdd #(
-        .BASE_ADDR(CSR_TIMER),
-        .WIDTH(32)
-    ) Timer (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (TimerRData),
-        .valid  (TimerValid),
-
-        .irq    (irq_timer),
+        .outpins(leds),
+        .irq_timer(irq_timer),
 
         .AVOID_WARNING()
     );
@@ -179,7 +126,18 @@ module top (
         .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby)
+        .mem_rgrubby    (mem_rgrubby),
+
+        .regset_we      (regset_we),
+        .regset_wa      (regset_wa),
+        .regset_wd      (regset_wd),
+        .regset_wg      (regset_wg),
+        .regset_ra1     (regset_ra1),
+        .regset_ra2     (regset_ra2),
+        .regset_rd1     (regset_rd1),
+        .regset_rg1     (regset_rg1),
+        .regset_rd2     (regset_rd2),
+        .regset_rg2     (regset_rg2)
     );
 
     SPRAMMemory mainmem (
@@ -191,7 +149,10 @@ module top (
         .rdata  (mem_rdata_main)
     );
 
-    BRAMMemory bootmem (
+    Memory32 #(
+        .ADDR_WIDTH(8), // 256 bytes
+        .CONTENT("../../sw/uart/build/bootloader_char.hex")
+    ) bootmem (
         .clk    (clk),
         .write  (mem_write_boot),
         .wmask  (mem_wmask),
@@ -200,6 +161,51 @@ module top (
         .rdata  (mem_rdata_boot)
     );
 
+`ifdef ENABLE_GRUBBY
+    wire mem_rgrubby_main;
+    wire mem_rgrubby_boot;
+    wire mem_rgrubby = q_SelBootMem ? mem_rgrubby_boot : mem_rgrubby_main;
+
+    Memory1 #(
+        .ADDR_WIDTH(14)
+    ) mainmem_grubby (
+        .clk    (clk),
+        .write  (mem_write_main),
+        .wdata  (mem_wgrubby),
+        .addr   (mem_addr[15:2]),
+        .rdata  (mem_rgrubby_main)
+    );
+    Memory1 #(
+        .ADDR_WIDTH(8)
+    ) bootmem_grubby (
+        .clk    (clk),
+        .write  (mem_write_boot),
+        .wdata  (mem_wgrubby),
+        .addr   (mem_addr[9:2]),
+        .rdata  (mem_rgrubby_boot)
+    );
+`else
+    wire mem_rgrubby = 0;
+`endif
+
+`ifdef ENABLE_GRUBBY
+    RegSet32g1
+`else
+    RegSet32
+`endif
+    regset (
+        .clk    (clk),
+        .we     (regset_we),
+        .wa     (regset_wa),
+        .wd     (regset_wd),
+        .wg     (regset_wg),
+        .ra1    (regset_ra1),
+        .ra2    (regset_ra2),
+        .rd1    (regset_rd1),
+        .rg1    (regset_rg1),
+        .rd2    (regset_rd2),
+        .rg2    (regset_rg2)
+    );
 endmodule
 
 
@@ -239,34 +245,6 @@ SB_SPRAM256KA spram_hi(
     .DATAOUT    (rdata[31:16])
     );
 
-endmodule
-
-
-module BRAMMemory (
-    input clk, 
-    input write,
-    input [3:0] wmask,
-    input [31:0] wdata,
-    input [7:0] addr,
-    output reg [31:0] rdata
-);
-    reg [31:0] mem [0:255];
-
-    initial begin
-        $readmemh("../../sw/uart/build/bootloader_char.hex", mem);
-//        $readmemh("../../sw/uart/build/bl_char.hex", mem);
-//        $readmemh("../../sw/uart/build/test_char.hex", mem);
-    end
-
-    always @(posedge clk) begin
-        rdata <= mem[addr];
-        if (write) begin
-            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
-            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
-            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
-            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
-        end
-    end
 endmodule
 
 
