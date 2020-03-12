@@ -219,12 +219,11 @@ module tb_tests;
                 end
             endcase
         end
-/*
-        if (dut.d_Insn == 'h006F) begin
+
+        if (dut.Insn == 'h006F && dut.d_PC==dut.f_PC+8) begin
             $display("exit due to write to infinite loop");
             $finish;
         end
-*/
 
     end
 

@@ -61,6 +61,17 @@ module top (
     wire mem_rgrubby_to_pipe = 0;
 `endif
 
+    wire        regset_we;
+    wire  [5:0] regset_wa;
+    wire [31:0] regset_wd;
+    wire        regset_wg;
+    wire  [5:0] regset_ra1;
+    wire  [5:0] regset_ra2;
+    wire [31:0] regset_rd1;
+    wire        regset_rg1;
+    wire [31:0] regset_rd2;
+    wire        regset_rg2;
+
     wire        irq_software = 0;
     wire        irq_timer;
     wire        irq_external = 0;
@@ -123,7 +134,18 @@ module top (
         .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby_to_pipe)
+        .mem_rgrubby    (mem_rgrubby_to_pipe),
+
+        .regset_we      (regset_we),
+        .regset_wa      (regset_wa),
+        .regset_wd      (regset_wd),
+        .regset_wg      (regset_wg),
+        .regset_ra1     (regset_ra1),
+        .regset_ra2     (regset_ra2),
+        .regset_rd1     (regset_rd1),
+        .regset_rg1     (regset_rg1),
+        .regset_rd2     (regset_rd2),
+        .regset_rg2     (regset_rg2)
     );
 
     Memory4x9 #(
@@ -141,6 +163,20 @@ module top (
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata),
         .rgrubby(mem_rgrubby_from_mem)
+    );
+
+    RegSet33 regset (
+        .clk    (clk),
+        .we     (regset_we),
+        .wa     (regset_wa),
+        .wd     (regset_wd),
+        .wg     (regset_wg),
+        .ra1    (regset_ra1),
+        .ra2    (regset_ra2),
+        .rd1    (regset_rd1),
+        .rg1    (regset_rg1),
+        .rd2    (regset_rd2),
+        .rg2    (regset_rg2)
     );
 
 endmodule

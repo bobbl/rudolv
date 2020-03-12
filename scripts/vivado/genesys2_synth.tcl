@@ -2,7 +2,7 @@
 # synthesize
 read_verilog ../../src/memory.v
 read_verilog ../../src/csr.v
-read_verilog ../../src/regset33.v
+read_verilog ../../src/regset.v
 read_verilog ../../pipeline.v
 read_verilog genesys2.v
 

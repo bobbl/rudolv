@@ -94,7 +94,6 @@ module Memory4x9 #(
     output rgrubby
 );
 
-    wire wgrubby2 = (wmask != 4'b1111) | wgrubby;
     wire wren0 = write & wmask[0];
     wire wren1 = write & wmask[1];
     wire wren2 = write & wmask[2];
@@ -113,7 +112,7 @@ module Memory4x9 #(
     ) mem0 (
         .clk    (clk),
         .write  (wren0),
-        .wdata  ({wgrubby2, wdata[7:0]}),
+        .wdata  ({wgrubby, wdata[7:0]}),
         .addr   (addr),
         .rdata  (rbyte0)
     );
@@ -124,7 +123,7 @@ module Memory4x9 #(
     ) mem1 (
         .clk    (clk),
         .write  (wren1),
-        .wdata  ({wgrubby2, wdata[15:8]}),
+        .wdata  ({wgrubby, wdata[15:8]}),
         .addr   (addr),
         .rdata  (rbyte1)
     );
@@ -135,7 +134,7 @@ module Memory4x9 #(
     ) mem2 (
         .clk    (clk),
         .write  (wren2),
-        .wdata  ({wgrubby2, wdata[23:16]}),
+        .wdata  ({wgrubby, wdata[23:16]}),
         .addr   (addr),
         .rdata  (rbyte2)
     );
@@ -146,13 +145,11 @@ module Memory4x9 #(
     ) mem3 (
         .clk    (clk),
         .write  (wren3),
-        .wdata  ({wgrubby2, wdata[31:24]}),
+        .wdata  ({wgrubby, wdata[31:24]}),
         .addr   (addr),
         .rdata  (rbyte3)
     );
 endmodule
-
-
 
 
 // 32 bit single ported zero latency memory
@@ -223,6 +220,24 @@ module Memory33Sim #(
         end
     end
 endmodule
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // 32 bit single ported zero latency memory
