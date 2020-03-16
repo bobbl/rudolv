@@ -50,3 +50,7 @@ export VIVADO
 # path (with trailing slash) to Quartus bin directory (or nothing if in $PATH)
 #QUARTUS_BIN=
 #export QUARTUS_BIN
+
+# Microsemi Libero SoC executable
+#LIBEROSOC="$HOME/.local/microsemi/Libero_SoC_v12.1/Libero/bin/libero"
+#export LIBEROSOC

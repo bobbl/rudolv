@@ -19,8 +19,6 @@ fi
 # Read configuration for external tools
 . ../../config_default.sh ; [ ! -e ../../config.sh ] || . ../../config.sh
 
-
-
 device=$1
 case $1 in
     genesys2)    ;;
@@ -42,7 +40,7 @@ target_bootloader() {
 }
 
 
-target_report() {
+report() {
     printf "\033[33m"
     awk '/1. Slice Logic/,/1.1 Summary of Registers by Type/ { \
           if ($2=="Slice") { \
@@ -64,7 +62,7 @@ while [ $# -ne 0 ]
 do
     case $1 in
         report)
-            target_report
+            report
             ;;
         synth)
             target_bootloader
@@ -82,8 +80,11 @@ do
             ;;
         *)
             echo "Unknown target $1. Stop."
-            exit 2
+            exit 3
             ;;
     esac
     shift
 done
+
+
+# SPDX-License-Identifier: ISC

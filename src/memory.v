@@ -27,6 +27,7 @@ endmodule
 // 8 bit single ported zero latency memory
 module Memory8 #(
     parameter ADDR_WIDTH = 8,
+    parameter SIZE = 0,
     parameter CONTENT = ""
 ) (
     input clk, 
@@ -35,9 +36,9 @@ module Memory8 #(
     input [ADDR_WIDTH-1:0] addr,
     output reg [7:0] rdata
 );
-    localparam integer SIZE = 1 << ADDR_WIDTH;
+    localparam integer COMPUTED_SIZE = (SIZE==0) ? (1 << ADDR_WIDTH) : SIZE;
 
-    reg [7:0] mem [0:SIZE-1];
+    reg [7:0] mem [0:COMPUTED_SIZE-1];
 
     initial begin
         if (CONTENT != "") $readmemh(CONTENT, mem);
@@ -53,6 +54,7 @@ endmodule
 // 9 bit single ported zero latency memory
 module Memory9 #(
     parameter ADDR_WIDTH = 8,
+    parameter SIZE = 0,
     parameter CONTENT = ""
 ) (
     input clk, 
@@ -61,9 +63,9 @@ module Memory9 #(
     input [ADDR_WIDTH-1:0] addr,
     output reg [8:0] rdata
 );
-    localparam integer SIZE = 1 << ADDR_WIDTH;
+    localparam integer COMPUTED_SIZE = (SIZE==0) ? (1 << ADDR_WIDTH) : SIZE;
 
-    reg [8:0] mem [0:SIZE-1];
+    reg [8:0] mem [0:COMPUTED_SIZE-1];
 
     initial begin
         if (CONTENT != "") $readmemh(CONTENT, mem);
@@ -79,6 +81,7 @@ endmodule
 // 32 bit plus grubby
 module Memory4x9 #(
     parameter ADDR_WIDTH = 14,
+    parameter SIZE = 0,
     parameter CONTENT_BYTE0 = "",
     parameter CONTENT_BYTE1 = "",
     parameter CONTENT_BYTE2 = "",
@@ -108,6 +111,7 @@ module Memory4x9 #(
 
     Memory9 #(
         .ADDR_WIDTH(ADDR_WIDTH),
+        .SIZE(SIZE/4),
         .CONTENT(CONTENT_BYTE0)
     ) mem0 (
         .clk    (clk),
@@ -119,6 +123,7 @@ module Memory4x9 #(
 
     Memory9 #(
         .ADDR_WIDTH(ADDR_WIDTH),
+        .SIZE(SIZE/4),
         .CONTENT(CONTENT_BYTE1)
     ) mem1 (
         .clk    (clk),
@@ -130,6 +135,7 @@ module Memory4x9 #(
 
     Memory9 #(
         .ADDR_WIDTH(ADDR_WIDTH),
+        .SIZE(SIZE/4),
         .CONTENT(CONTENT_BYTE2)
     ) mem2 (
         .clk    (clk),
@@ -141,6 +147,7 @@ module Memory4x9 #(
 
     Memory9 #(
         .ADDR_WIDTH(ADDR_WIDTH),
+        .SIZE(SIZE/4),
         .CONTENT(CONTENT_BYTE3)
     ) mem3 (
         .clk    (clk),

@@ -13,7 +13,7 @@ set_io LED2_GREEN     -pinname M16 -DIRECTION OUTPUT -fixed true -iostd LVCMOS33
 set_io LED2_RED       -pinname N16 -DIRECTION OUTPUT -fixed true -iostd LVCMOS33
 
 # buttons
-#set_io USER_BUTTON1   -pinname H12 -DIRECTION INPUT  -fixed true -iostd LVCMOS33
+set_io USER_BUTTON1   -pinname H12 -DIRECTION INPUT  -fixed true -iostd LVCMOS33
 #set_io USER_BUTTON2   -pinname H13 -DIRECTION INPUT  -fixed true -iostd LVCMOS33
 
 # UART

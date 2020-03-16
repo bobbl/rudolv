@@ -1,12 +1,13 @@
 set projname m2gl025
 set projpath $projname
+set freq 90
 
 info commands
 info procs
 
 new_project \
   -location $projpath \
-  -name $projname \
+  -name RudolV \
   -hdl VERILOG \
   -family IGLOO2 \
   -die "M2GL025" \
@@ -44,7 +45,7 @@ create_and_configure_core -core_vlnv {Actel:SgCore:OSC:2.0.101} -component_name 
 "XTLOSC_SRC:CRYSTAL"   }
 
 # create module for Clock Conditioning Circuitry
-create_and_configure_core -core_vlnv {Actel:SgCore:FCCC:2.0.201} -component_name {FCCC_C0} -params {\
+set params [concat {\
 "ADVANCED_TAB_CHANGED:false"  \
 "CLK0_IS_USED:false"  \
 "CLK0_PAD_IS_USED:false"  \
@@ -64,7 +65,7 @@ create_and_configure_core -core_vlnv {Actel:SgCore:FCCC:2.0.201} -component_name
 "GL0_IN_1_SRC:UNUSED"  \
 "GL0_IS_INVERTED:false"  \
 "GL0_IS_USED:true"  \
-"GL0_OUT_0_FREQ:100"  \
+} "GL0_OUT_0_FREQ:$freq" {\
 "GL0_OUT_1_FREQ:50"  \
 "GL0_OUT_IS_GATED:false"  \
 "GL0_PLL_IN_0_PHASE:0"  \
@@ -162,10 +163,15 @@ create_and_configure_core -core_vlnv {Actel:SgCore:FCCC:2.0.201} -component_name
 "Y0_IS_USED:false"  \
 "Y1_IS_USED:false"  \
 "Y2_IS_USED:false"  \
-"Y3_IS_USED:false"   }
+"Y3_IS_USED:false"   }]
+create_and_configure_core -core_vlnv {Actel:SgCore:FCCC:2.0.201} \
+  -component_name {FCCC_C0} -params $params
+
 
 import_files -hdl_source ../../pipeline.v
 import_files -hdl_source ../../src/csr.v
+import_files -hdl_source ../../src/memory.v
+import_files -hdl_source ../../src/regset.v
 import_files -hdl_source ${projname}.v
 build_design_hierarchy 
 set_root -module {top::work} 
@@ -198,6 +204,14 @@ organize_tool_files -tool {VERIFYTIMING} \
   -module top::work \
   -input_type {constraint}
 
+
+# synthesis options
+configure_tool -name {SYNTHESIZE} -params {CLOCK_ASYNC:12} \
+  -params {RETIMING:false} \
+  -params {SYNPLIFY_OPTIONS: \
+    set_option -low_power_ram_decomp 1;}
+
+
 # full synthesis flow
 update_and_run_tool -name {PROGRAMDEVICE} 
 
@@ -221,3 +235,5 @@ update_and_run_tool -name {PROGRAMDEVICE}
 
 exit 0
 
+
+# SPDX-License-Identifier: ISC

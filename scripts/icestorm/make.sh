@@ -105,9 +105,12 @@ do
             ;;
         *)
             echo "Unknown target $1. Stop."
-            exit 2
+            exit 3
             ;;
     esac
     shift
 done
+
+
+# SPDX-License-Identifier: ISC
 
