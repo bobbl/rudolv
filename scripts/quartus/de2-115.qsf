@@ -2,11 +2,12 @@ set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
 set_global_assignment -name TOP_LEVEL_ENTITY top
 set_global_assignment -name VERILOG_FILE ../de2-115.v
 set_global_assignment -name VERILOG_FILE ../../../pipeline.v
-set_global_assignment -name VERILOG_FILE ../../../src/regset36.v
+set_global_assignment -name VERILOG_FILE ../../../src/regset.v
 set_global_assignment -name VERILOG_FILE ../../../src/csr.v
 set_global_assignment -name HEX_FILE ../mem3.hex
 set_global_assignment -name VERILOG_FILE ../../../src/memory.v
 set_global_assignment -name SDC_FILE ../de2-115.sdc
+#set_global_assignment -name VERILOG_MACRO ENABLE_GRUBBY
 
 set_global_assignment -name FAMILY "Cyclone IV E"
 set_global_assignment -name DEVICE EP4CE115F29C8
@@ -91,6 +92,46 @@ set_location_assignment PIN_R24 -to KEY[3]
 #set_instance_assignment -name IO_STANDARD "2.5 V" -to KEY[1]
 #set_instance_assignment -name IO_STANDARD "2.5 V" -to KEY[2]
 set_instance_assignment -name IO_STANDARD "2.5 V" -to KEY[3]
+
+#============================================================
+# SW
+#============================================================
+#set_location_assignment PIN_AB28 -to SW[0]
+#set_location_assignment PIN_AC28 -to SW[1]
+#set_location_assignment PIN_AC27 -to SW[2]
+#set_location_assignment PIN_AD27 -to SW[3]
+#set_location_assignment PIN_AB27 -to SW[4]
+#set_location_assignment PIN_AC26 -to SW[5]
+#set_location_assignment PIN_AD26 -to SW[6]
+#set_location_assignment PIN_AB26 -to SW[7]
+#set_location_assignment PIN_AC25 -to SW[8]
+#set_location_assignment PIN_AB25 -to SW[9]
+#set_location_assignment PIN_AC24 -to SW[10]
+#set_location_assignment PIN_AB24 -to SW[11]
+#set_location_assignment PIN_AB23 -to SW[12]
+#set_location_assignment PIN_AA24 -to SW[13]
+#set_location_assignment PIN_AA23 -to SW[14]
+#set_location_assignment PIN_AA22 -to SW[15]
+#set_location_assignment PIN_Y24 -to SW[16]
+set_location_assignment PIN_Y23 -to SW[17]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[0]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[1]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[2]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[3]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[4]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[5]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[6]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[7]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[8]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[9]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[10]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[11]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[12]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[13]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[14]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[15]
+#set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[16]
+set_instance_assignment -name IO_STANDARD "2.5 V" -to SW[17]
 
 #============================================================
 # RS232

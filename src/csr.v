@@ -331,8 +331,10 @@ module CsrUartChar #(
     assign valid = q_Valid;
     assign rdata = q_RData;
 
-    localparam [15:0] CLOCK_DIV = CLOCK_RATE / BAUD_RATE;
+    localparam integer CLOCK_DIV32 = CLOCK_RATE / BAUD_RATE;
+    localparam [15:0] CLOCK_DIV = CLOCK_DIV32[15:0];
         // 16 bit is enough for up to 7.5 GHz (at 115200 baud)
+        // two steps to avoid warning from Quartus
 
     reg  [3:0] q_UartRecvBitCounter;
     reg [15:0] q_UartRecvClkCounter;

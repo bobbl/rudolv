@@ -1,3 +1,2 @@
 build
-mem?.hex
-*.tmp
+tmp.*
