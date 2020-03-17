@@ -15,15 +15,15 @@ module tb_tests;
         #40 rstn = 1;
     end
 
-    wire mem_valid;
-    wire mem_write;
-    wire [3:0] mem_wmask;
+    wire        mem_valid;
+    wire        mem_write;
+    wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
-    wire mem_wgrubby;
+    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
+    wire        mem_rgrubby_from_mem;
 
-    wire mem_rgrubby_from_mem;
 `ifdef ENABLE_GRUBBY
     wire mem_rgrubby_to_pipe = mem_rgrubby_from_mem;
 `else
@@ -38,6 +38,17 @@ module tb_tests;
     wire [31:0] PinsRData;
     wire        TimerValid;
     wire [31:0] TimerRData;
+
+    wire        regset_we;
+    wire  [5:0] regset_wa;
+    wire [31:0] regset_wd;
+    wire        regset_wg;
+    wire  [5:0] regset_ra1;
+    wire  [5:0] regset_ra2;
+    wire [31:0] regset_rd1;
+    wire        regset_rg1;
+    wire [31:0] regset_rd2;
+    wire        regset_rg2;
 
     wire        irq_software;
     wire        irq_timer;
@@ -154,24 +165,49 @@ module tb_tests;
         .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby_to_pipe)
+        .mem_rgrubby    (mem_rgrubby_to_pipe),
+
+        .regset_we      (regset_we),
+        .regset_wa      (regset_wa),
+        .regset_wd      (regset_wd),
+        .regset_wg      (regset_wg),
+        .regset_ra1     (regset_ra1),
+        .regset_ra2     (regset_ra2),
+        .regset_rd1     (regset_rd1),
+        .regset_rg1     (regset_rg1),
+        .regset_rd2     (regset_rd2),
+        .regset_rg2     (regset_rg2)
     );
 
 
 
-    Memory33Sim #(
-        .WIDTH(14), // 4 * (2**14) = 64 KiByte
+    Memory33 #(
+        .ADDR_WIDTH(14), // 4 * (2**14) = 64 KiByte
         .CONTENT(`CODE)
     ) mem (
         .clk    (clk),
         .valid  (mem_valid),
         .write  (mem_write),
         .wmask  (mem_wmask),
-        .wgrubby(mem_wgrubby),
         .wdata  (mem_wdata),
+        .wgrubby(mem_wgrubby),
         .addr   (mem_addr[15:2]),
         .rdata  (mem_rdata),
         .rgrubby(mem_rgrubby_from_mem)
+    );
+
+    RegSet33 regset (
+        .clk    (clk),
+        .we     (regset_we),
+        .wa     (regset_wa),
+        .wd     (regset_wd),
+        .wg     (regset_wg),
+        .ra1    (regset_ra1),
+        .ra2    (regset_ra2),
+        .rd1    (regset_rd1),
+        .rg1    (regset_rg1),
+        .rd2    (regset_rd2),
+        .rg2    (regset_rg2)
     );
 
 
@@ -224,7 +260,6 @@ module tb_tests;
             $display("exit due to write to infinite loop");
             $finish;
         end
-
     end
 
     initial begin
@@ -234,6 +269,67 @@ module tb_tests;
         #5_000_001 $write("*** TIMEOUT"); $stop;
 `endif
     end
+
+
+
+
+/* memory-mapped Microsemi Mi-V compatibility
+
+
+    reg [31:0] q_MemAddr;
+    reg [31:0] MemRData;
+    always @* casez (q_MemAddr)
+        32'h4400_4000: MemRData = mtimecmp[31:0];
+        32'h4400_4004: MemRData = mtimecmp[63:32];
+        32'h4400_bff8: MemRData = mtime[31:0];
+        32'h4400_bffc: MemRData = mtime[63:32];
+        32'h7000_0010: MemRData = 1; // uart ready to send, nothing received
+        32'h8000_????: MemRData = mem_rdata_rom;
+        32'h8001_????: MemRData = mem_rdata_rom;
+        32'h8004_????: MemRData = mem_rdata_ram[31:0];
+        default:       MemRData = ~0;
+    endcase
+
+    always @(posedge clk) begin
+        if (mem_valid & mem_write) begin
+            case (mem_addr)
+                'h4400_4000: begin // mtimecmp
+                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
+                        mtimecmp[31:0] <= mem_wdata;
+                    end
+                end
+                'h4400_4004: begin // mtimecmp
+                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
+                        mtimecmp[63:32] <= mem_wdata;
+                    end
+                end
+                'h4400_bff8: begin // mtime
+                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
+                        mtime[31:0] <= mem_wdata;
+                    end
+                end
+                'h4400_bffc: begin // mtime
+                    if (mem_wmask[0] & mem_wmask[1] & mem_wmask[2] & mem_wmask[3]) begin
+                        mtime[63:32] <= mem_wdata;
+                    end
+                end
+
+                'h7000_0000: begin // uart_tx_char
+                    if (mem_wmask[0])
+`ifdef DEBUG
+                     $display("\033[1;35m  putchar '%c'\033[0m", mem_wdata[7:0]);
+`else
+                     $write("\033[1;37m%c\033[0m", mem_wdata[7:0]);
+`endif
+                end
+
+            endcase
+        end
+    end
+*/
+
+
+
 
 
 endmodule

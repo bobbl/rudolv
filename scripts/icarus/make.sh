@@ -7,8 +7,6 @@ then
     echo "  debug <file.elf>     Simulate with extensive logging"
     echo "  gy-run <file.elf>    Enable grubby, no log"
     echo "  gy-debug <file.elf>  Enable grubby, log"
-    echo "  miv-run <file.elf>   Simulate Microsemi Mi-V memory map"
-    echo "  miv-debug <file.elf> Simulate Micorsemi Mi-V with logging"
     echo "  tests                Run riscv-tests and riscv-compliance tests"
     echo
     echo "<file.elf>"
@@ -20,7 +18,7 @@ fi
 . ../../config_default.sh
 [ ! -e ../../config.sh ] || . ../../config.sh
 
-verilog_files="../../src/memory.v ../../src/regset33.v ../../src/csr.v ../../pipeline.v"
+verilog_files="../../src/memory.v ../../src/regset.v ../../src/csr.v ../../pipeline.v"
 path_tests="../../sw/tests"
 path_compliance="../../sw/compliance"
 
@@ -114,16 +112,6 @@ do
             ;;
         gy-debug)
             compile $2 "-DENABLE_GRUBBY -DDEBUG tb_tests.v"
-            $VVP -N tmp.vvp
-            shift
-            ;;
-        miv-run)
-            compile $2 "tb_miv.v"
-            $VVP -N tmp.vvp
-            shift
-            ;;
-        miv-debug)
-            compile $2 "-DDEBUG tb_miv.v"
             $VVP -N tmp.vvp
             shift
             ;;
