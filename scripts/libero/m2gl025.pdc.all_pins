@@ -1,0 +1,397 @@
+#-------------------------------------------------------------------------------
+# Creative board I/O Physical Design Constraints file
+# 
+# Board rev   : R1
+# FPGA
+#   Family    : IGLOO 2, SmartFusion 2
+#   Die       : M2GL025, M2S025
+#   Package   : VF256 
+#
+# Created on  : August 2017
+# Author      : Frederic Vachon   
+#
+# (c) Copyright 2017 Future Electronics - Advanced Engineering Group 
+#     All rights reserved
+#-------------------------------------------------------------------------------
+
+#-------------------------------------------------------------------------------
+# FORMAT
+# Schematic Signal Name
+# set_io FPGA Signal Name \
+#	 -pinname XX \
+#	 -fixed true \
+#	 -DIRECTION INPUT_OUTPUT
+#-------------------------------------------------------------------------------
+
+#--- FPGA External 50Mhz Clock -------------------------------------------------
+
+set_io CLK_50M        \
+	-pinname H16        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#--- LEDs I/O ------------------------------------------------------------------
+    
+#set_io LED1_GREEN     \
+	-pinname J16        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io LED1_RED       \
+	-pinname K16        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+  -DIRECTION OUTPUT
+
+#set_io LED2_GREEN     \
+	-pinname M16        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io LED2_RED       \
+	-pinname N16        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#--- User Pushbuttons I/O ------------------------------------------------------
+
+#set_io USER_BUTTON1   \
+	-pinname H12        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#set_io USER_BUTTON2   \
+	-pinname H13        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT 
+
+#--- ADC I/O -------------------------------------------------------------------
+
+#set_io ADC_CLK_IN     \
+	-pinname F4         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io ADC_CSn        \
+	-pinname G2         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io ADC_DRn        \
+	-pinname H4         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#set_io ADC_RST        \
+	-pinname G5         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io ADC_SCK        \
+	-pinname F2         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io ADC_SDI        \
+	-pinname F5         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io  ADC_SDO       \
+	-pinname F3         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#--- Mikro I/O -----------------------------------------------------------------
+  
+#set_io MIKRO_CS       \
+	-pinname T12        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_INT      \
+	-pinname R9         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#set_io MIKRO_MISO     \
+	-pinname T13        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#set_io MIKRO_MOSI     \
+	-pinname R13        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_PWM      \
+	-pinname R10        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_RST      \
+	-pinname R11        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_RX       \
+	-pinname R8         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_SCK      \
+	-pinname R12        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_SCL      \
+	-pinname T7         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io MIKRO_SDA      \
+	-pinname R6         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+#set_io MIKRO_TX       \
+	-pinname T8         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT
+
+  
+#--- Ardruino I/O --------------------------------------------------------------
+
+#set_io ARD_IO0        \
+	-pinname P6         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO1        \
+	-pinname P7         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO10       \
+	-pinname N10        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO11       \
+	-pinname P10        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO12       \
+	-pinname P12        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO13       \
+	-pinname P13        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO2        \
+	-pinname N7         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO3        \
+	-pinname M7         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO4        \
+	-pinname P8         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO5        \
+	-pinname M8         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO6        \
+	-pinname N8         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO7        \
+	-pinname P9         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO8        \
+	-pinname M9         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_IO9        \
+	-pinname M10        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_RESET      \
+	-pinname G1         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION OUTPUT
+
+#set_io ARD_SCL        \
+	-pinname T6         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io ARD_SDA        \
+	-pinname T9         \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+ 
+#--- PMOD I/O ------------------------------------------------------------------
+
+#set_io PMOD_D0n       \
+	-pinname L12        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D0        \
+	-pinname L11        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D1n       \
+	-pinname L13        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D1        \
+	-pinname L14        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D2n       \
+	-pinname M13        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D2        \
+	-pinname N14        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D3n       \
+	-pinname N15        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+#set_io PMOD_D3        \
+	-pinname M15        \
+	-fixed true         \
+  -iostd LVCMOS33     \
+	-DIRECTION INPUT_OUTPUT
+
+  
+#--- FPGA UART I/O -------------------------------------------------------------
+ 
+# Ports are seen from the external UART
+ 
+#set_io FTDI_UART0_RXD   \
+	-pinname G3           \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION OUTPUT
+
+#set_io FTDI_UART0_TXD   \
+	-pinname H3           \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION INPUT
+
+  
+#--- 64 Mbit Serial Flash I/O --------------------------------------------------
+
+#set_io SPI_0_CLK        \
+	-pinname J14          \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION OUTPUT
+
+#set_io SPI_0_SDI        \
+	-pinname J13          \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION INPUT
+
+#set_io SPI_0_SDO        \
+	-pinname K12          \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION OUTPUT
+  
+#set_io SPI_0_SS         \
+	-pinname J12          \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION OUTPUT
+
+#set_io SPI_0_HOLDn      \
+	-pinname G16          \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION OUTPUT
+
+#set_io SPI_0_WPn        \
+	-pinname H14          \
+	-fixed true           \
+  -iostd LVCMOS33       \
+	-DIRECTION OUTPUT
+  
