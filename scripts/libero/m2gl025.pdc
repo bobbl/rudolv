@@ -1,4 +1,8 @@
 # Physical Design Constraints (PDC) file for IGLOO2 M2GL025-VF256
+#
+# source repo: github.com/Future-Electronics-Design-Center/Creative-Eval-Board/
+# source file: "Creative Dev Files/Libero Constraint Files/Creative_Rev1_IOs_def.pdc"
+
 
 # clock (50 MHz)
 #set_io CLK_50M        -pinname H16 -DIRECTION INPUT  -fixed true -iostd LVCMOS33

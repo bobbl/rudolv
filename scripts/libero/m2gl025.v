@@ -1,6 +1,4 @@
-`define ENABLE_GRUBBY
-/* Connect pipeline with memory that can be infered by 
- * Microsemi IGLOO2 M2GL025 (Future Electronics Creative Board)
+/* wrapper for Microsemi IGLOO2 M2GL025 (Future Electronics Creative Board)
 
 Memory map
 0000'0000h 56KiB main memory (BRAM)
@@ -10,10 +8,15 @@ CSR
 BC0h    UART
 BC1h    LEDs
 BC2h    Timer
+
+press RESET button to reset
+hold SW1 to disable grubby security feature
 */
 
 
-module top (
+module top #(
+    parameter integer MHZ = 100
+) (
     input  FTDI_UART0_TXD,
     output FTDI_UART0_RXD,
     input  USER_BUTTON1,
@@ -22,7 +25,7 @@ module top (
     output LED2_GREEN,
     output LED2_RED
 );
-    localparam integer CLOCK_RATE = 100_000_000;
+    localparam integer CLOCK_RATE = 1_000_000 * MHZ;
     localparam integer BAUD_RATE = 115200;
 
     wire clk50;
@@ -40,7 +43,11 @@ module top (
     );
 
     wire [3:0] leds;
-    assign LED1_GREEN = leds[0];
+    assign LED1_GREEN = leds[0] ^ grubby_switch;
+        // Necessary to avoid that USER_BUTTON1 is removed from the net when
+        // grubby is disabled.
+        // If removed, the synthesis stops because a pin is mentioned in the
+        // .pdc file but not connected.
     assign LED1_RED   = leds[1];
     assign LED2_GREEN = leds[2];
     assign LED2_RED   = leds[3];
@@ -197,6 +204,7 @@ module top (
         .rd2    (regset_rd2),
         .rg2    (regset_rg2)
     );
+
 endmodule
 
 

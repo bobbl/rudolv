@@ -1,6 +1,28 @@
 set projname m2gl025
 set projpath $projname
-set freq 90
+set freq 100
+
+# translate all command line arguments to verilog preprocessor defines or
+# parameters to the top module
+set synplify " "
+if { $::argc > 0 } {
+  foreach arg $::argv {
+    if {[string match "MHZ=*" $arg]} {
+      puts "parameter $arg recognised"
+      append synplify "set_option -hdl_param -set " $arg "; "
+      set freq [string range $arg 4 20]
+    } else {
+      if {$arg == "ENABLE_GRUBBY"} {
+        puts "define $arg recognised"
+        append synplify "set_option -hdl_define -set " $arg "; "
+      } else {
+        puts "WARNING: unknown argument to $projname.tcl"
+      }
+    }
+  }
+}
+
+
 
 info commands
 info procs
@@ -206,34 +228,21 @@ organize_tool_files -tool {VERIFYTIMING} \
 
 
 # synthesis options
+set options [concat {SYNPLIFY_OPTIONS:} $synplify \
+    {set_option -low_power_ram_decomp 1;}]
+    # If low_power_ram_decomp is not set, the data width is split on multiple
+    # BRAMs, not the address range. The former one is faster but leaves some
+    # BRAMs unused (32 vs 56 KiByte)
 configure_tool -name {SYNTHESIZE} -params {CLOCK_ASYNC:12} \
   -params {RETIMING:false} \
-  -params {SYNPLIFY_OPTIONS: \
-    set_option -low_power_ram_decomp 1;}
+  -params $options
 
 
 # full synthesis flow
-update_and_run_tool -name {PROGRAMDEVICE} 
+#update_and_run_tool -name {PROGRAMDEVICE} 
+update_and_run_tool -name {VERIFYTIMING} 
 
-
-
-#puts "\033\[1;36mSYNTHESIZE\033\[0m"
-#update_and_run_tool -name {SYNTHESIZE}
-#puts "\033\[1;36mPLACEROUTE\033\[0m"
-#run_tool -name {PLACEROUTE}
-##puts "\033\[1;36mVERIFYTIMING\033\[0m"
-##run_tool -name {VERIFYTIMING}
-#puts "\033\[1;36mGENERATEPROGRAMMINGDATA\033\[0m"
-#run_tool -name {GENERATEPROGRAMMINGDATA}
-#puts "\033\[1;36mGENERATEPROGRAMMINGFILE\033\[0m"
-#run_tool -name {GENERATEPROGRAMMINGFILE}
-#puts "\033\[1;36mPROGRAMDEVICE\033\[0m"
-#run_tool -name {PROGRAMDEVICE}
-
-## export_bitstream
-#export_bitstream_file -trusted_facility_file 1 -trusted_facility_file_components {FABRIC}
-
-exit 0
+#exit 0
 
 
 # SPDX-License-Identifier: ISC

@@ -10,6 +10,7 @@ then
     echo "<target>"
     echo "  synth       Synthesize using Libero"
     echo "  gy-synth    Synthesize with grubby support"
+    echo "  timing      Verify timing"
     echo "  prog        Program the device"
     echo "  gui <args>  Start Libero SoC GUI"
     exit 1
@@ -52,12 +53,26 @@ check() {
 
 report() {
     printf "\033[33m"
+
     awk '/\^| 4LUT / {lut=$4} \
          /\^| DFF /  {dff=$4} \
          /\^| Logic Element /  {le=$5} \
-        END { printf("SYNTHESIS RESULTS: %d LEs, %d LUTs, %d DFFs\n", \
-                     le, lut, dff)}' \
+        END { printf("SYNTHESIS RESULTS: %d LEs, %d LUTs, %d DFFs", le, lut, dff)}' \
         ${device}/designer/top/top_layout_log.log
+
+    # Another file with lots of useful information about the resource usage:
+    #   ${device}/designer/top/top_compile_netlist_resources.rpt
+    # e.g. more than 1000 LUTs and DFFs are used for block RAM interfacing
+
+    # Report on the block RAM usage:
+    #   ${device}/designer/top/top_ram_rpt.txt
+
+    awk '/Performance Summary/,/Clock Relationships/ { \
+           if ($9=="generated") {mhz=$4} \
+         } \
+        END { printf(", %s MHz\n", mhz) }' \
+        < ${device}/synthesis/top.srr
+
     printf "\033[0m"
 }
 
@@ -71,6 +86,18 @@ launch_libero() {
 }
 
 
+# create tempory .tcl file to run one step in an existing project
+# $1 tool name
+run_tool() {
+    echo "open_project -file {RudolV.prjx}" > tmp.tcl
+    echo "run_tool -name {$1}" >> tmp.tcl
+    cd $device
+    launch_libero SCRIPT:../tmp.tcl
+    cd ..
+}
+
+
+
 while [ $# -ne 0 ]
 do
     case $1 in
@@ -80,17 +107,24 @@ do
         synth)
             check
             rm -rf ${device}
-            launch_libero SCRIPT:${device}.tcl
+            launch_libero SCRIPT:${device}.tcl SCRIPT_ARGS:"MHZ=100"
+            # only 96 MHz will be achieved, but thats enough under normal conditions
             report
             ;;
         gy-synth)
+            check
+            rm -rf ${device}
+            launch_libero SCRIPT:${device}.tcl SCRIPT_ARGS:"MHZ=80 ENABLE_GRUBBY"
+            report
             ;;
         timing)
-            cd $device
-            launch_libero SCRIPT:../verify_timing.tcl
-            cd ..
+            run_tool VERIFYTIMING
+            cat ${device}/designer/top/top_has_violations
+            # don't know, why the log does not print an error, if there is a
+            # violation
             ;;
         prog)
+            run_tool PROGRAMDEVICE
             ;;
         gui)
             check
