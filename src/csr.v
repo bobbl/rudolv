@@ -233,8 +233,7 @@ module CsrPinsOut #(
         // D stage: decode CSR address
         q_enPins <= (addr == BASE_ADDR);
 
-        //if (~rstn) q_Pins <= RESET_VALUE;
-        // not synthesisable with Quartus
+        if (~rstn) q_Pins <= RESET_VALUE;
     end
 endmodule
 

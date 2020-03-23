@@ -11,8 +11,8 @@ then
     echo
     echo "<target>"
     echo "  bootloader  Build bootloader"
-    echo "  synth       Synthesize with yosys"
-    echo "  miv-synth   Synthesize Mi-V compatible core (only UP5K)"
+    echo "  synth       Synthesize using yosys"
+    echo "  gy-synth    Synthesize with gruppy detection"
     echo "  pnr         Place and route wirh nextpnr"
     echo "  prog        Program the device with iceprog"
     exit 1
@@ -89,10 +89,6 @@ do
             $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -top top -json tmp.json' \
                 -D ENABLE_GRUBBY $verilog_files $chip.v
             report_yosys
-            ;;
-        miv-synth)
-            $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -top top -json tmp.json' \
-                $verilog_files ${chip}_miv.v ../../src/memory.v
             ;;
         pnr)
             $NEXTPNR_ICE40 $args -ql tmp.nextpnr.log --json tmp.json \

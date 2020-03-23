@@ -41,7 +41,6 @@ module top (
     end
     wire rstn = &reset_counter & reset_button;
 
-
     wire        mem_valid;
     wire        mem_write;
     wire  [3:0] mem_wmask;
@@ -88,7 +87,7 @@ module top (
         .OUTPINS_COUNT(8),
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE),
-        .TIMER_WIDTH(16)
+        .TIMER_WIDTH(32)
     ) uart (
         .clk    (clk),
         .rstn   (rstn),

@@ -1,4 +1,4 @@
-include ../../config_default.mk
+# $(RV32I_PREFIX) refers to a environment variable that is set by ../make.sh
 
 USE_MYSTDLIB = 1
 OBJS = dhry_1.o dhry_2.o stdlib.o

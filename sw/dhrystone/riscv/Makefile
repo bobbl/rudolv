@@ -1,4 +1,4 @@
-include ../../config_default.mk
+# $(RV32I_PREFIX) refers to a environment variable that is set by ../make.sh
 
 SRC_FILES = crt.S syscalls.c dhrystone_main.c dhrystone.c
 

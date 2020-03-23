@@ -1,4 +1,4 @@
-# Copy this file to /etc/udec/rules.d/ to enable non-rooot access to the USB
+# Copy this file to /etc/udev/rules.d/ to enable non-rooot access to the USB
 # programming and UART connection of all FPGAs supported by RudolV
 
 # Lattice

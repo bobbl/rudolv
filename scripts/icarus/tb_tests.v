@@ -196,7 +196,7 @@ module tb_tests;
         .rgrubby(mem_rgrubby_from_mem)
     );
 
-    RegSet33 regset (
+    RegSet33 RegSet (
         .clk    (clk),
         .we     (regset_we),
         .wa     (regset_wa),
@@ -257,7 +257,7 @@ module tb_tests;
         end
 
         if (dut.Insn == 'h006F && dut.d_PC==dut.f_PC+8) begin
-            $display("exit due to write to infinite loop");
+            $display("exit due to infinite loop");
             $finish;
         end
     end
