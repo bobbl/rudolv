@@ -1,121 +1,108 @@
 # RudolV
 
-A 32 bit RISC-V processor with 5 pipeline stages and in-order execution.
-The architecture avoids speculative components to provide a predictable timing
-as required by hard real-time systems. It started as a submission to the
-[2018 RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
-RudolV won the 
-[third prize](https://riscv.org/2019/10/announcing-the-winners-of-the-risc-v-soft-cpu-contest/)
-in the
-[2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
-.
+RISC-V processor for real-time systems. 32 bit in-order pipeline with 5 stages.
 
+Features
+  * [Multiple target FPGAs](#supported-fpgas)
+  * [Predictable timing model](#instruction-timing)
+  * [Security extension](#security-extension)
+  * [CSR extension interface](#csr-extension-interface)
 
-RISC-V SoftCPU Contest on Security
-----------------------------------
+Compatibility
+  * RV32IM Zcsr Zifence
+  * Privileged machine-level ISA 1.11
+  * [RISC-V compliance tests](#risc-v-compliance-tests)
+  * [Zephyr 2.2.0 support](#zephyr-support)
 
-The objective of the contest is to thwart 5 particular attacks of RIPE, the
-[Runtime Intrusion Prevention Evaluator](https://github.com/johnwilander/RIPE).
-RudolV can detect all these 5 attacks and responds with an exception. No
-compiler modifications are necessary.
-
-
-### Requirements
-
-  * Future Electronics - Microsemi Creative Development Board with 
-    IGLOO 2 M2GL025-VF256 FPGA
-  * Libero 12.1 ([Howto install Libero on Ubuntu](https://bobbl.github.io/fpga/microsemi/2019/09/23/install-libero.html))
-  * Zephyr SDK 0.10.0 (only this version fits Zephyr OS v1.14.1-rc1 which is
-    required by the contest)
-
-
-### CPU
-
-  * Plug in the Creative Board.
-  * Open the project file `scripts/libero/proj/iot_contest/iot_contest.prjx`
-    with Libero.
-  * Choose the `schematic` tab and click on the leftmost icon to generate the
-    component.
-  * Click on _Program Design/Run PROGRAM Action_ within the `Design Flow` tab
-    to synthesize the bitstream and program the FPGA board.
-
-Alternatively the complete bitstream can be downloaded as release `iot_contest`
-from the RudolV GitHub repository.
-
-After pushing the reset button, RudolV waits for the binary application image to
-be transfered via the UART. The format is simple: first send the length of the
-image (in bytes) as decimal ASCII string. Followed by a blank (0x20) and then the
-binary data. The following script can be used:
-
-    sw/bootloader/send_image.sh /dev/ttyUSB0 image.bin
-
-To check what happens without the grubby attack detection, edit line 74 in
-`scripts/libero/proj/iot_contest/hdl/withmem.v` and set `MemRGrubby` to 0.
-After synthesis and programming the attacks will be successful.
-
-
-### Build the software
-
-RudolV is binary compatible to Mi-V for the Creative Board therefore binaries
-can be build the same way as descibed in the 
-[contest rules](https://github.com/Thales-RISC-V/RISC-V-IoT-Contest). 
-After building an application, the raw binary image `zephyr.bin` can be found
-in the Zephyr build directory. To run it use
-
-    sw/bootloader/send_image.sh /dev/ttyUSB0 zephyr.bin
-
-To build the RIPE binaries make sure that the environmental variable
-`ZEPHYR_SDK_INSTALL_DIR` points to the Zephyr SDK directory.
-
-If there is already a Zephyr installation, set `ZEPHYR_BASE` accoringly and
-`ZEPHYR_TOOLCHAIN_VARIANT=zephyr`. Otherwise Zephyr OS v1.14.1-rc1 can be 
-instaled locally with
-
-    cd sw/zephyr
-    source ./make.sh zephyr
-
-Build the RIPE attack binaries
-
-    ./make.sh ripe
+Benchmarks
+  * [Dhrystone](#Dhrystone-Benchmark): Dhrystone MIPS/MHz: 0.736 ... 1.815 
+    (depending on Dhrystone implementation)
+  * [CoreMark](#EEMBC-CoreMark-Benchmark):  1.295 per MHz
 
 
 
-### Run the attacks
 
-Use a terminal emulator like picocom at 115200 baud to receive the output of RIPE:
+Structure of Repository
+-----------------------
 
-    picocom -b 115200 /dev/ttyUSB0
-
-Now push the reset button on the Creative Board and transfer the binary image of
-an attack to the bootloader of RudolV:
-
-    sw/bootloader/send_image.sh /dev/ttyUSB0 sw/zephyr/build/ripe1.rv32im.bin
-
-For the other attacks use `ripe2` to `ripe5`. 
-
-
-
-### How does the detection work?
-
-All attacks have in common, that they alter the memory byte by byte, not with
-full 32 bit writes. Therefore RudolV uses an additional _grubby_ bit for each
-memory location to keep track of words that were not written as a whole.
-If RudolV fetches an instruction word with the grubby bit set, it throws
-exception 14. If it loads a grubby word and uses it as target address for a
-jump, exception 10 is thrown.
+| Path              | Content
+| ----------------- | --------------------------------------------------- |
+| scripts/          | **Scripts for synthesis and simulation**            |
+| scripts/icarus/   | Simulation with Icarus Verilog                      |
+| scripts/icestorm/ | Synthesis with ICEStorm for Lattice FPGAs           |
+| scripts/libero/   | Synthesis with Libero for Microsemi FPGAs           |
+| scripts/quartus/  | Synthesis with Quartus for Intel FPGAs              |
+| scripts/vivado/   | Synthesis with Vivado for Xilinx FPGAs              |
+| src/              | **CSR extensions and FPGA-specific verilog code**   |
+| sw/               | **Software that can be executed on RudolV**         |
+| sw/compliance/    | RISC-V compliance tests                             |
+| sw/coremark/      | EEMBC CoreMark benchmark                            |
+| sw/dhrystone/     | Multiple implementations of the Dhrystone benchmark |
+| sw/tests/         | RISC-V tests                                        |
+| sw/uart/          | UART driver and bootloader                          |
+| sw/zephyr/        | Zephyr port                                         |
 
 
-### Chip resources for the IGLOO 2 port of RudolV
+Supported FPGAs
+---------------
 
+| Manufacturer    | Intel      | Lattice       | Microsemi       | Xilinx    |
+| --------------- |:----------:|:-------------:|:---------------:|:---------:|
+| FPGA            | Cyclone IV | iCE40 UP5K    | IGLOO2 M2GL025  | Kinex-7   |
+| Board           | DE2-115    | UltraPlus MDP | Future Creative | Genesys-2 |
+| Tool            | Quartus    | IceStorm      | Libero          | Vivado    |
+| Logic Elements  | 2625       | 3434          | 3804            | 545       |
+| LUTs            | 2550       | 2661          | 3751            | 1728      |
+| DFFs            | 1089       | 1147          | 2190            | 1077      |
+| MHz             | 70         | 25            | 96              | 200       |
+| CoreMark        | 86         | 32            | 124             | 259       |
 
-| chip resources  | unit      |  number |
-|:--------------- | ---------:| -------:|
-| LUT4            |           |    3551 |
-| flip-flops      |     1 Bit |    2293 |
-| LEs             |           |    3633 |
-| uRAM            |   1 KiBit |       7 |
-| LSRAM           |  18 KiBit |      28 |
-| clock frequency |       MHz |      99 |
+Features:
+  * 64 KiByte RAM (Microsemi only 56 KiByte)
+  * UART with 115200 Bit/s
+  * 32 bit timer and interrupt
+  * Counters: `CYCLE` and `INSTRET`
+  * Bootloader waits for an executable image via UART
+
+### Synthesis
+
+For FPGA support change to the manufacturer-specific directory and run the make
+script
+
+    cd scripts/TOOLNAME
+    ./make.sh
+
+to display the make targets. They differ from FPGA to FPGA, but all have in
+common, that the first argument must be the board name. To do the synthesis, use
+
+    ./make.sh BOARD synth
+
+On some boards, a separate place and route pass is necessary:
+
+    ./make.sh BOARD pnr
+
+Programming the device is done with
+
+    ./make.sh BOARD prog
+
+Programming (and UART communication) requires some access rights that can be
+granted by udev rules. The udev rules for all supported boards can be found in
+[rudolv/scripts/53-fpgas-supported-by-rudolv.rules](rudolv/scripts/53-fpgas-supported-by-rudolv.rules).
+Simply copy this file to `/etc/udev/rules.d/`.
+
+### Bootloader
+
+After programming or pushing the reset button, RudolV waits for the binary
+application image to be transfered via the UART. The format is simple: first
+send the length of the image (in bytes) as decimal ASCII string. Followed by a
+blank (0x20) and then the binary data. The following script can be used:
+
+    sw/bootloader/send_elf.sh /dev/ttyUSB0 IMAGE.elf
+
+Use a terminal emulator like picocom at 115200 baud to communicate with the
+program:
+
+    picocom -b 115200 --imap lfcrlf /dev/ttyUSB0
 
 
 
@@ -123,98 +110,258 @@ jump, exception 10 is thrown.
 Instruction timing
 ------------------
 
-Data hatzards are avoided by operand forwarding, therefore most instructions 
-are executed in one cycle. Since the memory is single ported, memory accesses
-take two cycles. The jump target is computed in the execute stage, resulting in
-a two cycle latency. There is no dynamic branch prediction but subsequent
-instructions are only killed in the case of a taken branch. This behaviour can
-be considered as a static always not taken prediction.
+The architecture avoids speculative components to provide a predictable timing
+as required by hard real-time systems.
 
-| instruction class  | examples        | cycles |
-| ------------------ | --------------- | ------ |
-| RV32M              | MUL, DIV, ...   | 34     |
-| pipeline flush     | FENCE.I         | 3      |
-| exception          | ECALL, EBREAK   | 3      |
-| unconditional jump | JAL, JALR       | 3      |
-| taken branch       | BEQ, ...        | 3      |
-| CSR access         | CSRRW, ...      | 2      |
-| memory access      | LB, LW, SH, ... | 2      |
-| not taken branch   | BEQ, ...        | 1      |
-| barrel shifter     | SLL, SRL, SRA   | 1      |
-| arithmetic         | ADD, ...        | 1      |
+Data hazards are avoided by operand forwarding, therefore most instructions are
+executed in one cycle. Since the memory is single ported, memory accesses take
+two cycles. The jump target is computed in the execute stage, resulting in a two
+cycle latency. There is no dynamic branch prediction but subsequent instructions
+are only killed in the case of a taken branch. This behaviour can be considered
+as a static always not taken prediction.
 
-
-
-Simulation and testing with Icarus Verilog
-------------------------------------------
-
-Run riscv-tests with Icarus Verilog
-
-    make -C sw/tests/
-    make -C scripts/icarus/ test-all
-
-Run riscv-compliance tests with Icarus Verilog
-
-    make -C sw/compliance/
-    cd scripts/icarus/ 
-    ./run_compliance_tests.h
-
-Run Dhrystone benchmark from riscv-tests repository wirh Icarus Verilog
-
-    make -C sw/riscv-dhrystone/
-    make -C scripts/icarus/ riscv-dhrystone
-
-Run Dhrystone benchmark from picorv32 repository wirh Icarus Verilog
-
-    make -C sw/picorv32-dhrystone/
-    make -C scripts/icarus/ picorv32-dhrystone
-
-Dhrystone results:
-
-|                      | DMIPS/MHz | Dhrystones/s/MHz | CPI   | cycles per Dhrystone |
-| -------------------- | --------- | ---------------- | ----- | -------------------- |
-| `riscv-dhrystone`    | 0.75      | 1362             | 1.66  | 734                  |
-| `picorv32-dhrystone` | 0.968     | 1702             | 1.599 | 587                  |
+| instruction class  | examples                                       | cycles |
+| ------------------ | ---------------------------------------------- | ------ |
+| RV32M              | MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU | 34     |
+| pipeline flush     | FENCE.I                                        | 3      |
+| exception          | ECALL, EBREAK                                  | 3      |
+| unconditional jump | JAL, JALR                                      | 3      |
+| taken branch       | BEQ, BNE, BLT, BGE, BLTU, BGEU                 | 3      |
+| CSR access         | CSRRW, CSRRS, CSRRC                            | 2      |
+| memory access      | LB, LH, LW, LBU, LHU, SB, SH, SW               | 2      |
+| not taken branch   | BEQ, BNE, BLT, BGE, BLTU, BGEU                 | 1      |
+| barrel shifter     | SLL, SRL, SRA                                  | 1      |
+| arithmetic         | ADD, SUB, SLT, SLTU, XOR, OR, AND, LUI, AUIPC  | 1      |
 
 
 
-Synthesis with IceStorm
+
+Security extension
+------------------
+
+RudolV started as a submission to the
+[2018 RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
+Also participating in the 
+[2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
+it made the 
+[third place](https://riscv.org/2019/10/announcing-the-winners-of-the-risc-v-soft-cpu-contest/)
+.
+
+The objective of the contest was to thwart 5 particular attacks of RIPE, the
+[Runtime Intrusion Prevention Evaluator](https://github.com/johnwilander/RIPE).
+RudolV can detect all these 5 attacks and responds with an exception. No
+compiler modifications are necessary.
+
+### Grubby attack detection
+
+RudolV monitors if a memory location was written as a whole 32 bit word or if
+narrow byte accesses modified it. Memory locations that were not written as a
+whole are called _grubby_. If an instruction is fetched from such a grubby
+memory location, an exception (14) is thrown. If the value from a grubby memory
+location is used as function pointer or return address, exception 10 is throw.
+
+### Technical implementation
+
+Each memory word requires an additional grubby bit. The bit is cleared, if a 
+aligned `sw` instruction writes the word. The other store instructions (`sh` and
+`sb`) set the grubby bit. If a word with grubby bit set is fetched, execution
+continues at the address `mtvec` and `mcause` is set to 14.
+
+The detection of an indirect jump to an address from a grubby memory location is
+a bit more complex. There is no single instruction to jump to the address in a
+memory location. At least two instructions are involved instead. First, `lw`
+reads the target address from memory to a register and then `jalr` jumps to the
+address in the register. Therefore, all registers also need a grubby bit. It is
+written by a load and tested by a jump.
+
+### Hardware costs
+
+The hardware costs are not very high. The logic is simple (only a few dozend LUT4s)
+and most FPGAs provide block RAMs with parity bits that are 36 bits wide, not 32
+bits. These parity bits can be used as grubby bits. Only the Lattice FPGAs do not
+provide a parity bit.
+
+| Manufacturer    | Intel      | Lattice       | Microsemi       | Xilinx    |
+| --------------- |:----------:|:-------------:|:---------------:|:---------:|
+| Logic Elements  |       2622 |          3434 |            3884 |       539 |
+| LUTs            |       2562 |          2661 |            3822 |      1734 |
+| DFFs            |       1096 |          1147 |            2195 |      1084 |
+| MHz             |         71 |            22 |              96 |       200 |
+
+If available on the board, a switch (DE2-115, Genesys-2) or a button (IGLOO2)
+can disable the grubby detection.
+
+### Detection quality
+
+All buffer overflows that write the memory byte by byte can be detected with the
+grubby mechanism. RIPE tests 850 different stack overflow attacks, subdivided by
+five dimensions. Four dimensions (location, target code pointer, overflow technique
+and attack code) are irrelevat for the grubby detection, the only dimension that
+has an influence is the abused function. Grubby detection only works for functions
+that write the memory byte by byte. Fortunately, 9 of the 10 functions use `sb`
+to write to memory (at least in the glibc implementation). Only `memcpy()` writes
+on a word basis and is resistant to the grubby detection.
+
+Replacing `memcpy()` by a byte by byte implementation is not an option, because
+`memcpy()` may be used for legal copies of function pointers that may lead to false
+positives. So far, no other false positives are known, as long as no dirty hacks
+are used in the source code.
+
+### Comparison with Pulserain Rattlesnake
+
+The grubby detection is very similar to the _Dirty Address Trace_ (DAT) technique
+used by [Pulserain Rattlesnake](https://github.com/PulseRain/Rattlesnake). It
+also needs an additional bit per memory word and register. The dirty bit is set,
+if more than 8 consecutive writes to memory are detected. 
+
+DAT also covers word by word like `memcpy()` attacks, but it is vulnerable to attacks
+with short consecutive writes and contexts switches during a write sequence.
+I may be biased, but in my opinion, the DAT and grubby detection rate are roughly
+comparable. However, the hardware costs of the grubby detection are lower.
+
+
+
+
+CSR Extension Interface
 -----------------------
 
-Synthesize with Project IceStorm and flash to a Lattice iCE40 UltraPlus MDP board.
-The board must be configured to flash and run FPGA U4.
+Extra CSRs can be added with the follwing interface:
 
-    cd scripts/icestorm
-    ./make.sh uwg30 bootloader synth pnr prog
+    input         clk
+    input         read
+    input   [2:0] modify
+    input  [31:0] wdata
+    input  [11:0] addr
+    output [31:0] rdata
+    output        valid
 
-Now the processor within the FPGA executes the bootloader and waits for data
-from the UART. To run the Dhrystone benchmark on the FPGA use:
+`addr` is valid one cycle earlier that the other signals. Thus, address decoding
+is separated from the actual read or write action.
 
-    make -C sw/riscv-dhrystone
-    sw/uart/send_elf.sh /dev/ttyUSB1 sw/riscv-dhrystone/dhrystone.elf
+In the following cycle, `read` is set if the CSR value should be read. If a valid
+register was selected by `addr` in the previous cycle, `valid` should be set to
+high and `rdata` to the value of the register. Both signals are only asserted for
+one cycle, otherwise both are cleared to 0.
 
-This Dhrystone version is derived from the risv-tests version, but with the
-correct clock frequency of 24 MHz and 100'000 iterations. The result is 32697
-Dhrystones per second. To see the output use a terminal emulator like picocom
-at 115200 baud:
+`modify` defines, how the current CSR value should be combined with `wdata` to
+form the new value.
 
-    picocom -b 115200 --imap lfcrlf /dev/ttyUSB1
+| `modify` | action | instruction | function             |
+| -------- | ------ | ----------- | -------------------- |
+| 001      | write  | CSRW        | `csr = wdata`        |
+| 010      | set    | CSRS        | `csr = csr | wdata`  |
+| 011      | clear  | CSRC        | `csr = csr &~ wdata` |
 
-The processor logic and the bootloader are written to the flash memory. Hence, the
-processor can be reset with switch SW2 of the MDP board. After switching it back and
-forth, `send_elf.sh` can be used again to start a new program on the processor.
+This interface can also be used to connect external peripherals. Its advantage
+over a memory mapped interface is less impact on the critcal path and thus a
+potentially higher clock rate.
 
-| chip resources  | unit      | default | no counters | no exceptions | minimal |
-|:--------------- | ---------:| -------:| -----------:| -------------:| -------:|
-| LCs             |      LUT4 |    1829 |        1622 |          1619 |    1414 |
-| BRAM            |   4 KiBit |       6 |           6 |             6 |       6 |
-| SPRAM           | 256 KiBit |       2 |           2 |             2 |       2 |
-| clock frequency |       MHz |      25 |          23 |            22 |      26 |
+Examples of CSR extensions can be found in [src/csr.v](src/csr.v):
+
+| verilog module | no   | CSRs / description                                  |
+| -------------- | ---- | --------------------------------------------------- |
+| CsrIDs         | 0F1x | `vendorid`, `archid`, `impid`, `hartid`, clock rate |
+| CsrCounter     | 0C0x | `cycle`, `time`, `instret`                          |
+| CsrUartBitbang | 07C0 | Minimal UART interface for software bitbanging      |
+| CsrUartChar    | 0BC0 | Read and write bytes via UART                       |
+| CsrPinsIn      | 0FC1 | Read external pins (e.g. buttons or switches)       |
+| CsrPinsOut     | 0BC1 | Write external pins (e.g. LEDs)                     |
+| CsrTimerAdd    | 0BC2 | Simple timer that asserts the timer interupt        |
 
 
 
-CoreMark EEMBC benchmark scores
--------------------------------
+
+RISC-V Compliance Tests
+-----------------------
+
+Meanwhile the [RISC-V compliance tests](https://github.com/riscv/riscv-compliance)
+include most of the older [riscv-tests](https://github.com/riscv/riscv-tests),
+but some tests for multiplication and division are missing. Therefore these
+missing tests and some RudolV-specific tests were added. They can be found
+under [sw/tests/src/](sw/tests/src/).
+
+Build the compliance tests:
+
+    make -C sw/compliance/
+
+Build the remaining riscv-tests and rudolv-tests:
+
+    make -C sw/tests/
+
+Run all tests with Icarus:
+
+   cd scripts/icarus
+   ./make.sh tests
+
+Simulate only a single test with debug output:
+
+   cd scripts/icarus
+   ./make.sh debug ../../sw/tests/build/rudolv_irq.elf
+
+
+
+
+
+Zephyr Support
+--------------
+
+RudolV supports Zephyr with an out-of-tree board description. This means that
+a plain, unpatched installation of Zephyr can be used to build an .elf file for
+RudolV. To install Zephyr follow the instructions on 
+https://docs.zephyrproject.org/latest/getting_started/index.html, particularly
+topics 2 (dependencies) and 5 (SDK). Topics 3 (source code) and 4 (python 
+dependencies) are integrated in RudolV's make script:
+
+    cd sw/zephyr
+    ./make.sh zephyr
+
+Technically, a complete Zephyr port consists of board, DeviceTree, SoC and 
+driver definitions. However, as of Zephyr 2.2.0, out-of-tree SoC definitions and
+drivers do not yet work properly. Therefore, all RudolV customisations are
+packed into the board definition at [sw/zephyr/board/](sw/zephyr/board/).
+
+For example, tu build the hello_word sample, type
+
+    cd sw/zephyr
+    west build -b rudolv ./zephyrproject/zephyr/samples/hello_world -- -DBOARD_ROOT=.
+
+or use the make script:
+
+    ./make.sh elf ./zephyrproject/zephyr/samples/hello_world
+
+
+
+
+Dhrystone Benchmark
+-------------------
+
+Dhrystone is widely used, but it depends to such an extend on the compiler
+settings and libc implementation that it is hardly comparable. Here
+are 3 different implementations from repositories of other RISC-V cores.
+Build them with
+
+    cd sw/dhrystone
+    ./make.sh all
+
+And send the images in `sw/dhrystone/build/` to the bootloader. Or run it with
+Icarus Verilog:
+
+    cd scripts/icarus
+    ./make.sh run ../../sw/dhrystone/build/riscv.elf 
+    ./make.sh run ../../sw/dhrystone/build/picorv32.elf 
+    ./make.sh run ../../sw/dhrystone/build/scr1.elf 
+
+| Dhrystone source | reference core | F<sub>max</sub> | cycles/iteration | RudolV c/i | DMIPS/MHz | RudolV D/M |
+| ----------------------------------------------------------------- | -------- |:-------:|:----:|:---:|:-----:|:-----:|
+| [riscv/riscv-tests](https://github.com/riscv/riscv-tests)         |          |         |      | 773 |       | 0.734 |
+| [cliffordwolf/picorv32](https://github.com/cliffordwolf/picorv32) | PicoRV32 | 400 MHz | 1100 | 615 | 0.516 | 0.924 |
+| [syntacore/scr1-sdk](https://github.com/syntacore/scr1-sdk)       | SCR1     |  30 MHz |  301 | 313 | 1.896 | 1.815 |
+
+
+
+
+EEMBC CoreMark Benchmark
+------------------------
 
 Run one iteration of [EEMBC CoreMark](https://www.eembc.org/coremark/) with Icarus Verilog:
 
@@ -238,6 +385,7 @@ bootloader.
 
 The CoreMark/MHz of RudolV is 1.295 and 0.892 without bitwise multiplier and
 divider.
+
 
 
 

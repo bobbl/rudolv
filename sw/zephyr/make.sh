@@ -3,7 +3,7 @@
 if [ $# -eq 0 ] 
 then
     echo "Usage: $0 <targets> ..."
-    echo "  zephyr     clone, patch and build Zephyr RTOS 2.2.0-rc3"
+    echo "  zephyr     clone and build Zephyr RTOS 2.2.0"
     echo "  elf <dir>  build Zephyr application in <dir> and copy ELF to ./elf/"
     echo "  ripe       build all 5 ripe attack scenarios for the RISC-V IoT contest"
     echo
@@ -26,7 +26,7 @@ fi
 
 target_zephyr() {
     #pip3 install --user west
-    west init zephyrproject --mr v2.2.0-rc3
+    west init zephyrproject --mr v2.2.0
     cd zephyrproject
     west update
 
@@ -72,7 +72,7 @@ fi
 
 if [ -z "$ZEPHYR_TOOLCHAIN_VARIANT" ]
 then
-    if [ -d zephyrproject/zephr ]
+    if [ -d zephyrproject/zephyr ]
     then
         echo "Zephyr not found. Set ZEPHYR_BASE or install with $0 zephyr"
         exit 3
