@@ -236,47 +236,47 @@ module Pipeline #(
 
     always @* begin
 
-        FetchDirect <= 0;
-        FetchDelayed <= 0;
-        FetchSynth <= 0;
-        MstatusExcEnter <= 0;
-        MstatusExcLeave <= 0;
+        FetchDirect = 0;
+        FetchDelayed = 0;
+        FetchSynth = 0;
+        MstatusExcEnter = 0;
+        MstatusExcLeave = 0;
 
-        SoftwareInt <= 0;
-        TimerInt <= 0;
-        ExternalInt <= 0;
-        ClearWaitForInt <= 0;
+        SoftwareInt = 0;
+        TimerInt = 0;
+        ExternalInt = 0;
+        ClearWaitForInt = 0;
 
         if (m_Kill) begin
             if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
-                FetchSynth <= fsJumpMTVEC;
-                MstatusExcEnter <= 1;
+                FetchSynth = fsJumpMTVEC;
+                MstatusExcEnter = 1;
             end else begin
-                FetchDirect <= 1;
+                FetchDirect = 1;
             end
         end else begin
             if (ExcGrubbyInsn) begin
-                FetchSynth <= fsJumpMTVEC;
-                MstatusExcEnter <= 1;
+                FetchSynth = fsJumpMTVEC;
+                MstatusExcEnter = 1;
             end else if (SysOpcode) begin
                 if (CsrPart) begin
-                    FetchSynth <= fsCSR;
+                    FetchSynth = fsCSR;
                 end else if (ExcUser) begin
-                    FetchSynth <= fsJumpMTVEC;
-                    MstatusExcEnter <= 1;
+                    FetchSynth = fsJumpMTVEC;
+                    MstatusExcEnter = 1;
                 end else if (InsnMRET) begin
-                    FetchSynth <= fsJumpMEPC;
-                    MstatusExcLeave <= 1;
+                    FetchSynth = fsJumpMEPC;
+                    MstatusExcLeave = 1;
                     // KNOWN BUG:
                     // If irq_timer ist still 1 when the MRET restores MIE to 1,
                     // d_TimerInt will be killed because it is in the delay slots
                     // of the MRET instructions.
                 end else begin // WFI and other system opcodes -> nop
-                    FetchSynth <= fsNOP;
+                    FetchSynth = fsNOP;
                 end
             end else if (MemAccess) begin
-                FetchSynth <= fsJumpMTVEC;
-                // MstatusExcEnter <= 1;
+                FetchSynth = fsJumpMTVEC;
+                // MstatusExcEnter = 1;
                 // KNOWN BUG:
                 // Without this line, MSTATUS.IE is not cleared when a memory
                 // misaligned exception is raised, i.e. such an exception can be
@@ -289,16 +289,16 @@ module Pipeline #(
                     // == 1 : last cycle, fetch next instruction
                     // == 2 : last but one cycle, fetch multicycle opcode once again
                     if (d_MultiCycleCounter > 2) begin
-                        FetchSynth <= fsNOP;
+                        FetchSynth = fsNOP;
                     end else begin
-                        FetchDirect <= 1;
+                        FetchDirect = 1;
                     end
                 end else begin
                     if (MULDIVOpcode) begin
                         // start of multicycle execution
                         // the next instruction is currently beeing fetched and must
                         // be overwritten.
-                        FetchSynth <= fsNOP;
+                        FetchSynth = fsNOP;
 
 `ifdef ENABLE_TIMER
                     // not the absolutely correct priority, but works:
@@ -312,23 +312,23 @@ module Pipeline #(
                         )
                     begin
                         if (f_ExternalInt)
-                            ExternalInt <= 1;
+                            ExternalInt = 1;
                         else if (f_SoftwareInt)
-                            SoftwareInt <= 1;
+                            SoftwareInt = 1;
                         else
-                            TimerInt <= 1;
-                        ClearWaitForInt <= 1;
+                            TimerInt = 1;
+                        ClearWaitForInt = 1;
 
-                        FetchSynth <= fsJumpMTVEC;
-                        MstatusExcEnter <= 1;
+                        FetchSynth = fsJumpMTVEC;
+                        MstatusExcEnter = 1;
 `endif
 
                     end else if (f_WaitForInt | d_WaitForInt) begin
-                        FetchSynth <= fsNOP;
+                        FetchSynth = fsNOP;
                     end else if (d_Bubble | d_SaveFetch) begin
-                        FetchDelayed <= 1;
+                        FetchDelayed = 1;
                     end else begin
-                        FetchDirect <= 1;
+                        FetchDirect = 1;
                     end
                 end
             end
@@ -381,33 +381,33 @@ module Pipeline #(
     reg MModeIntEnable;
     reg MModePriorIntEnable;
     always @* begin
-        MModeIntEnable <= f_MModeIntEnable;
-        MModePriorIntEnable <= f_MModePriorIntEnable;
+        MModeIntEnable = f_MModeIntEnable;
+        MModePriorIntEnable = f_MModePriorIntEnable;
         if (e_CsrAddr==12'h300) begin  // mstatus
             case (e_CsrModify)
                 3'b001: begin // write
-                    MModeIntEnable      <= e_CsrWData[3];
-                    MModePriorIntEnable <= e_CsrWData[7];
+                    MModeIntEnable      = e_CsrWData[3];
+                    MModePriorIntEnable = e_CsrWData[7];
                 end
                 3'b010: begin // set
-                    MModeIntEnable      <= f_MModeIntEnable      | e_CsrWData[3];
-                    MModePriorIntEnable <= f_MModePriorIntEnable | e_CsrWData[7];
+                    MModeIntEnable      = f_MModeIntEnable      | e_CsrWData[3];
+                    MModePriorIntEnable = f_MModePriorIntEnable | e_CsrWData[7];
                 end
                 3'b011: begin // clear
-                    MModeIntEnable      <= f_MModeIntEnable      & ~e_CsrWData[3];
-                    MModePriorIntEnable <= f_MModePriorIntEnable & ~e_CsrWData[7];
+                    MModeIntEnable      = f_MModeIntEnable      & ~e_CsrWData[3];
+                    MModePriorIntEnable = f_MModePriorIntEnable & ~e_CsrWData[7];
                 end
                 default: begin  // do not alter
                 end
             endcase
         end
         if (MstatusExcEnter) begin
-            MModeIntEnable <= 0;
-            MModePriorIntEnable <= f_MModeIntEnable;
+            MModeIntEnable = 0;
+            MModePriorIntEnable = f_MModeIntEnable;
         end
         if (MstatusExcLeave) begin
-            MModeIntEnable <= f_MModePriorIntEnable;
-            MModePriorIntEnable <= 1;
+            MModeIntEnable = f_MModePriorIntEnable;
+            MModePriorIntEnable = 1;
         end
     end
 `endif
@@ -561,7 +561,7 @@ module Pipeline #(
     always @(posedge clk) begin
         e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~d_Insn[13] | (d_Insn[19:15]!=0))) 
             ? d_Insn[13:12] : 2'b00};
-        e_CsrWData  <= d_Insn[14] ? d_Insn[19:15] : ForwardAE;
+        e_CsrWData  <= d_Insn[14] ? {{(WORD_WIDTH-5){1'b0}}, d_Insn[19:15]} : ForwardAE;
 
         // for internal CSRs
         e_CsrAddr   <= d_Insn[31:20];
@@ -693,7 +693,7 @@ module Pipeline #(
     // OPTIMIZE? vFastResult has one input left
     wire [WORD_WIDTH-1:0] vFastResult = 
         vLogicResult | vUIResult | vPCResult | vMulResult;
-    wire [WORD_WIDTH-1:0] Sum = e_A + e_B + e_Carry;
+    wire [WORD_WIDTH-1:0] Sum = e_A + e_B + {{(WORD_WIDTH-1){1'b0}}, e_Carry};
     wire [WORD_WIDTH-1:0] vShiftAlternative = {
         e_SelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
         e_SelSum ? Sum[0]              : (vFastResult[0] | vCondResultBit)};
@@ -1242,6 +1242,9 @@ module Pipeline #(
 `ifdef DEBUG
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
             mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
+        $display("F FetchDirect=%b Delayed=%b Synth=%h",
+            FetchDirect, FetchDelayed, FetchSynth);
+
         $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h",
             d_PC, d_PC, d_Insn, Insn);
         $display("R  0 %h %h %h %h %h %h %h %h", 

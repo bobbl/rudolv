@@ -1,12 +1,12 @@
-module tb_tests;
+module top
 
-    localparam CSR_SIM   = 12'h3FF;
-    localparam CSR_UART  = 12'hBC0;
-    localparam CSR_LEDS  = 12'hBC1;
-    localparam CSR_SWI   = 12'hBC1;
-    localparam CSR_TIMER = 12'hBC2;
-    localparam CSR_KHZ   = 12'hFC0;
-
+`ifdef VERILATOR
+(
+    input clk,
+    input rstn
+);
+`elsif __ICARUS__
+;
     reg clk = 1;
     always #5 clk = !clk;
 
@@ -14,6 +14,17 @@ module tb_tests;
     initial begin
         #40 rstn = 1;
     end
+`else
+    $display("Unknown simulator");
+    $stop;
+`endif
+
+    localparam CSR_SIM   = 12'h3FF;
+    localparam CSR_UART  = 12'hBC0;
+    localparam CSR_LEDS  = 12'hBC1;
+    localparam CSR_SWI   = 12'hBC1;
+    localparam CSR_TIMER = 12'hBC2;
+    localparam CSR_KHZ   = 12'hFC0;
 
     wire        mem_valid;
     wire        mem_write;
@@ -211,9 +222,6 @@ module tb_tests;
     );
 
 
-`ifdef DEBUG
-    always #10 $monitor("  time %t", $time);
-`endif
 
 
     reg [11:0] q_CsrAddr = 0;
@@ -221,6 +229,14 @@ module tb_tests;
     integer sig_begin;
     integer sig_end;
     always @(posedge clk) begin
+
+`ifdef DEBUG
+`ifdef __ICARUS__
+        $monitor("  time %t", $time);
+`elsif VERILATOR
+        $display("  time %t", $time);
+`endif
+`endif
 
         q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
         q_CsrAddr  <= csr_addr;
@@ -236,9 +252,10 @@ module tb_tests;
                 CSR_SIM: begin
                     case (csr_wdata)
                         2: begin // signature from compliance tests
-                            while (sig_begin < sig_end) begin
-                                $display("%h", mem.mem[sig_begin][31:0]);
-                                sig_begin = sig_begin + 1;
+                            i = sig_begin;
+                            while (i < sig_end) begin
+                                $display("%h", mem.mem[i][31:0]);
+                                i = i + 1;
                             end
                         end
                         default: $display("exit due to write to CSR 0x3ff");
@@ -262,6 +279,7 @@ module tb_tests;
         end
     end
 
+`ifdef __ICARUS__
     initial begin
 `ifdef DEBUG
         #200_000 $write("*** TIMEOUT"); $stop;
@@ -269,7 +287,7 @@ module tb_tests;
         #5_000_001 $write("*** TIMEOUT"); $stop;
 `endif
     end
-
+`endif
 
 
 

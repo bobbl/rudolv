@@ -219,6 +219,7 @@ module Memory33 #(
     reg [32:0] mem [0:SIZE-1];
 
     initial begin
+        /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
     end
 

@@ -2,16 +2,24 @@
 
 if [ $# -eq 0 ] 
 then
-    echo "Usage: $0 <targets> ..."
+    echo "Usage: $0 <simulator> <targets> ..."
+    echo
+    echo "<simulator>"
+    echo "  icarus               Use Icarus Verilog for simulation"
+    echo "  verilator            Use Verilator for simulation"
+    echo "  verilator-vcd        Use Verilator ans generate .vcd file"
+    echo
+    echo "<target>"
     echo "  run <file.elf>       Simulate without logging"
     echo "  debug <file.elf>     Simulate with extensive logging"
     echo "  gy-run <file.elf>    Enable grubby, no log"
     echo "  gy-debug <file.elf>  Enable grubby, log"
-    echo "  tests                Run riscv-tests and riscv-compliance tests"
+    echo "  tests                Run tests (riscv-tests, riscv-compliance, RudolV-specific)"
     echo
     echo "<file.elf>"
-    echo "  ../../sw/picorv32-dhrystone/dhrystone.elf  Benchmark from picorv32 repo"
-    echo "  ../../sw/riscv-dhrystone/dhrystone.elf     Benchmark from RISC-V repo"
+    echo "  ../../sw/dhrystone/build/riscv.elf      Benchmark from RISC-V repo"
+    echo "  ../../sw/zephyr/elf/philosophers.elf    Philosophers sample from Zephyr"
+    echo "  ../../sw/compliance/build/I-XOR-01.elf  Compliance test for XOR"
     exit 1
 fi
 
@@ -24,15 +32,57 @@ path_compliance="../../sw/compliance"
 
 
 
+
+
+
 # compile Icarus Verilog simulation
 #   $1 ELF filename
 #   $2 arguments for iverilog
 compile() {
+    # build memory content
     ${RV_PREFIX}objcopy -O binary $1 tmp.bin
     printf "@0 " > tmp.hex
     od -An -tx4 -w4 -v tmp.bin | cut -b2- >> tmp.hex
-    $IVERILOG -o tmp.vvp -DCODE=\"tmp.hex\" $2 $verilog_files || exit 1
+
+    case $simulator in
+        icarus)
+            $IVERILOG -o tmp.vvp -DCODE=\"tmp.hex\" $2 testbench.v $verilog_files || exit 1
+            ;;
+
+        verilator)
+            $VERILATOR --cc --exe --top-module top \
+                -DCODE=\"tmp.hex\" $2 $verilog_files \
+                testbench.v verilator.cpp --Mdir tmp.verilator
+            make -C tmp.verilator -f Vtop.mk
+            ;;
+
+        verilator-vcd)
+            $VERILATOR --cc --exe -trace --top-module top \
+                -DCODE=\"tmp.hex\" $2 $verilog_files \
+                testbench.v verilator-vcd.cpp --Mdir tmp.verilator
+            make -C tmp.verilator -f Vtop.mk
+            ;;
+    esac
 }
+
+
+# run Icarus Verilog simulation
+run() {
+    case $simulator in
+        icarus)
+            $VVP -N tmp.vvp
+            ;;
+
+        verilator)
+            ./tmp.verilator/Vtop
+            ;;
+
+        verilator-vcd)
+            ./tmp.verilator/Vtop
+            ;;
+    esac
+}
+
 
 
 
@@ -40,8 +90,8 @@ compile() {
 #   $1 filename of ELF image
 #   $2 filename of expected signature
 check_sig() {
-    compile $1 tb_tests.v
-    $VVP -N tmp.vvp | sed -e '/^xxxxxxxx$/d' > tmp.sig
+    compile $1 "" > /dev/null
+    run | sed -e '/^-/d' > tmp.sig
 
     diff --strip-trailing-cr $2 tmp.sig > tmp.diff
     if [ $? -ne 0 ]
@@ -52,7 +102,6 @@ check_sig() {
     name=$(basename $1 .elf)
     echo "ok - $name"
 }
-
 
 
 # Compile and run the riscv-tests and riscv-compliance tests
@@ -92,27 +141,45 @@ target_tests() {
 
 
 
+
+
+simulator=$1
+case $1 in
+    icarus)             ;;
+    verilator)          ;;
+    verilator-vcd)      ;;
+
+    *)  echo "Unknown simulator $1. Stop."
+        exit 2
+        ;;
+esac
+shift
+
+
+
+
+
 while [ $# -ne 0 ]
 do
     case $1 in
         run)
-            compile $2 "tb_tests.v"
-            $VVP -N tmp.vvp
+            compile $2 ""
+            run
             shift
             ;;
         debug)
-            compile $2 "-DDEBUG tb_tests.v"
-            $VVP -N tmp.vvp
+            compile $2 "-DDEBUG"
+            run
             shift
             ;;
         gy-run)
-            compile $2 "-DENABLE_GRUBBY tb_tests.v"
-            $VVP -N tmp.vvp
+            compile $2 "-DENABLE_GRUBBY"
+            run
             shift
             ;;
         gy-debug)
-            compile $2 "-DENABLE_GRUBBY -DDEBUG tb_tests.v"
-            $VVP -N tmp.vvp
+            compile $2 "-DENABLE_GRUBBY -DDEBUG"
+            run
             shift
             ;;
         tests)

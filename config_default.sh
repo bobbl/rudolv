@@ -26,6 +26,9 @@ export IVERILOG
 VVP=vvp
 export VVP
 
+VERILATOR=verilator
+export VERILATOR
+
 YOSYS=yosys
 export YOSYS
 

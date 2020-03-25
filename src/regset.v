@@ -22,7 +22,7 @@ module RegSet32(
     reg [31:0] regs [0:63];
 
     initial begin
-        regs[0] <= 0;
+        regs[0] = 0;
     end
 
     always @(posedge clk) begin
@@ -54,7 +54,7 @@ module RegSet33(
     reg [32:0] regs [0:63];
 
     initial begin
-        regs[0] <= 0;
+        regs[0] = 0;
     end
 
     always @(posedge clk) begin
@@ -87,8 +87,8 @@ module RegSet32g1(
     reg grubby[0:63];
 
     initial begin
-        regs[0] <= 0;
-        grubby[0]  <= 0;
+        regs[0] = 0;
+        grubby[0]  = 0;
     end
 
     always @(posedge clk) begin

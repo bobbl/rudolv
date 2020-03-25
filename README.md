@@ -7,6 +7,7 @@ Features
   * [Predictable timing model](#instruction-timing)
   * [Security extension](#security-extension)
   * [CSR extension interface](#csr-extension-interface)
+  * [Simulation with Icarus Verilog or Verilator](#simulation)
 
 Compatibility
   * RV32IM Zcsr Zifence
@@ -28,7 +29,7 @@ Structure of Repository
 | Path              | Content
 | ----------------- | --------------------------------------------------- |
 | scripts/          | **Scripts for synthesis and simulation**            |
-| scripts/icarus/   | Simulation with Icarus Verilog                      |
+| scripts/sim/      | Simulation with Icarus Verilog or Verilator         |
 | scripts/icestorm/ | Synthesis with ICEStorm for Lattice FPGAs           |
 | scripts/libero/   | Synthesis with Libero for Microsemi FPGAs           |
 | scripts/quartus/  | Synthesis with Quartus for Intel FPGAs              |
@@ -271,6 +272,22 @@ Examples of CSR extensions can be found in [src/csr.v](src/csr.v):
 
 
 
+Simulation
+----------
+
+For simulation use the make script in [scripts/sim/](scripts/sim):
+
+    cd scripts/sim
+    ./make.sh
+
+will display the usage of the script.
+
+Icarus Verilog and Verilator are supported and any .elf file can be executed
+with optional debug output and .vcd generation.
+
+
+
+
 RISC-V Compliance Tests
 -----------------------
 
@@ -290,13 +307,13 @@ Build the remaining riscv-tests and rudolv-tests:
 
 Run all tests with Icarus:
 
-   cd scripts/icarus
-   ./make.sh tests
+    cd scripts/sim
+    ./make.sh icarus tests
 
 Simulate only a single test with debug output:
 
-   cd scripts/icarus
-   ./make.sh debug ../../sw/tests/build/rudolv_irq.elf
+    cd scripts/sim
+    ./make.sh icarus debug ../../sw/tests/build/rudolv_irq.elf
 
 
 

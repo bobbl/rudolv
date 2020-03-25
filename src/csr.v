@@ -128,9 +128,9 @@ module CsrCounter (
 
         // increment counters (spread over two cycles)
         q_CounterCYCLE    <= {1'b0, q_CounterCYCLE[31:0]} + 1;
-        q_CounterCYCLEH   <= q_CounterCYCLEH + q_CounterCYCLE[32];
+        q_CounterCYCLEH   <= q_CounterCYCLEH + {31'b0, q_CounterCYCLE[32]};
         q_CounterINSTRET  <= {1'b0, q_CounterINSTRET[31:0]} + {32'b0, retired};
-        q_CounterINSTRETH <= q_CounterINSTRETH + q_CounterINSTRET[32];
+        q_CounterINSTRETH <= q_CounterINSTRETH + {31'b0, q_CounterINSTRET[32]};
 
         if (~rstn) begin
             q_CounterCYCLE    <= 0;
@@ -218,7 +218,7 @@ module CsrPinsOut #(
     always @(posedge clk) begin
         // E stage: read CSR
         q_Valid <= q_enPins;
-        q_RData <= (q_enPins ? q_Pins : 32'b0);
+        q_RData <= (q_enPins ? {{(32-COUNT){1'b0}}, q_Pins} : 32'b0);
 
         // E stage: write CSR
         if (q_enPins) begin
@@ -460,6 +460,7 @@ module CsrTimerAdd #(
                 3'b011: begin // clear with any value disables the timer
                     q_TimerOn <= 0;
                 end
+                default: ;
             endcase
         end
 
