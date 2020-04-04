@@ -266,8 +266,8 @@ module top
 `ifdef DEBUG
                     $write("\033[1;37mputchar '%c'\033[0m\n", csr_wdata[7:0]);
 `else
-                    $write("\033[1;37m%c\033[0m", csr_wdata[7:0]);
-                    //$write("%c", csr_wdata[7:0]);
+                    //$write("\033[1;37m%c\033[0m", csr_wdata[7:0]);
+                    $write("%c", csr_wdata[7:0]);
 `endif
                 end
             endcase

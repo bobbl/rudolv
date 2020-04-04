@@ -71,6 +71,7 @@ module Pipeline #(
     reg d_Bubble;
 
     reg [5:0] d_MultiCycleCounter;
+    reg d_WithinMultiCycle;
     reg e_StartMC;
     reg [WORD_WIDTH:0] q_MulB;
     reg [2*WORD_WIDTH+1:0] q_MulC;
@@ -284,14 +285,15 @@ module Pipeline #(
                 // With this line each load/store will clear MSTATUS.IE.
 
             end else begin
-                if (d_MultiCycleCounter!=0) begin
+                if (d_WithinMultiCycle) begin
                     // == 0 : no multi cycle instruction
                     // == 1 : last cycle, fetch next instruction
                     // == 2 : last but one cycle, fetch multicycle opcode once again
-                    if (d_MultiCycleCounter > 2) begin
-                        FetchSynth = fsNOP;
-                    end else begin
+                    //  > 2 : NOP within multi cycle instruction
+                    if (d_MultiCycleCounter==1 || d_MultiCycleCounter==2) begin
                         FetchDirect = 1;
+                    end else begin
+                        FetchSynth = fsNOP;
                     end
                 end else begin
                     if (MULDIVOpcode) begin
@@ -739,38 +741,44 @@ module Pipeline #(
         // any jump or exception
 
 
+    // within multicycle, but not the last one
+    wire vNotLastMultiCycle = ~e_InsnJALR & (StartMC | (d_MultiCycleCounter>2));
+
+
     wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
     wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
-    wire [WORD_WIDTH-1:0] NextOrSum = (((e_MemAccess | e_InsnJALR) & ~DualKill)
-        | (e_SoftwareInt | e_TimerInt | e_ExternalInt))
-        //? {AddrSum[WORD_WIDTH-1:2], 2'b00} : NextPC;
-        ? {AddrSum[WORD_WIDTH-1:1], 1'b0} : NextPC;
 
-    // within multicycle, but not the last one
-    wire NotLastMultiCycle = (~m_Kill & ~e_InsnJALR &
-     (((MULDIVOpcode & ~m_Kill) & (d_MultiCycleCounter==0)) | (d_MultiCycleCounter>2)));
-//     ^^^^^^^^^^^^^^                                          ^^^^^^^^^^^^^^^^^^^^
-//     first                                                 second to one before last
+    wire [WORD_WIDTH-1:0] NextOrSum =
+        (vNotLastMultiCycle & ~m_Kill)
+            ? d_PC
+            //: NextOrSum_1
+            : (((e_MemAccess | e_InsnJALR) & ~DualKill) | e_SoftwareInt | e_TimerInt | e_ExternalInt)
+                ? {AddrSum[WORD_WIDTH-1:1], 1'b0} 
+                : NextPC;
 
-    wire [WORD_WIDTH-1:0] NextOrSum_2 = NotLastMultiCycle ? d_PC : NextOrSum;
 
-    wire [WORD_WIDTH-1:0] MemAddr   = (vBEQ | vNotBEQ)    ? e_PCImm : NextOrSum_2;
+    wire [WORD_WIDTH-1:0] MemAddr =
+        (vBEQ | vNotBEQ)
+            ? e_PCImm 
+            : NextOrSum;
 
-//    wire [WORD_WIDTH-1:0] NoBranch  = (d_Bubble & ~m_Kill) ? f_PC    : NextOrSum_2;
-    wire [WORD_WIDTH-1:0] NoBranch  = 
-        ((d_Bubble & ~m_Kill) | (WaitForInt & ~e_InsnJALR)) ? f_PC    : NextOrSum_2;
-    //                           ^^^^^^^^^^
+    wire [WORD_WIDTH-1:0] FetchPC =
+        (vBEQ | vNotBEQ)
+            ? e_PCImm
+            //: NoBranch
+            : ((d_Bubble & ~m_Kill) | (WaitForInt & ~e_InsnJALR))
+    //                                 ^^^^^^^^^^
     // A WFI instruction must immediately stop to increment the PC, otherwise
     // the MEPC will be wrong in the trap handler.
-    //                                      ^^^^^^^^^^^^^
+    //                                             ^^^^^^^^^^^^^
     // But not when the WFI is in the first delay slot of a JALR
+                ? f_PC
+                : NextOrSum;
 
-    wire [WORD_WIDTH-1:0] FetchPC   = (vBEQ | vNotBEQ)    ? e_PCImm : NoBranch;
-
-//    wire [WORD_WIDTH-1:0] DecodePC  = (d_Bubble & ~m_Kill) ? d_PC    : f_PC;
-    wire [WORD_WIDTH-1:0] DecodePC  = 
-        ( (d_Bubble|NotLastMultiCycle) & ~m_Kill) ? d_PC    : f_PC;
-
+    wire [WORD_WIDTH-1:0] DecodePC = 
+        ((d_Bubble|vNotLastMultiCycle) & ~m_Kill) 
+            ? d_PC
+            : f_PC;
 
 
 
@@ -782,7 +790,7 @@ module Pipeline #(
 
     // multi cycle instructions
 
-    wire UnkilledStartMC = e_StartMC & ~m_Kill;
+    wire UnkilledStartMC = e_StartMC & ~DualKill;
     wire MULDIVOpcode = ArithOpcode & MULDIVPart;
     wire MulASigned = (d_Insn[13:12] != 2'b11);
     wire MulBSigned = ~d_Insn[13];
@@ -792,12 +800,17 @@ module Pipeline #(
             & (e_B!=0 || e_SelRemOrDiv))
         : e_DivResultSign;
 
-    wire MultiCycle = (d_MultiCycleCounter != 0);
-    wire StartMC = MULDIVOpcode & ~MultiCycle & ~m_Kill;
-    wire [5:0] MultiCycleCounter = 
-        m_Kill ? 6'b0 : (
-        MultiCycle ? (d_MultiCycleCounter-6'b1)
-                   : (MULDIVOpcode ? 6'h21 : 6'b0));
+    wire [5:0] MultiCycleCounter =
+        m_Kill
+            ? 6'b0
+            : (d_WithinMultiCycle
+                ? (d_MultiCycleCounter-6'b1)
+                : (MULDIVOpcode ? 6'h21 : 6'b0));
+//    wire WithinMultiCycle = (MultiCycleCounter != 0);
+    wire WithinMultiCycle = ~m_Kill &
+            ((d_WithinMultiCycle & (d_MultiCycleCounter!=1)) | StartMC);
+    wire StartMC = MULDIVOpcode & ~d_WithinMultiCycle;
+
 
     // MULDIV unit
     //wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_MulC;
@@ -1101,6 +1114,7 @@ module Pipeline #(
 
 
         d_MultiCycleCounter <= MultiCycleCounter;
+        d_WithinMultiCycle <= WithinMultiCycle;
         e_StartMC <= StartMC;
 
         e_MulASigned <= MulASigned;
@@ -1285,6 +1299,7 @@ module Pipeline #(
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 */
 
+/*
         $display("E MCCounter=%h rem=%h %h mul=%h e_FromMul=%b e_StartMC=%b",
             d_MultiCycleCounter, q_DivRem, q_MulB, q_MulC, e_FromMul,
             e_StartMC);
@@ -1292,7 +1307,7 @@ module Pipeline #(
             vMulResLo, SelDivOrMul, m_SelDivOrMul, e_DivSigned);
         $display("E div=%h e_FromDivOrRem=%b NotLastMC=%b",
             q_DivQuot, e_FromDivOrRem, NotLastMultiCycle);
-
+*/
 
         $display("X Exc UserDEM %b%b%b GInsnDEM %b%b%b GJumpFDE %b%b%b JumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcUser,
@@ -1316,19 +1331,22 @@ module Pipeline #(
 
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchPC);
 
+/*
         $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
             vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
         $display("  e_InsnBLTorBLTU=%b vLess=%b e_InsnJALorFENCEI=%b InsnJALorJALR=%b",
             e_InsnBLTorBLTU, vLess, e_InsnJALorFENCEI, InsnJALorJALR);
         $display("  e_InsnBEQ=%b e_InvertBranch=%b vEqual=%b",
             e_InsnBEQ, e_InvertBranch, vEqual);
+*/
 
 
-
+/*
         $display("G MemResultGrubby=%b e_AGrubby=%b ExcGrubbyJump",
             MemResultGrubby, e_AGrubby, ExcGrubbyJump);
         $display("G FwdAEGrubby=%b d_RdNo1[5]=%b w_WrGrubby=%b RdGrubby1=%b",
             ForwardAEGrubby, d_RdNo1[5], w_WrGrubby, RdGrubby1);
+*/
 
 /*
     wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : RdGrubby1;
@@ -1338,20 +1356,19 @@ module Pipeline #(
 */
 
 
+/*
         $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
             FwdAE, FwdAM, FwdAW, ForwardAR, ForwardAM, ForwardAE);
         $display("F BE=%b BM=%b BW=%b BR=%h BM=%h BE=%h SelImm=%b",
             FwdBE, FwdBM, FwdBW, ForwardBR, ForwardBM, ForwardBE, SelImm);
+*/
 
-
-/*
         $display("C MTVEC=%h MSCRATCH=%h MEPC=%h MCAUSE=%h MTVAL=%h",
             RegSet.regs[REG_CSR_MTVEC],
             RegSet.regs[REG_CSR_MSCRATCH],
             RegSet.regs[REG_CSR_MEPC],
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
-*/
 
         $display("Z AddrSum=%h NextOrSum=%h NoBranch=%h NextOrSum_2=%h",
             AddrSum, NextOrSum, NoBranch, NextOrSum_2);

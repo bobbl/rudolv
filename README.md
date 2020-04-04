@@ -250,7 +250,7 @@ form the new value.
 | `modify` | action | instruction | function             |
 | -------- | ------ | ----------- | -------------------- |
 | 001      | write  | CSRW        | `csr = wdata`        |
-| 010      | set    | CSRS        | `csr = csr | wdata`  |
+| 010      | set    | CSRS        | `csr = csr or wdata` |
 | 011      | clear  | CSRC        | `csr = csr &~ wdata` |
 
 This interface can also be used to connect external peripherals. Its advantage
