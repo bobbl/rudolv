@@ -73,12 +73,13 @@ module Pipeline #(
     reg [5:0] d_MultiCycleCounter;
     reg d_WithinMultiCycle;
     reg e_StartMC;
-    reg [WORD_WIDTH:0] q_MulB;
-    reg [2*WORD_WIDTH+1:0] q_MulC;
+    reg [WORD_WIDTH-1:0] q_MulB;
+    reg [WORD_WIDTH:0] q_MulC;
     reg e_FromMul;
     reg e_FromMulH;
     reg e_MulASigned;
     reg e_MulBSigned;
+    reg q_MulHSign;
 
     reg [WORD_WIDTH-1:0] q_DivQuot;
     reg [WORD_WIDTH:0] q_DivRem;
@@ -86,7 +87,7 @@ module Pipeline #(
     reg e_SelRemOrDiv;
     reg e_DivSigned;
     reg e_DivResultSign;
-    reg m_SelDivOrMul;
+    reg q_SelDivOrMul;
 
     // execute
     reg e_InsnJALR;
@@ -648,7 +649,7 @@ module Pipeline #(
     wire FwdAE = e_WrEn & (d_RdNo1 == e_WrNo);
     wire FwdAM = m_WrEn & (d_RdNo1 == m_WrNo);
     wire FwdAW = w_WrEn & (d_RdNo1 == w_WrNo);
-    wire [WORD_WIDTH-1:0] ForwardAR = (FwdAE | FwdAM | FwdAW) ? 0 : RdData1;
+    wire [WORD_WIDTH-1:0] ForwardAR = (FwdAE | FwdAM | FwdAW) ? 0 : regset_rd1;
     wire [WORD_WIDTH-1:0] ForwardAM = FwdAM ? MemResult : (FwdAW ? w_WrData : 0);
     wire [WORD_WIDTH-1:0] ForwardAE = FwdAE ? ALUResult : (ForwardAR | ForwardAM);
 
@@ -656,17 +657,17 @@ module Pipeline #(
     wire FwdBM = m_WrEn & (d_RdNo2 == m_WrNo) & ~SelImm;
     wire FwdBW = w_WrEn & (d_RdNo2 == w_WrNo);
     wire [WORD_WIDTH-1:0] ForwardImm = SelImm ? ImmI : 0;
-    wire [WORD_WIDTH-1:0] ForwardBR = SelImm ?    0 : (FwdBW ? w_WrData : RdData2);
+    wire [WORD_WIDTH-1:0] ForwardBR = SelImm ?    0 : (FwdBW ? w_WrData : regset_rd2);
     wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBR | ForwardImm);
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}};
 
 
     wire ALUResultGrubby = 0;
-    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : RdGrubby1;
+    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : regset_rg1;
     wire ForwardAMGrubby =  FwdAM ? MemResultGrubby : ForwardAWGrubby;
     wire ForwardAEGrubby = (FwdAE ? ALUResultGrubby : ForwardAMGrubby)
         & ~d_RdNo1[5];
-    wire ForwardBRGrubby = ~SelImm & (FwdBW ? w_WrGrubby : RdGrubby2);
+    wire ForwardBRGrubby = ~SelImm & (FwdBW ? w_WrGrubby : regset_rg2);
     wire ForwardBMGrubby =  FwdBM ? MemResultGrubby : ForwardBRGrubby;
     wire ForwardBEGrubby = (FwdBE ? ALUResultGrubby : ForwardBMGrubby)
         & ~d_RdNo2[5]; 
@@ -725,6 +726,7 @@ module Pipeline #(
 
     // branch unit
 
+    wire AnyInterrupt = e_SoftwareInt | e_TimerInt | e_ExternalInt;
     wire vEqual = (vLogicResult == ~0);
 
     wire DualKill = m_Kill | w_Kill;
@@ -736,8 +738,7 @@ module Pipeline #(
     wire vNotBEQ = ((e_InsnBLTorBLTU & vLess) | e_InsnJALorFENCEI) & ~DualKill;
     wire vCondResultBit = e_SetCond & vLess;
 
-    wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & (~DualKill |
-        (e_SoftwareInt | e_TimerInt | e_ExternalInt)));
+    wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & (~DualKill | AnyInterrupt));
         // any jump or exception
 
 
@@ -752,7 +753,7 @@ module Pipeline #(
         (vNotLastMultiCycle & ~m_Kill)
             ? d_PC
             //: NextOrSum_1
-            : (((e_MemAccess | e_InsnJALR) & ~DualKill) | e_SoftwareInt | e_TimerInt | e_ExternalInt)
+            : (((e_MemAccess | e_InsnJALR) & ~DualKill) | AnyInterrupt)
                 ? {AddrSum[WORD_WIDTH-1:1], 1'b0} 
                 : NextPC;
 
@@ -790,79 +791,90 @@ module Pipeline #(
 
     // multi cycle instructions
 
-    wire UnkilledStartMC = e_StartMC & ~DualKill;
-    wire MULDIVOpcode = ArithOpcode & MULDIVPart;
-    wire MulASigned = (d_Insn[13:12] != 2'b11);
+    // control signals for first cycle
+    wire DivSigned = ~d_Insn[12] & d_Insn[14];
     wire MulBSigned = ~d_Insn[13];
-    wire DivSigned = ~d_Insn[12];
-    wire DivResultSign = UnkilledStartMC
+    wire MulASigned = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
+
+    // control signals for first and last cycle
+    wire SelRemOrDiv = d_Insn[13];
+    wire SelDivOrMul = StartMC ? d_Insn[14] : q_SelDivOrMul;
+
+    // control signals for last cycle
+    wire DivResultSign = e_StartMC
         ? (e_DivSigned & (e_A[31] ^ (~e_SelRemOrDiv & e_B[31])) 
             & (e_B!=0 || e_SelRemOrDiv))
         : e_DivResultSign;
+    wire MulHSign = e_StartMC ? (e_MulBSigned & e_B[WORD_WIDTH-1]) : q_MulHSign;
 
+
+
+    wire MULDIVOpcode = ArithOpcode & MULDIVPart;
+    wire StartMC = MULDIVOpcode & ~d_WithinMultiCycle;
     wire [5:0] MultiCycleCounter =
         m_Kill
             ? 6'b0
             : (d_WithinMultiCycle
                 ? (d_MultiCycleCounter-6'b1)
                 : (MULDIVOpcode ? 6'h21 : 6'b0));
-//    wire WithinMultiCycle = (MultiCycleCounter != 0);
+    //wire WithinMultiCycle = (MultiCycleCounter != 0);
     wire WithinMultiCycle = ~m_Kill &
             ((d_WithinMultiCycle & (d_MultiCycleCounter!=1)) | StartMC);
-    wire StartMC = MULDIVOpcode & ~d_WithinMultiCycle;
-
 
     // MULDIV unit
-    //wire [2*WORD_WIDTH-1:0] DivDiff = {32'b0, q_DivRem} - q_MulC;
-    //wire DivNegative = DivDiff[2*WORD_WIDTH-1];
-    wire [WORD_WIDTH:0] DivDiff = {q_DivRem} - {1'b0, q_MulC[WORD_WIDTH-1:0]};
-    wire DivNegative = (q_MulC[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff[WORD_WIDTH];
+    wire [WORD_WIDTH:0] vDivDiff = q_DivRem - {1'b0, q_MulB};
+    wire vDivNegative = (q_MulC[WORD_WIDTH-1:0]!=0) | vDivDiff[WORD_WIDTH];
+    wire [WORD_WIDTH:0] DivRem = e_StartMC
+        ?   {e_MulASigned & e_A[WORD_WIDTH-1],
+            (e_DivSigned  & e_A[WORD_WIDTH-1]) ? (-e_A) : e_A}
+        : ((vDivNegative | ~q_SelDivOrMul) ? q_DivRem 
+                                          : {1'b0, vDivDiff[WORD_WIDTH-1:0]});
 
-    wire [WORD_WIDTH:0] DivRem = UnkilledStartMC
-        ? (m_SelDivOrMul ? {1'b0, (e_DivSigned & e_A[31]) ? (-e_A) : e_A}
-                         : {e_MulASigned & e_A[WORD_WIDTH-1], e_A})
-        : ((DivNegative | ~m_SelDivOrMul) ? q_DivRem 
-                                          : {1'b0, DivDiff[WORD_WIDTH-1:0]});
+    wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot[WORD_WIDTH-2:0], ~vDivNegative};
 
-//    wire [WORD_WIDTH:0] MulB = UnkilledStartMC
-//        ? {e_MulBSigned & e_B[WORD_WIDTH-1], e_B} 
-//        : {1'b0, q_MulB[WORD_WIDTH:1]};
-    wire [WORD_WIDTH:0] MulB = {e_MulBSigned & e_B[WORD_WIDTH-1],
-        UnkilledStartMC ? e_B : q_MulB[WORD_WIDTH:1]};
-    wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot[WORD_WIDTH-2:0], ~DivNegative};
+    wire [WORD_WIDTH+1:0] vAddMulC =
+        {q_MulC[WORD_WIDTH], q_MulC}
+            + (q_MulB[0] ? {q_DivRem[WORD_WIDTH], q_DivRem}
+                         : {(WORD_WIDTH+2){1'b0}});
+    wire [WORD_WIDTH+1:0] vMulCShifted = e_StartMC
+        ? {2'b0,
+           q_SelDivOrMul ? ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B)
+                         : {(WORD_WIDTH){1'b0}}
+          }
+        : vAddMulC;
+    wire [WORD_WIDTH:0] MulC = vMulCShifted[WORD_WIDTH+1:1];
 
-    wire [2*WORD_WIDTH+1:0] MulC = UnkilledStartMC
-        ? {3'b0,
-           m_SelDivOrMul ? ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B)
-                         : {(WORD_WIDTH){1'b0}},
-           {(WORD_WIDTH-1){1'b0}}}
-        : { {q_MulC[2*WORD_WIDTH+1], q_MulC[2*WORD_WIDTH+1:WORD_WIDTH+1]}
-            + ((~m_SelDivOrMul & q_MulB[0]) ? {q_DivRem[WORD_WIDTH], q_DivRem}
-                                            : {(WORD_WIDTH+2){1'b0}}),
-            q_MulC[WORD_WIDTH:1]};
+    wire [WORD_WIDTH-1:0] MulB = e_StartMC 
+        ? (q_SelDivOrMul ? {e_B[0], {(WORD_WIDTH-1){1'b0}}} 
+                         : e_B)
+        : {vAddMulC[0], q_MulB[WORD_WIDTH-1:1]};
+
+
 
     // result selection for MULDIV
     wire FromMul  = MULDIVOpcode & (d_Insn[14:12]==3'b000);
     wire FromMulH = MULDIVOpcode & ~d_Insn[14] & (d_Insn[13] | d_Insn[12]);
     wire FromDivOrRem = MULDIVOpcode & d_Insn[14];
-    wire SelRemOrDiv = d_Insn[13];
-    wire SelDivOrMul = StartMC ? d_Insn[14] : m_SelDivOrMul;
 
-    wire [WORD_WIDTH-1:0] vMulResLo =
-        {q_MulC[WORD_WIDTH:1]};
-    wire [WORD_WIDTH-1:0] vMulResHi_C =
-        {q_MulC[2*WORD_WIDTH:WORD_WIDTH+1]};
-    wire [WORD_WIDTH-1:0] vMulResHi = q_MulB[0]
-        ? (vMulResHi_C - q_DivRem[WORD_WIDTH-1:0])
-        :  vMulResHi_C;
+    wire [WORD_WIDTH-1:0] vMulResHi = q_MulHSign
+        ? (q_MulC[WORD_WIDTH-1:0] - q_DivRem[WORD_WIDTH-1:0])
+        :  q_MulC[WORD_WIDTH-1:0];
     wire [WORD_WIDTH-1:0] vDivRem = e_SelRemOrDiv ? q_DivRem[WORD_WIDTH-1:0] : q_DivQuot;
+
+
+
     wire [WORD_WIDTH-1:0] vMulResult =
-          (e_FromMul ? vMulResLo : 0)
+          (e_FromMul ? q_MulB : 0)
           | (e_FromMulH ? vMulResHi : 0)
           | (e_FromDivOrRem ? (e_DivResultSign ? (-vDivRem) : vDivRem) : 0);
-
-
-
+/*
+    wire [WORD_WIDTH-1:0] vMulResult = MULDIVOpcode
+        ? (q_SelDivOrMul
+            ? (e_DivResultSign ? (-vDivRem) : vDivRem)
+            : (e_FromMul       ? q_MulB     : vMulResHi)
+          )
+        : 0;
+*/
 
 
 
@@ -908,7 +920,7 @@ module Pipeline #(
         WriteMCAUSE     ? {m_Cause[4], {(WORD_WIDTH-5){1'b0}}, m_Cause[3:0]}  // MCAUSE
 
                         // special case if interrupt directly after branch insn
-                        : ((m_Kill & (e_SoftwareInt | e_TimerInt | e_ExternalInt))
+                        : ((m_Kill & AnyInterrupt)
                             ? f_PC
                             : e_ExcWrData2);
 
@@ -1046,15 +1058,7 @@ module Pipeline #(
 
 
 
-
-
-
-
-// ---------------------------------------------------------------------
-// sequential logic
-// ---------------------------------------------------------------------
-
-
+    // register set
 
     wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
     wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
@@ -1066,35 +1070,14 @@ module Pipeline #(
     assign regset_ra1 = RdNo1;
     assign regset_ra2 = RdNo2;
 
-    wire [WORD_WIDTH-1:0] RdData1 = regset_rd1;
-    wire [WORD_WIDTH-1:0] RdData2 = regset_rd2;
-    wire RdGrubby1 = regset_rg1;
-    wire RdGrubby2 = regset_rg2;
-
-/*
-    wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
-    wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
-    wire [WORD_WIDTH-1:0] RdData1;
-    wire [WORD_WIDTH-1:0] RdData2;
-    wire RdGrubby1;
-    wire RdGrubby2;
-
-    RegisterSet RegSet(
-        .clk(clk),
-        .we(MemWrEn),
-        .wa(MemWrNo),
-        .wd(MemResult),
-        .wg(MemResultGrubby),
-        .ra1(RdNo1),
-        .ra2(RdNo2),
-        .rd1(RdData1),
-        .rg1(RdGrubby1),
-        .rd2(RdData2),
-        .rg2(RdGrubby2)
-    );
-*/
 
 
+
+
+
+// ---------------------------------------------------------------------
+// sequential logic
+// ---------------------------------------------------------------------
 
 
     always @(posedge clk) begin
@@ -1119,6 +1102,7 @@ module Pipeline #(
 
         e_MulASigned <= MulASigned;
         e_MulBSigned <= MulBSigned;
+        q_MulHSign <= MulHSign;
         e_DivSigned <= DivSigned;
         e_DivResultSign <= DivResultSign;
 
@@ -1132,7 +1116,7 @@ module Pipeline #(
         e_FromDivOrRem <= FromDivOrRem;
         e_SelRemOrDiv <= SelRemOrDiv;
 
-        m_SelDivOrMul <= SelDivOrMul;
+        q_SelDivOrMul <= SelDivOrMul;
 
 
 
@@ -1195,8 +1179,7 @@ module Pipeline #(
         e_ExcWrData2        <= ExcWrData2;
         m_ExcWrData         <= ExcWrData; 
         e_ExcUser           <= ExcUser;
-        m_ExcUser           <= (e_ExcUser & ~m_Kill) 
-                                | e_SoftwareInt | e_TimerInt | e_ExternalInt;
+        m_ExcUser           <= (e_ExcUser & ~m_Kill) | AnyInterrupt;
         e_ExcGrubbyInsn     <= ExcGrubbyInsn;
         m_ExcGrubbyInsn     <= (e_ExcGrubbyInsn & ~m_Kill);
         d_ExcJump           <= ExcJump;
@@ -1206,7 +1189,6 @@ module Pipeline #(
         e_ExcGrubbyJump     <= d_ExcGrubbyJump;
         m_ExcMem            <= MemMisaligned & ~m_Kill;
         w_ExcMem            <= m_ExcMem & ~m_Kill;
-//        e_EBREAKorECALL     <= d_Insn[20];
         m_MemWr             <= e_MemWr;
         m_WriteMCAUSE       <= WriteMCAUSE;
         m_WriteMTVAL        <= WriteMTVAL;
@@ -1289,7 +1271,7 @@ module Pipeline #(
             RegSet.regs[12][32], RegSet.regs[13][32], RegSet.regs[14][32], RegSet.regs[15][32]);
 
         $display("D read x%d=%h x%d=%h", 
-            d_RdNo1, RdData1, d_RdNo2, RdData2);
+            d_RdNo1, regset_rd1, d_RdNo2, regset_rd2);
         $display("D Bubble=%b SaveFetch=%b f_PC=%h",
             d_Bubble, d_SaveFetch, f_PC);
         $display("E a=%h b=%h i=%h -> %h -> x%d wren=%b",
@@ -1303,8 +1285,8 @@ module Pipeline #(
         $display("E MCCounter=%h rem=%h %h mul=%h e_FromMul=%b e_StartMC=%b",
             d_MultiCycleCounter, q_DivRem, q_MulB, q_MulC, e_FromMul,
             e_StartMC);
-        $display("E vMulResLo=%h SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
-            vMulResLo, SelDivOrMul, m_SelDivOrMul, e_DivSigned);
+        $display("E vMulCLo=%h SelDivOrMul=%b m_SelDivOrMul=%b, e_DivSigned=%b",
+            vMulCLo, SelDivOrMul, m_SelDivOrMul, e_DivSigned);
         $display("E div=%h e_FromDivOrRem=%b NotLastMC=%b",
             q_DivQuot, e_FromDivOrRem, NotLastMultiCycle);
 */
@@ -1344,12 +1326,12 @@ module Pipeline #(
 /*
         $display("G MemResultGrubby=%b e_AGrubby=%b ExcGrubbyJump",
             MemResultGrubby, e_AGrubby, ExcGrubbyJump);
-        $display("G FwdAEGrubby=%b d_RdNo1[5]=%b w_WrGrubby=%b RdGrubby1=%b",
-            ForwardAEGrubby, d_RdNo1[5], w_WrGrubby, RdGrubby1);
+        $display("G FwdAEGrubby=%b d_RdNo1[5]=%b w_WrGrubby=%b regset_rg1=%b",
+            ForwardAEGrubby, d_RdNo1[5], w_WrGrubby, regset_rg1);
 */
 
 /*
-    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : RdGrubby1;
+    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : regset_rg1;
     wire ForwardAMGrubby =  FwdAM ? MemResultGrubby : ForwardAWGrubby;
     wire ForwardAEGrubby = (FwdAE ? ALUResultGrubby : ForwardAMGrubby)
         & ~d_RdNo1[5];
