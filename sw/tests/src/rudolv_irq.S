@@ -127,7 +127,7 @@ test_13:
         # Test 14: IE=1 then SWI=1 => trap (interrupt wfi)
         #-------------------------------------------------------------
 test_14:
-        li      TESTNUM, 5
+        li      TESTNUM, 14
         li      x7, 0x90
         ENABLE_SOFTINT
         wfi
