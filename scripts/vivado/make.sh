@@ -67,13 +67,13 @@ do
         synth)
             target_bootloader
             $VIVADO -nojournal -mode batch -source genesys2_synth.tcl
-            target_report
+            report
             ;;
         gy-synth)
             target_bootloader
             $VIVADO -nojournal -mode batch -source genesys2_synth.tcl \
                 -tclargs -verilog_define ENABLE_GRUBBY=1
-            target_report
+            report
             ;;
         prog)
             $VIVADO -nojournal -mode batch -source prog.tcl
