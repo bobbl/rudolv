@@ -59,7 +59,7 @@ int main(int argc, char **argv)
         // => one_second = 1024 ms
     int ch;
 
-    set_leds(1);
+    set_leds(3);
     print_str("Starting\r\n");
     set_leds(ff_leds = 0xaa);
 

@@ -42,6 +42,9 @@ Structure of Repository
 | sw/tests/         | RISC-V tests                                        |
 | sw/uart/          | UART driver and bootloader                          |
 | sw/zephyr/        | Zephyr port                                         |
+| config.sh         | Configure paths to external tools                   |
+
+
 
 
 Supported FPGAs
@@ -402,6 +405,35 @@ bootloader.
 
 The CoreMark/MHz of RudolV is 1.295 and 0.892 without bitwise multiplier and
 divider.
+
+
+
+
+Dependencies
+------------
+
+For simulation, either [Icarus Verilog](http://iverilog.icarus.com/) or
+[Verilator](https://www.veripool.org/wiki/verilator/) are required. Most Linux
+distributions offer packages for them.
+
+Open source synthesis for Lattice FPGAs is possible with
+[Project Icestorm](http://www.clifford.at/icestorm/). Installation guidelines
+are on the website. Synthesis for the other FPGAs is only possible with
+vendor-specific toolchains (Libero, Quartus, Vivado). A guide to install
+Libero can be found 
+[here](https://bobbl.github.io/fpga/microsemi/2019/09/23/install-libero.html).
+
+To build the software, a RISC-V assembler and a C compiler for RV32IM is
+required. Install the GNU toolchain with
+
+    git clone --recursive https://github.com/riscv/riscv-gnu-toolchain
+    ./configure --prefix=/opt/riscv32im --with-arch=rv32im
+    make
+
+By default, the build scripts of RudolV expect that the external toolchains
+are in the search path (see [config_default.sh](config_default.sh). To set
+specific path for every tool, copy `config_default.sh` to `config.sh` and
+edit the paths there.
 
 
 
