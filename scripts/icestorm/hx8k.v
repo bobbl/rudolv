@@ -5,9 +5,10 @@ Memory map
 0000'1E00h start address of boot loader
 
 CSR
-bc0h       UART
-bc1h       LEDs
+BC0h    UART
+BC2h    Timer
 */
+
 
 module top (
     input clk,
@@ -24,8 +25,8 @@ module top (
         reset_counter <= reset_counter + !rstn;
     end
 
-    wire mem_valid;
-    wire mem_write;
+    wire        mem_valid;
+    wire        mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
     wire        mem_wgrubby;
@@ -34,31 +35,35 @@ module top (
     wire        mem_rgrubby = 0;
 
 
-    wire        IDsValid;
-    wire [31:0] IDsRData;
-    wire        CounterValid;
-    wire [31:0] CounterRData;
-    wire        UartValid;
-    wire [31:0] UartRData;
-    wire        LedsValid;
-    wire [31:0] LedsRData;
+    wire        regset_we;
+    wire  [5:0] regset_wa;
+    wire [31:0] regset_wd;
+    wire        regset_wg;
+    wire  [5:0] regset_ra1;
+    wire  [5:0] regset_ra2;
+    wire [31:0] regset_rd1;
+    wire        regset_rg1;
+    wire [31:0] regset_rd2;
+    wire        regset_rg2;
 
-    wire        retired;
     wire        irq_software = 0;
-    wire        irq_timer = 0;
+    wire        irq_timer;
     wire        irq_external = 0;
+    wire        retired;
 
     wire        csr_read;
-    wire [2:0]  csr_modify;
+    wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | UartRData;
-    wire        csr_valid = IDsValid | CounterValid | UartValid;
+    wire [31:0] csr_rdata;
+    wire        csr_valid;
 
-    CsrIDs #(
-        .BASE_ADDR(12'hFC0),
-        .KHZ(CLOCK_RATE/1000)
-    ) csr_ids (
+    CsrDefault #(
+        .OUTPINS_COUNT(8),
+        .CLOCK_RATE(CLOCK_RATE),
+        .BAUD_RATE(BAUD_RATE),
+        .TIMER_WIDTH(32)
+    ) csrs (
         .clk    (clk),
         .rstn   (rstn),
 
@@ -66,72 +71,28 @@ module top (
         .modify (csr_modify),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
-        .rdata  (IDsRData),
-        .valid  (IDsValid),
+        .rdata  (csr_rdata),
+        .valid  (csr_valid),
+
+        .retired(retired),
+        .rx     (uart_rx),
+        .tx     (uart_tx),
+        .outpins(leds),
+        .irq_timer(irq_timer),
 
         .AVOID_WARNING()
     );
 
-    CsrCounter counter (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (CounterRData),
-        .valid  (CounterValid),
-
-        .retired(retired)
-    );
-
-    CsrUartChar #(
-        .CLOCK_RATE(CLOCK_RATE),
-        .BAUD_RATE(BAUD_RATE)
-    ) uart (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (UartRData),
-        .valid  (UartValid),
-
-        .rx     (uart_rx),
-        .tx     (uart_tx)
-    );
-
-    CsrPinsOut #(
-        .BASE_ADDR(12'hbc1),
-        .COUNT(8)
-    ) csr_leds (
-        .clk    (clk),
-        .rstn   (rstn),
-
-        .read   (csr_read),
-        .modify (csr_modify),
-        .wdata  (csr_wdata),
-        .addr   (csr_addr),
-        .rdata  (LedsRData),
-        .valid  (LedsValid),
-
-        .pins   (leds)
-    );
-
     Pipeline #(
-        .START_PC       (32'h_0000_1e00)
-//        .START_PC       (32'h_0000_0000)
+        .START_PC       (32'h0000_1E00)
     ) pipe (
         .clk            (clk),
         .rstn           (rstn),
 
-        .retired        (retired),
         .irq_software   (irq_software),
         .irq_timer      (irq_timer),
         .irq_external   (irq_external),
+        .retired        (retired),
 
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
@@ -147,7 +108,18 @@ module top (
         .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby)
+        .mem_rgrubby    (mem_rgrubby),
+
+        .regset_we      (regset_we),
+        .regset_wa      (regset_wa),
+        .regset_wd      (regset_wd),
+        .regset_wg      (regset_wg),
+        .regset_ra1     (regset_ra1),
+        .regset_ra2     (regset_ra2),
+        .regset_rd1     (regset_rd1),
+        .regset_rg1     (regset_rg1),
+        .regset_rd2     (regset_rd2),
+        .regset_rg2     (regset_rg2)
     );
 
     BRAMMemory mem (
@@ -157,6 +129,20 @@ module top (
         .wdata  (mem_wdata),
         .addr   (mem_addr[12:2]),
         .rdata  (mem_rdata)
+    );
+
+    RegSet32 regset (
+        .clk    (clk),
+        .we     (regset_we),
+        .wa     (regset_wa),
+        .wd     (regset_wd),
+        .wg     (regset_wg),
+        .ra1    (regset_ra1),
+        .ra2    (regset_ra2),
+        .rd1    (regset_rd1),
+        .rg1    (regset_rg1),
+        .rd2    (regset_rd2),
+        .rg2    (regset_rg2)
     );
 endmodule
 

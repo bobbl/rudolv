@@ -77,11 +77,11 @@ module top (
     wire        csr_valid;
 
     CsrDefault #(
-        .OUTPINS_COUNT(0),
+        .OUTPINS_COUNT(1),
         .CLOCK_RATE(CLOCK_RATE),
         .BAUD_RATE(BAUD_RATE),
         .TIMER_WIDTH(32)
-    ) uart (
+    ) csrs (
         .clk    (clk),
         .rstn   (rstn),
 
@@ -102,7 +102,7 @@ module top (
     );
 
     Pipeline #(
-        .START_PC       (32'h_0002_0000)
+        .START_PC       (32'h0002_0000)
     ) pipe (
         .clk            (clk),
         .rstn           (rstn),

@@ -414,7 +414,9 @@ Dependencies
 
 For simulation, either [Icarus Verilog](http://iverilog.icarus.com/) or
 [Verilator](https://www.veripool.org/wiki/verilator/) are required. Most Linux
-distributions offer packages for them.
+distributions offer packages for them. For example Ubuntu:
+
+    sudo apt install iverilog verilator
 
 Open source synthesis for Lattice FPGAs is possible with
 [Project Icestorm](http://www.clifford.at/icestorm/). Installation guidelines
@@ -423,11 +425,14 @@ vendor-specific toolchains (Libero, Quartus, Vivado). A guide to install
 Libero can be found 
 [here](https://bobbl.github.io/fpga/microsemi/2019/09/23/install-libero.html).
 
-To build the software, a RISC-V assembler and a C compiler for RV32IM is
-required. Install the GNU toolchain with
+To build the software, a RISC-V assembler and a C compiler with libgcc for
+RV32IM is required. Install the GNU toolchain to `$DESTDIR` with
 
     git clone --recursive https://github.com/riscv/riscv-gnu-toolchain
-    ./configure --prefix=/opt/riscv32im --with-arch=rv32im
+    cd riscv-gnu-toolchain
+    mkdir build
+    cd build
+    ../configure --prefix=$DESTDIR --with-arch=rv32im
     make
 
 By default, the build scripts of RudolV expect that the external toolchains
