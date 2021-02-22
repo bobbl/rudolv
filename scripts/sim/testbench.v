@@ -19,12 +19,15 @@ module top
     $stop;
 `endif
 
-    localparam CSR_SIM   = 12'h3FF;
-    localparam CSR_UART  = 12'hBC0;
-    localparam CSR_LEDS  = 12'hBC1;
-    localparam CSR_SWI   = 12'hBC1;
-    localparam CSR_TIMER = 12'hBC2;
-    localparam CSR_KHZ   = 12'hFC0;
+    localparam CSR_IRQBOMB = 12'h3F8;
+    localparam CSR_SIM     = 12'h3FF;
+    localparam CSR_UART    = 12'hBC0;
+    localparam CSR_LEDS    = 12'hBC1;
+    localparam CSR_SWI     = 12'hBC1;
+    localparam CSR_TIMER   = 12'hBC2;
+    localparam CSR_KHZ     = 12'hFC0;
+
+    reg IRQBombEnable = 0;
 
     wire        mem_valid;
     wire        mem_write;
@@ -63,7 +66,7 @@ module top
 
     wire        irq_software;
     wire        irq_timer;
-    wire        irq_external = 0;
+    wire        irq_external = IRQBombEnable;
     wire        retired;
 
     wire        csr_read;
@@ -228,6 +231,7 @@ module top
     integer i;
     integer sig_begin;
     integer sig_end;
+    integer irqbomb_marker = 2000000000;
     always @(posedge clk) begin
 
 `ifdef DEBUG
@@ -238,11 +242,38 @@ module top
 `endif
 `endif
 
+`ifdef IRQBOMB
+        if ($time == 10*`IRQBOMB) begin
+            $display("IRQBOMB request in cycle %0d", $time/10);
+            IRQBombEnable <= 1;
+        end
+`endif
+
+        if ($time > (irqbomb_marker + 10000)) begin
+            $display("***** IRQBOMB 'TIMEOUT 1000 cycles after marker in cycle %0d", $time/10);
+            $finish;
+        end
+
         q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
         q_CsrAddr  <= csr_addr;
 
         if (csr_modify==1) begin
             case (q_CsrAddr)
+
+                (CSR_IRQBOMB): begin
+                    $display("IRQBOMB marker in cycle %0d for %0d cycles",
+                        $time/10, csr_wdata);
+                    irqbomb_marker <= $time;
+                end
+                (CSR_IRQBOMB+1): begin
+`ifdef IRQBOMB
+                    $display("IRQBOMB response in cycle %0d response time: %0d",
+                        $time/10, $time/10 - `IRQBOMB);
+`endif
+                    IRQBombEnable <= 0;
+                end
+
+
                 (CSR_SIM-2): begin
                     sig_begin <= csr_wdata / 4;
                 end
@@ -258,7 +289,8 @@ module top
                                 i = i + 1;
                             end
                         end
-                        default: $display("exit due to write to CSR 0x3ff");
+                        default: $display("exit after %0d cycles due to write to CSR 0x3ff",
+                                          $time/10);
                     endcase
                     $finish;
                 end

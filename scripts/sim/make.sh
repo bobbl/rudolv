@@ -2,19 +2,21 @@
 
 if [ $# -eq 0 ] 
 then
-    echo "Usage: $0 <simulator> <targets> ..."
+    echo "Usage: $0 <command> ..."
     echo
-    echo "<simulator>"
-    echo "  icarus               Use Icarus Verilog for simulation"
-    echo "  verilator            Use Verilator for simulation"
-    echo "  verilator-vcd        Use Verilator ans generate .vcd file"
+    echo "Choose simulator"
+    echo "  icarus                       Use Icarus Verilog for simulation (default)"
+    echo "  verilator                    Use Verilator for simulation"
+    echo "  verilator-vcd                Use Verilator ans generate .vcd file"
     echo
-    echo "<target>"
-    echo "  run <file.elf>       Simulate without logging"
-    echo "  debug <file.elf>     Simulate with extensive logging"
-    echo "  gy-run <file.elf>    Enable grubby, no log"
-    echo "  gy-debug <file.elf>  Enable grubby, log"
-    echo "  tests                Run tests (riscv-tests, riscv-compliance, RudolV-specific)"
+    echo "Simulation"
+    echo "  run <file.elf>               Simulate without logging"
+    echo "  debug <file.elf>             Simulate with extensive logging"
+    echo "  irq-debug <file.elf> <cycle> Raise IRQ in <cycle>, log"
+    echo "  gy-run <file.elf>            Enable grubby, no log"
+    echo "  gy-debug <file.elf>          Enable grubby, log"
+    echo "  tests                        Run tests (riscv-tests, riscv-compliance, RudolV-specific)"
+    echo "  irqbomb                      Run IRQ tests"
     echo
     echo "<file.elf>"
     echo "  ../../sw/dhrystone/build/riscv.elf      Benchmark from RISC-V repo"
@@ -29,6 +31,7 @@ fi
 verilog_files="../../src/memory.v ../../src/regset.v ../../src/csr.v ../../pipeline.v"
 path_tests="../../sw/tests"
 path_compliance="../../sw/compliance"
+path_irqbomb="../../sw/irqbomb"
 
 
 
@@ -140,28 +143,65 @@ target_tests() {
 }
 
 
+# run binary image several times and raise IRQ in different cycles
+#   $1 filename of ELF image
+check_irqs() {
+    compile $1 "" > /dev/null
+
+    run > tmp.log
+
+    cat tmp.log | grep 'IRQBOMB marker' > tmp.marker
+    marker=$(cat tmp.marker | cut -d' ' -f5)
+    count=$(cat tmp.marker | cut -d' ' -f7)
+
+    echo "TAP version 13"
+    echo "1..$count"
+    i=$marker
+    lasti=$(($marker + $count))
+    while [ $i -lt $lasti ]
+    do
+        compile $1 "-DIRQBOMB=$i"
+        run > tmp.log
+
+        ok=$(cat tmp.log | grep IRQBOMB -v)
+        response=$(cat tmp.log | grep 'IRQBOMB response' | cut -d' ' -f5)
+        delta=$(($response - $i))
+
+        if [ "$ok" = '00006b6f' ]
+        then
+            echo "ok - $(basename $1) request $i response $response time $delta"
+        else
+            echo "not ok - $1 request $i execution failed"
+            exit 1
+        fi
+
+        i=$(($i + 1))
+    done
+}
+
+irqbomb() {
+
+    # build binaries
+    make -s -C ${path_irqbomb} || exit 1
+
+    for test in ${path_irqbomb}/build/*.elf
+    do
+        check_irqs $test
+    done
+}
 
 
 
-simulator=$1
-case $1 in
-    icarus)             ;;
-    verilator)          ;;
-    verilator-vcd)      ;;
-
-    *)  echo "Unknown simulator $1. Stop."
-        exit 2
-        ;;
-esac
-shift
 
 
-
-
+simulator=icarus
 
 while [ $# -ne 0 ]
 do
     case $1 in
+        icarus|verilator|verilator-vcd)
+            simulator = $1
+            ;;
         run)
             compile $2 ""
             run
@@ -170,6 +210,12 @@ do
         debug)
             compile $2 "-DDEBUG"
             run
+            shift
+            ;;
+        irq-debug)
+            compile $2 "-DDEBUG -DIRQBOMB=$3"
+            run
+            shift
             shift
             ;;
         gy-run)
@@ -184,6 +230,9 @@ do
             ;;
         tests)
             target_tests
+            ;;
+        irqbomb)
+            irqbomb
             ;;
         *)
             echo "Unknown target $1. Stop."

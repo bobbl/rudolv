@@ -1,5 +1,3 @@
-`define ENABLE_TIMER
-
 
 module Pipeline #(
     parameter [31:0] START_PC = 0
@@ -180,11 +178,11 @@ module Pipeline #(
 
 
 
-`ifdef ENABLE_TIMER
     reg        f_MModeIntEnable;        // mstatus.mie
     reg        f_MModePriorIntEnable;   // mstatus.mpie
-    reg        f_WaitForInt; 
-    reg        d_WaitForInt; 
+    reg        f_WaitForInt;
+    reg        d_WaitForInt;
+    reg        e_NoInt;
 
     reg        f_SoftwareInt;
     reg        d_SoftwareInt;
@@ -195,7 +193,6 @@ module Pipeline #(
     reg        f_ExternalInt;
     reg        d_ExternalInt;
     reg        e_ExternalInt;
-`endif
 
     reg d_GrubbyInsn;
 
@@ -210,14 +207,11 @@ module Pipeline #(
 
     // fetch
 
-`ifdef ENABLE_TIMER
     wire WaitForInt = (InsnWFI & ~m_Kill) | d_WaitForInt;
     reg ClearWaitForInt;
     reg SoftwareInt;
     reg TimerInt;
     reg ExternalInt;
-`endif
-
 
     wire MemOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b000; // ST or LD
     wire SysOpcode =  d_Insn[6] && d_Insn[4:2]==3'b100;
@@ -287,7 +281,7 @@ module Pipeline #(
                 if (d_WithinMultiCycle) begin
                     // == 0 : no multi cycle instruction
                     // == 1 : last cycle, fetch next instruction
-                    // == 2 : last but one cycle, fetch multicycle opcode once again
+                    // == 2 : last but one cycle, fetch multicycle opcode again
                     //  > 2 : NOP within multi cycle instruction
                     if (d_MultiCycleCounter==1 || d_MultiCycleCounter==2) begin
                         FetchDirect = 1;
@@ -297,17 +291,16 @@ module Pipeline #(
                 end else begin
                     if (MULDIVOpcode) begin
                         // start of multicycle execution
-                        // the next instruction is currently beeing fetched and must
-                        // be overwritten.
+                        // the next instruction is currently beeing fetched and
+                        // must be overwritten.
                         FetchSynth = fsNOP;
 
-`ifdef ENABLE_TIMER
                     // not the absolutely correct priority, but works:
                     end else if (f_MModeIntEnable &
                         (f_SoftwareInt | f_TimerInt | f_ExternalInt) &
-                        ~e_ReturnPC // In the 2nd cycle after a JAL or JALR d_PC
-                                    // is not yet set to the destination, thus
-                                    // MEPC will be set to the wrong return
+                        ~e_NoInt    // In the 2nd cycle after a jump or branch
+                                    // d_PC is not yet set to the destination,
+                                    // thus MEPC will be set to the wrong return
                                     // address when a interrupt is raised
                                     // => delay interrupt for 1 cycle 
                         )
@@ -322,8 +315,6 @@ module Pipeline #(
 
                         FetchSynth = fsJumpMTVEC;
                         MstatusExcEnter = 1;
-`endif
-
                     end else if (f_WaitForInt | d_WaitForInt) begin
                         FetchSynth = fsNOP;
                     end else if (d_Bubble | d_SaveFetch) begin
@@ -377,7 +368,6 @@ module Pipeline #(
 
 
 
-`ifdef ENABLE_TIMER
     // modify MSTATUS
     reg MModeIntEnable;
     reg MModePriorIntEnable;
@@ -411,7 +401,6 @@ module Pipeline #(
             MModePriorIntEnable = 1;
         end
     end
-`endif
 
 
 
@@ -547,6 +536,7 @@ module Pipeline #(
     reg InsnJALR;
     reg BranchUncondPCRel;
     reg ReturnPC;
+    reg NoInt;
 
     reg NegB;
     reg SelSum;
@@ -578,6 +568,9 @@ module Pipeline #(
         InsnJALR        = 0;
         BranchUncondPCRel    = 0;
         ReturnPC        = 0;
+        NoInt           = 0;
+            // don't allow interrupt in 2nd cycle, because d_PC is
+            // not set correctly, which will result in a wrong MEPC
 
         NegB            = 0;
         SelSum          = 0;
@@ -610,10 +603,12 @@ module Pipeline #(
                     ExcInvalidInsn = 0;
                     BranchUncondPCRel = 1;
                     ReturnPC       = 1;
+                    NoInt          = 1;
                 end
                 5'b11001: begin // JALR
                     ExcInvalidInsn = (d_Insn[14:12]!=3'b000);
-                    ReturnPC = 1;
+                    ReturnPC       = 1;
+                    NoInt          = 1;
 
                     // disable JALR, if it is the memory bubble and there is no memory exception
                     // TODO: get rid of it
@@ -627,6 +622,7 @@ module Pipeline #(
                     DecodeWrEn     = 0;
                     InsnBEQ        = (d_Insn[14:13]==2'b00);
                     InsnBLTorBLTU  = d_Insn[14];
+                    NoInt          = 1;
                     NegB           = 1;
                     SelLogic       = InsnBEQ ? 2'b00 : 2'b01;
                 end
@@ -1206,6 +1202,7 @@ module Pipeline #(
         e_InsnBEQ <= InsnBEQ;
         e_InsnBLTorBLTU <= InsnBLTorBLTU;
         e_BranchUncondPCRel <= BranchUncondPCRel;
+        e_NoInt <= NoInt;
 
         e_EnShift <= EnShift;
         e_ShiftArith <= ShiftArith;
@@ -1274,8 +1271,7 @@ module Pipeline #(
         w_CsrFromReg        <= m_CsrFromReg;
         m_CsrModified       <= CsrModified;
 
-
-`ifdef ENABLE_TIMER
+        // interrupt handling
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
         f_WaitForInt        <= WaitForInt & ~ClearWaitForInt;
@@ -1290,19 +1286,19 @@ module Pipeline #(
         f_ExternalInt       <= irq_external;
         d_ExternalInt       <= ExternalInt;
         e_ExternalInt       <= d_ExternalInt;
-`endif
 
-
+        // csr
         e_CsrFromExt        <= CsrFromExt;
         e_CsrRead           <= CsrRead;
         m_CsrRead           <= e_CsrRead;
         m_CsrValid          <= CsrValidInternal;
         m_CsrRdData         <= CsrRDataInternal;
 
-
-
-
         d_GrubbyInsn <= DecodeGrubbyInsn;
+
+
+
+
 
 `ifdef DEBUG
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
@@ -1476,6 +1472,7 @@ module Pipeline #(
             d_Bubble <= 0;
             d_DelayedInsn <= 0;
             d_DelayedInsnGrubby <= 0;
+            e_NoInt <= 0;
 
             d_MultiCycleCounter <= 0;
             e_StartMC <= 0;
@@ -1486,7 +1483,6 @@ module Pipeline #(
             e_PCImm <= START_PC;
             e_BranchUncondPCRel  <= 1;
 
-`ifdef ENABLE_TIMER
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
             f_WaitForInt <= 0;
@@ -1494,12 +1490,8 @@ module Pipeline #(
             d_SoftwareInt <= 0;
             d_TimerInt <= 0;
             d_ExternalInt <= 0;
-`endif
-
         end
-
     end
-
 endmodule
 
 
