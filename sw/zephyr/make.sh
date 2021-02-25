@@ -18,14 +18,21 @@ fi
 # Read configuration for external tools
 . ../../config_default.sh ; [ ! -e ../../config.sh ] || . ../../config.sh
 
-
+export | grep ZEPHYR
 
 # ---------------------------------------------
 # targets
 # ---------------------------------------------
 
 target_zephyr() {
-    #pip3 install --user west
+
+    # Install SDK 0.11.4
+    # Zephyr 2.2.0 does not support SDK versions >= 0.12
+    wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.11.4/zephyr-sdk-0.11.4-setup.run
+    chmod +x zephyr-sdk-0.11.4-setup.run
+    ./zephyr-sdk-0.11.4-setup.run -- -d ~/.local/zephyr-sdk-0.11.4
+
+    pip3 install --user west
     west init zephyrproject --mr v2.2.0
     cd zephyrproject
     west update
@@ -70,17 +77,20 @@ then
     exit 2
 fi
 
-if [ -z "$ZEPHYR_TOOLCHAIN_VARIANT" ]
+if [ "$1" != zephyr ]
 then
-    if [ -d zephyrproject/zephyr ]
+    if [ -z "$ZEPHYR_TOOLCHAIN_VARIANT" ]
     then
-        echo "Zephyr not found. Set ZEPHYR_BASE or install with $0 zephyr"
-        exit 3
+        if [ ! -d zephyrproject/zephyr ]
+        then
+            echo "Zephyr not found. Set ZEPHYR_BASE or install with $0 zephyr"
+            exit 3
+        fi
+        ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+        export ZEPHYR_TOOLCHAIN_VARIANT
+        ZEPHYR_BASE=$(pwd)/zephyrproject/zephyr
+        export ZEPHYR_BASE
     fi
-    ZEPHYR_TOOLCHAIN_VARIANT=zephyr
-    export ZEPHYR_TOOLCHAIN_VARIANT
-    ZEPHYR_BASE=$(pwd)/zephyrproject/zephyr
-    export ZEPHYR_BASE
 fi
 
 
