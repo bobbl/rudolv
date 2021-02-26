@@ -200,7 +200,7 @@ while [ $# -ne 0 ]
 do
     case $1 in
         icarus|verilator|verilator-vcd)
-            simulator = $1
+            simulator=$1
             ;;
         run)
             compile $2 ""

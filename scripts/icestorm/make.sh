@@ -13,7 +13,7 @@ then
     echo "  bootloader  Build bootloader"
     echo "  synth       Synthesize using yosys"
     echo "  gy-synth    Synthesize with gruppy detection"
-    echo "  pnr         Place and route wirh nextpnr"
+    echo "  pnr         Place and route with nextpnr"
     echo "  prog        Program the device with iceprog"
     exit 1
 fi

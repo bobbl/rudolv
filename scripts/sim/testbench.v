@@ -231,7 +231,7 @@ module top
     integer i;
     integer sig_begin;
     integer sig_end;
-    integer irqbomb_marker = 2000000000;
+    time irqbomb_marker = 2000000000;
     always @(posedge clk) begin
 
 `ifdef DEBUG

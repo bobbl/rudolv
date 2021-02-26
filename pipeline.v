@@ -61,6 +61,11 @@ module Pipeline #(
     reg [5:0] d_RdNo1;
     reg [5:0] d_RdNo2;
 
+    reg d_MC;
+    reg [7:0] d_MCState;
+    reg [4:0] d_CsrTranslate;
+    reg d_IrqResponse;
+
     reg [WORD_WIDTH-1:0] d_PC;
     reg [31:0] d_DelayedInsn;
     reg d_DelayedInsnGrubby;
@@ -208,7 +213,7 @@ module Pipeline #(
     // fetch
 
     wire WaitForInt = (InsnWFI & ~m_Kill) | d_WaitForInt;
-    reg ClearWaitForInt;
+    reg IrqResponse;
     reg SoftwareInt;
     reg TimerInt;
     reg ExternalInt;
@@ -219,7 +224,6 @@ module Pipeline #(
 
     reg FetchDirect;
     reg FetchDelayed;
-    reg [1:0] FetchSynth;
     reg MstatusExcEnter;
     reg MstatusExcLeave;
 
@@ -232,44 +236,30 @@ module Pipeline #(
 
         FetchDirect = 0;
         FetchDelayed = 0;
-        FetchSynth = 0;
         MstatusExcEnter = 0;
         MstatusExcLeave = 0;
-
-        SoftwareInt = 0;
-        TimerInt = 0;
-        ExternalInt = 0;
-        ClearWaitForInt = 0;
+        IrqResponse = 0;
 
         if (m_Kill) begin
             if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
-                FetchSynth = fsJumpMTVEC;
                 MstatusExcEnter = 1;
             end else begin
                 FetchDirect = 1;
             end
         end else begin
             if (ExcGrubbyInsn) begin
-                FetchSynth = fsJumpMTVEC;
                 MstatusExcEnter = 1;
             end else if (SysOpcode) begin
-                if (CsrPart) begin
-                    FetchSynth = fsCSR;
-                end else if (ExcUser) begin
-                    FetchSynth = fsJumpMTVEC;
+                if (ExcUser) begin
                     MstatusExcEnter = 1;
                 end else if (InsnMRET) begin
-                    FetchSynth = fsJumpMEPC;
                     MstatusExcLeave = 1;
                     // KNOWN BUG:
                     // If irq_timer ist still 1 when the MRET restores MIE to 1,
                     // d_TimerInt will be killed because it is in the delay slots
                     // of the MRET instructions.
-                end else begin // WFI and other system opcodes -> nop
-                    FetchSynth = fsNOP;
                 end
             end else if (MemOpcode) begin
-                FetchSynth = fsJumpMTVEC;
                 // MstatusExcEnter = 1;
                 // KNOWN BUG:
                 // Without this line, MSTATUS.IE is not cleared when a memory
@@ -285,15 +275,12 @@ module Pipeline #(
                     //  > 2 : NOP within multi cycle instruction
                     if (d_MultiCycleCounter==1 || d_MultiCycleCounter==2) begin
                         FetchDirect = 1;
-                    end else begin
-                        FetchSynth = fsNOP;
                     end
                 end else begin
-                    if (MULDIVOpcode) begin
+                    if (MULDIVOpcode | MC) begin
                         // start of multicycle execution
                         // the next instruction is currently beeing fetched and
                         // must be overwritten.
-                        FetchSynth = fsNOP;
 
                     // not the absolutely correct priority, but works:
                     end else if (f_MModeIntEnable &
@@ -305,18 +292,9 @@ module Pipeline #(
                                     // => delay interrupt for 1 cycle 
                         )
                     begin
-                        if (f_ExternalInt)
-                            ExternalInt = 1;
-                        else if (f_SoftwareInt)
-                            SoftwareInt = 1;
-                        else
-                            TimerInt = 1;
-                        ClearWaitForInt = 1;
-
-                        FetchSynth = fsJumpMTVEC;
+                        IrqResponse = 1;
                         MstatusExcEnter = 1;
                     end else if (f_WaitForInt | d_WaitForInt) begin
-                        FetchSynth = fsNOP;
                     end else if (d_Bubble | d_SaveFetch) begin
                         FetchDelayed = 1;
                     end else begin
@@ -331,35 +309,26 @@ module Pipeline #(
     // set instruction word for decode
     reg [31:0] Insn;
     reg DecodeGrubbyInsn;
-    reg RdNo1Aux;
+    reg [5:0] RdNo1;
     always @* begin
         Insn = 0;
         DecodeGrubbyInsn = 0;
-        RdNo1Aux = 0;
         if (FetchDirect) begin
+            RdNo1 = {1'b0, mem_rdata[19:15]};
             Insn = mem_rdata;
             DecodeGrubbyInsn = mem_rgrubby;
         end else begin
+            RdNo1 = {1'b0, d_DelayedInsn[19:15]};
             if (FetchDelayed) begin
                 Insn = d_DelayedInsn;
                 DecodeGrubbyInsn = d_DelayedInsnGrubby;
             end else begin
-                RdNo1Aux = (FetchSynth != fsNOP);
-                if (~FetchSynth[1]) begin
-                    Insn = {7'b0000000, 5'b00000,
-                             vCsrTranslate,
-                             3'b110, 
-                             (FetchSynth[0] ? vCsrTranslate : 5'b0),
-                             7'b0110011}; // OR X0/CSR, CSR, X0
-                end else begin
-                    Insn = {7'b0000000, 5'b00000,
-                             (FetchSynth[0] ? REG_CSR_MEPC[4:0] : REG_CSR_MTVEC[4:0]),
-                             3'b110,
-                             5'b00000,
-                             7'b1100111}; // JALR X0, MTVEC/MEPC, 0
-                end
+                // FIXME: technically this value should be ignored, but
+                // if it is not a nop, there are problems
+                Insn = 32'h6013;
             end
         end
+        if (ModRdNo1[5]) RdNo1 = ModRdNo1;
     end
 
     wire MemValid = (d_MultiCycleCounter < 4) | m_Kill;
@@ -517,11 +486,17 @@ module Pipeline #(
 
 
 
+    localparam [7:0] mcNop = 0;
+    localparam [7:0] mcCSR = 1;
+    localparam [7:0] mcJumpReg = 2;
+    localparam [7:0] mcMem = 3;
 
 
     // Decoding
     reg ExcInvalidInsn;
     reg DecodeWrEn;
+    reg [5:0] DecodeWrNo;
+
     reg InsnWFI;
     reg InsnMRET;
     reg InsnCSR;
@@ -550,10 +525,21 @@ module Pipeline #(
     reg MemStore;
     reg [1:0] MemWidth;
 
+    reg [5:0] ModRdNo1;
+//    wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
+    reg MC;
+    reg [7:0] MCState;
+    reg [WORD_WIDTH-1:0] Imm;
+
     always @* begin
         ExcInvalidInsn = 1;
-        DecodeWrEn = (d_Insn[11:7]!=0) // do not write to x0
-            & ~e_CsrFromExt; // don't write in second cycle of CSR Insn
+        DecodeWrEn = (d_Insn[11:7]!=0); // do not write to x0
+        DecodeWrNo = {e_CsrFromReg, d_Insn[11:7]};
+            // For a CSR instruction, WrNo is set, but not WrEn.
+            // If WrEn was set, the following second cycle of the CSR insn would
+            // get the wrong value, because the forwarding condition for the execute
+            // bypass was fulfilled.
+
         InsnWFI = 0;
         InsnMRET = 0;
         InsnCSR = 0;
@@ -584,9 +570,71 @@ module Pipeline #(
         MemStore        = 0;
         MemWidth        = 2'b11; // no memory access
 
+//        RdNo1           = {RdNo1Aux, Insn[19:15]};
+        ModRdNo1        = 0; // don't change the register read in the next cycle
+        MC              = 0;
+        MCState         = d_MCState + 1;
+        Imm             = ImmISU;
+
+        SoftwareInt = 0;
+        TimerInt = 0;
+        ExternalInt = 0;
+
+
         if (m_Kill) begin
             ExcInvalidInsn = 0;
             DecodeWrEn = 0;
+            if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
+                ModRdNo1       = REG_CSR_MTVEC;
+                MC             = 1;
+                MCState        = mcJumpReg;
+            end
+
+        end else if (d_GrubbyInsn) begin
+            ModRdNo1       = REG_CSR_MTVEC;
+            MC             = 1;
+            MCState        = mcJumpReg;
+
+        // microcoded cycles of multi-cycle instructions
+        end else if (d_MC) begin
+            case (d_MCState)
+                mcNop: begin
+                    DecodeWrEn     = 0;
+                end
+                mcCSR: begin // 2nd cycle of CSR access
+                    DecodeWrEn     = e_CsrFromReg;
+                    DecodeWrNo     = {1'b1, d_CsrTranslate};
+                end
+                mcJumpReg: begin // jump to adddress in first register
+                    NoInt       = 1;
+                    InsnJALR    = 1;
+                    AddrFromSum = 1;
+                    Imm         = 0;
+                end
+                mcMem: begin // 2nd cycle of memory access
+                    DecodeWrEn     = 0;
+                    if (MemMisaligned) begin
+                        InsnJALR = 1;
+                        AddrFromSum = 1;
+                        Imm = 0;
+                    end
+                end
+                default: begin
+                end
+            endcase
+        end else if (d_IrqResponse) begin
+            if (f_ExternalInt)
+                ExternalInt = 1;
+            else if (f_SoftwareInt)
+                SoftwareInt = 1;
+            else
+                TimerInt = 1;
+
+                ModRdNo1 = REG_CSR_MTVEC;
+                MC       = 1;
+                MCState  = mcJumpReg;
+
+
 
         // 32 bit instruction
         end else if (d_Insn[1:0]==2'b11) begin
@@ -631,6 +679,11 @@ module Pipeline #(
                     Bubble         = 1;
                     AddrFromSum    = 1;
                     MemWidth       = d_Insn[13:12];
+                    ModRdNo1       = REG_CSR_MTVEC;
+                        // read MTVEC in 2nd cycle, so that its value is
+                        // available if Exc is raised
+                    MC             = 1;
+                    MCState        = mcMem;
                 end
                 5'b01000: begin // store
                     ExcInvalidInsn = (d_Insn[14] | (d_Insn[13] & d_Insn[12]));
@@ -639,6 +692,9 @@ module Pipeline #(
                     AddrFromSum    = 1;
                     MemStore       = 1;
                     MemWidth       = d_Insn[13:12];
+                    ModRdNo1       = REG_CSR_MTVEC;
+                    MC             = 1;
+                    MCState        = mcMem;
                 end
                 5'b00100: begin // immediate
                     ExcInvalidInsn = ~d_Insn[13] & d_Insn[12] &
@@ -682,24 +738,42 @@ module Pipeline #(
                         InsnCSR    = 1;
                         CsrFromExt = ~CsrFromReg;
                         CsrOp      = d_Insn[13:12];
+                        ModRdNo1   = {1'b1, vCsrTranslate};
+                        MC         = 1;
+                        MCState    = mcCSR;
                     end else begin
                         if (d_Insn[19:7]==0) begin
                             ExcInvalidInsn = 0;
                             case (d_Insn[31:20])
                                 12'h000: begin // ECALL
-                                    ExcUser = 1;
+                                    ExcUser  = 1;
+                                    ModRdNo1 = REG_CSR_MTVEC;
+                                    MC       = 1;
+                                    MCState  = mcJumpReg;
                                 end
                                 12'h001: begin // EBREAK
-                                    ExcUser = 1;
+                                    ExcUser  = 1;
+                                    ModRdNo1 = REG_CSR_MTVEC;
+                                    MC       = 1;
+                                    MCState  = mcJumpReg;
                                 end
                                 12'h002: begin // URET
                                     InsnMRET = 1;
+                                    ModRdNo1 = REG_CSR_MEPC;
+                                    MC       = 1;
+                                    MCState  = mcJumpReg;
                                 end
                                 12'h102: begin // SRET
                                     InsnMRET = 1;
+                                    ModRdNo1 = REG_CSR_MEPC;
+                                    MC       = 1;
+                                    MCState  = mcJumpReg;
                                 end
                                 12'h302: begin // MRET
                                     InsnMRET = 1;
+                                    ModRdNo1 = REG_CSR_MEPC;
+                                    MC       = 1;
+                                    MCState  = mcJumpReg;
                                 end
                                 12'h105: begin // WFI
                                     InsnWFI = 1;
@@ -730,7 +804,7 @@ module Pipeline #(
 
 
 
-    wire [5:0] DecodeWrNo = {e_CsrFromReg, d_Insn[11:7]};
+//    wire [5:0] DecodeWrNo = {e_CsrFromReg, d_Insn[11:7]};
         // For a CSR instruction, WrNo is set, but not WrEn.
         // If WrEn was set, the following second cycle of the CSR insn would
         // get the wrong value, because the forwarding condition for the execute
@@ -1002,13 +1076,16 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ExcWrData2 =
         MemMisaligned   ? AddrSum       // MTVAL for mem access
                         : d_PC;         // MEPC 
+
+
     wire [WORD_WIDTH-1:0] ExcWrData =
         WriteMCAUSE     ? {m_Cause[4], {(WORD_WIDTH-5){1'b0}}, m_Cause[3:0]}  // MCAUSE
 
                         // special case if interrupt directly after branch insn
                         : ((m_Kill & AnyInterrupt)
                             ? f_PC
-                            : e_ExcWrData2);
+//                            : e_ExcWrData2);
+                            : (AnyInterrupt ? m_ExcWrData : e_ExcWrData2));
 
     wire [WORD_WIDTH-1:0] CsrResult =
         vExcOverwrite   ? ((e_ExcJump | e_ExcGrubbyJump) ? e_ExcWrData2 // MTVAL for jump
@@ -1130,7 +1207,7 @@ module Pipeline #(
 
     // register set
 
-    wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
+//    wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
     wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
 
     assign regset_we = MemWrEn;
@@ -1156,6 +1233,10 @@ module Pipeline #(
         d_Insn <= Insn;
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
+        d_CsrTranslate <= vCsrTranslate;
+        d_MC <= MC;
+        d_MCState <= MCState;
+        d_IrqResponse <= IrqResponse;
         if (SaveFetch) begin
             d_DelayedInsn <= mem_rdata;
             d_DelayedInsnGrubby <= mem_rgrubby;
@@ -1194,7 +1275,7 @@ module Pipeline #(
         e_B <= ForwardBE;
         e_AGrubby <= ForwardAEGrubby;
         e_BGrubby <= ForwardBEGrubby;
-        e_Imm <= ImmISU;
+        e_Imm <= Imm;
         e_PCImm <= PCImm;
 
         e_WrEn <= DecodeWrEn;
@@ -1274,8 +1355,8 @@ module Pipeline #(
         // interrupt handling
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
-        f_WaitForInt        <= WaitForInt & ~ClearWaitForInt;
-        d_WaitForInt        <= (d_WaitForInt | f_WaitForInt) & ~m_Kill & ~ClearWaitForInt;
+        f_WaitForInt        <= WaitForInt & ~IrqResponse;
+        d_WaitForInt        <= (d_WaitForInt | f_WaitForInt) & ~m_Kill & ~IrqResponse;
 
         f_SoftwareInt       <= irq_software;
         d_SoftwareInt       <= SoftwareInt;
@@ -1303,8 +1384,8 @@ module Pipeline #(
 `ifdef DEBUG
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
             mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
-        $display("F FetchDirect=%b Delayed=%b Synth=%h",
-            FetchDirect, FetchDelayed, FetchSynth);
+        $display("F FetchDirect=%b Delayed=%b",
+            FetchDirect, FetchDelayed);
 
         $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h",
             d_PC, d_PC, d_Insn, Insn);
@@ -1339,8 +1420,11 @@ module Pipeline #(
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2);
         $display("D Bubble=%b SaveFetch=%b f_PC=%h",
             d_Bubble, d_SaveFetch, f_PC);
-        $display("E a=%h b=%h i=%h -> %h -> x%d wren=%b",
-            e_A, e_B, e_Imm, ALUResult, e_WrNo, e_WrEn);
+        $display("D MCD_q=%b MCStateD_q=%h InsnJALR=%b Imm=%h",
+            d_MC, d_MCState, InsnJALR, Imm);
+
+        $display("E a=%h b=%h i=%h -> %h -> x%d wrenDE=%b%b",
+            e_A, e_B, e_Imm, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
 /*
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
@@ -1439,8 +1523,8 @@ module Pipeline #(
 //            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
         $display("X vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b m_Cause=%h",
             vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
-        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h CsrResult=%h",
-            ExcWrData, e_ExcWrData2, m_ExcWrData, CsrResult);
+        $display("X ExcWrData2=%h ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h CsrResult=%h",
+            ExcWrData2, ExcWrData, e_ExcWrData2, m_ExcWrData, CsrResult);
         $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
             MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
 
@@ -1448,12 +1532,12 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI_FD=%b%b%b ClearWFI=%b",
+        $display("I MIE=%b MPIE=%b SoftwareFDE=%b%b%b TimerFDE=%b%b%b ExternalFDE=%b%b%b WFI_FD=%b%b%b IR=%b%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             f_SoftwareInt, d_SoftwareInt, e_SoftwareInt,
             f_TimerInt, d_TimerInt, e_TimerInt,
             f_ExternalInt, d_ExternalInt, e_ExternalInt,
-            WaitForInt, f_WaitForInt, d_WaitForInt, ClearWaitForInt);
+            WaitForInt, f_WaitForInt, d_WaitForInt, IrqResponse, d_IrqResponse);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1468,9 +1552,10 @@ module Pipeline #(
             f_PC <= 32'hf0000000;
 
             d_Insn <= 32'h13;
+            d_MC <= 0;
             d_SaveFetch <= 0;
             d_Bubble <= 0;
-            d_DelayedInsn <= 0;
+            d_DelayedInsn <= 'h13;
             d_DelayedInsnGrubby <= 0;
             e_NoInt <= 0;
 
@@ -1490,6 +1575,7 @@ module Pipeline #(
             d_SoftwareInt <= 0;
             d_TimerInt <= 0;
             d_ExternalInt <= 0;
+            d_IrqResponse <= 0;
         end
     end
 endmodule
