@@ -65,7 +65,6 @@ module Pipeline #(
     reg [7:0] d_MCState;
     reg [4:0] d_MCAux;
     reg [4:0] d_CsrTranslate;
-    reg d_IrqResponse;
 
     reg [WORD_WIDTH-1:0] d_PC;
     reg [31:0] d_DelayedInsn;
@@ -188,15 +187,15 @@ module Pipeline #(
 
 
 
-    reg        f_MModeIntEnable;        // mstatus.mie
-    reg        f_MModePriorIntEnable;   // mstatus.mpie
-    reg        f_WaitForInt;
-    reg        d_WaitForInt;
-    reg        e_NoInt;
+    reg f_MModeIntEnable;        // mstatus.mie
+    reg f_MModePriorIntEnable;   // mstatus.mpie
+    reg WaitForInt_q;
+    reg IrqResponse_q;
+    reg NoIrq_q;
 
-    reg        f_SoftwareInt;
-    reg        f_TimerInt;      // external pin high
-    reg        f_ExternalInt;
+    reg SoftwareIrq_q;
+    reg TimerIrq_q;      // external pin high
+    reg ExternalIrq_q;
 
     reg d_GrubbyInsn;
 
@@ -210,11 +209,6 @@ module Pipeline #(
 
 
     // fetch
-
-    wire WaitForInt = (InsnWFI & ~m_Kill) | d_WaitForInt;
-    reg SoftwareInt;
-    reg TimerInt;
-    reg ExternalInt;
 
     wire MemOpcode = ~d_Insn[6] && d_Insn[4:2]==3'b000; // ST or LD
     wire SysOpcode =  d_Insn[6] && d_Insn[4:2]==3'b100;
@@ -247,7 +241,7 @@ module Pipeline #(
                     end
                 end else begin
                     if (MULDIVOpcode | MC) begin
-                    end else if (f_WaitForInt | d_WaitForInt) begin
+                    end else if (WaitForInt_q) begin
                     end else if (d_Bubble | d_SaveFetch) begin
                         FetchDelayed = 1;
                     end else begin
@@ -437,9 +431,9 @@ module Pipeline #(
     endcase
 
 
-    wire IrqResponse = f_MModeIntEnable &
-        (f_SoftwareInt | f_TimerInt | f_ExternalInt) &
-        ~NoInt;    // no interrup the 2nd cycle after a jump or branch
+    wire IrqResponse_v = f_MModeIntEnable &
+        (SoftwareIrq_q | TimerIrq_q | ExternalIrq_q) &
+        ~NoIrq_v;    // no interrup the 2nd cycle after a jump or branch
 
 
     localparam [7:0] mcNop = 0;
@@ -454,7 +448,6 @@ module Pipeline #(
     reg DecodeWrEn;
     reg [5:0] DecodeWrNo;
 
-    reg InsnWFI;
     reg InsnCSR;
     reg CsrRead;
     reg CsrFromExt; // only to avoid write enable in second cycle of CSR Insn
@@ -466,7 +459,8 @@ module Pipeline #(
     reg InsnJALR;
     reg BranchUncondPCRel;
     reg ReturnPC;
-    reg NoInt;
+    reg NoIrq_v;
+    reg WaitForInt_v;
 
     reg NegB;
     reg SelSum;
@@ -499,7 +493,6 @@ module Pipeline #(
             // get the wrong value, because the forwarding condition for the execute
             // bypass was fulfilled.
 
-        InsnWFI = 0;
         InsnCSR = 0;
         CsrRead = 0;
         CsrFromExt = 0;
@@ -511,9 +504,10 @@ module Pipeline #(
         InsnJALR        = 0;
         BranchUncondPCRel    = 0;
         ReturnPC        = 0;
-        NoInt           = 0;
+        NoIrq_v           = 0;
             // don't allow interrupt in 2nd cycle, because d_PC is
             // not set correctly, which will result in a wrong MEPC
+        WaitForInt_v    = WaitForInt_q;
 
         NegB            = 0;
         SelSum          = 0;
@@ -537,13 +531,10 @@ module Pipeline #(
         TrapEnter_v     = 0;
         InsnMRET_v      = 0;
 
-        SoftwareInt = 0;
-        TimerInt = 0;
-        ExternalInt = 0;
-
         if (m_Kill) begin
             ExcInvalidInsn = 0;
             DecodeWrEn = 0;
+            WaitForInt_v = 0;
             if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
                 ModRdNo1       = REG_CSR_MTVEC;
                 MC             = 1;
@@ -578,14 +569,14 @@ module Pipeline #(
                 mcJumpReg: begin // MRET
                     // jump to adddress in first register (MTVEC)
                     DecodeWrEn  = 0;
-                    NoInt       = 1;
+                    NoIrq_v       = 1;
                     InsnJALR    = 1;
                     AddrFromSum = 1;
                     Imm         = 0;
                 end
                 mcException: begin 
                     // jump to adddress in first register (MEPC) and write MCAUSE
-                    NoInt       = 1;
+                    NoIrq_v       = 1;
                     InsnJALR    = 1;
                     AddrFromSum = 1;
                     Imm         = 0;
@@ -598,25 +589,27 @@ module Pipeline #(
             endcase
 
 
-        end else if (d_IrqResponse & ~d_WithinMultiCycle) begin
+        end else if (WaitForInt_q) begin
+            if (IrqResponse_q & ~d_WithinMultiCycle) begin
 
-            if (f_ExternalInt) begin
-                ExternalInt = 1;
-                MCAux = 5'h1b;
-            end else if (f_SoftwareInt) begin
-                SoftwareInt = 1;
-                MCAux = 5'h13;
-            end else begin
-                TimerInt = 1;
-                MCAux = 5'h17;
+                if (ExternalIrq_q) begin
+                    MCAux = 5'h1b;
+                end else if (SoftwareIrq_q) begin
+                    MCAux = 5'h13;
+                end else begin
+                    MCAux = 5'h17;
+                end
+                WaitForInt_v = 0;
+                Overwrite_v = 1;
+                OverwriteVal_v = d_PC;
+                DecodeWrNo = REG_CSR_MEPC;
+                ModRdNo1 = REG_CSR_MTVEC;
+                MC       = 1;
+                MCState  = mcException;
+                TrapEnter_v = 1;
             end
-            Overwrite_v = 1;
-            OverwriteVal_v = d_PC;
-            DecodeWrNo = REG_CSR_MEPC;
-            ModRdNo1 = REG_CSR_MTVEC;
-            MC       = 1;
-            MCState  = mcException;
-            TrapEnter_v = 1;
+            // else do nothing and wait for interrupt
+
 
 
         // 32 bit instruction
@@ -635,12 +628,12 @@ module Pipeline #(
                     ExcInvalidInsn = 0;
                     BranchUncondPCRel = 1;
                     ReturnPC       = 1;
-                    NoInt          = 1;
+                    NoIrq_v          = 1;
                 end
                 5'b11001: begin // JALR
                     ExcInvalidInsn = (d_Insn[14:12]!=3'b000);
                     ReturnPC       = 1;
-                    NoInt          = 1;
+                    NoIrq_v          = 1;
 
                     // disable JALR, if it is the memory bubble and there is no memory exception
                     // TODO: get rid of it
@@ -654,7 +647,7 @@ module Pipeline #(
                     DecodeWrEn     = 0;
                     InsnBEQ        = (d_Insn[14:13]==2'b00);
                     InsnBLTorBLTU  = d_Insn[14];
-                    NoInt          = 1;
+                    NoIrq_v          = 1;
                     NegB           = 1;
                     SelLogic       = InsnBEQ ? 2'b00 : 2'b01;
                 end
@@ -714,8 +707,8 @@ module Pipeline #(
                 end
                 5'b11100: begin // system
                     Bubble   = 1;
-                        MC         = 1;
-                        MCState    = mcNop;
+                    MC         = 1;
+                    MCState    = mcNop;
                     if (d_Insn[13] | d_Insn[12]) begin
                         // RVZicsr
                         ExcInvalidInsn = 0;
@@ -770,7 +763,7 @@ module Pipeline #(
                                     InsnMRET_v = 1;
                                 end
                                 12'h105: begin // WFI
-                                    InsnWFI = 1;
+                                    WaitForInt_v = 1;
                                 end
                                 default: begin
                                     ExcInvalidInsn = 1;
@@ -929,7 +922,7 @@ module Pipeline #(
         (vBEQ | vNotBEQ)
             ? e_PCImm
             //: NoBranch
-            : ((d_Bubble & ~m_Kill) | (WaitForInt & ~e_InsnJALR))
+            : ((d_Bubble & ~m_Kill) | (WaitForInt_v & ~e_InsnJALR))
             //                         ^^^^^^^^^^
             // A WFI instruction must immediately stop to increment the PC,
             // otherwise the MEPC will be wrong in the trap handler.
@@ -1221,7 +1214,6 @@ module Pipeline #(
         d_MC <= MC;
         d_MCState <= MCState;
         d_MCAux <= MCAux;
-        d_IrqResponse <= IrqResponse;
         if (SaveFetch) begin
             d_DelayedInsn <= mem_rdata;
             d_DelayedInsnGrubby <= mem_rgrubby;
@@ -1268,7 +1260,6 @@ module Pipeline #(
         e_InsnBEQ <= InsnBEQ;
         e_InsnBLTorBLTU <= InsnBLTorBLTU;
         e_BranchUncondPCRel <= BranchUncondPCRel;
-        e_NoInt <= NoInt;
 
         e_EnShift <= EnShift;
         e_ShiftArith <= ShiftArith;
@@ -1345,12 +1336,12 @@ module Pipeline #(
         // interrupt handling
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
-        f_WaitForInt        <= WaitForInt & ~IrqResponse;
-        d_WaitForInt        <= (d_WaitForInt | f_WaitForInt) & ~m_Kill & ~IrqResponse;
-
-        f_SoftwareInt       <= irq_software;
-        f_TimerInt          <= irq_timer;
-        f_ExternalInt       <= irq_external;
+        WaitForInt_q        <= WaitForInt_v | IrqResponse_v;
+        IrqResponse_q       <= IrqResponse_v;
+        NoIrq_q             <= NoIrq_v;
+        SoftwareIrq_q       <= irq_software;
+        TimerIrq_q          <= irq_timer;
+        ExternalIrq_q       <= irq_external;
 
         // csr
         e_CsrFromExt        <= CsrFromExt;
@@ -1517,12 +1508,12 @@ module Pipeline #(
 
 
 
-        $display("I MIE=%b MPIE=%b Software=%b Timer=%b External=%b WFI_FD=%b%b%b IR=%b%b",
+        $display("I MIE=%b MPIE=%b Software=%b Timer=%b External=%b WFI_F=b%b IR=%b%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
-            f_SoftwareInt,
-            f_TimerInt,
-            f_ExternalInt,
-            WaitForInt, f_WaitForInt, d_WaitForInt, IrqResponse, d_IrqResponse);
+            SoftwareIrq_q,
+            TimerIrq_q,
+            ExternalIrq_q,
+            WaitForInt_v, WaitForInt_q, IrqResponse_v, IrqResponse_q);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1542,7 +1533,6 @@ module Pipeline #(
             d_Bubble <= 0;
             d_DelayedInsn <= 'h13;
             d_DelayedInsnGrubby <= 0;
-            e_NoInt <= 0;
 
             d_MultiCycleCounter <= 0;
             e_StartMC <= 0;
@@ -1555,9 +1545,9 @@ module Pipeline #(
 
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
-            f_WaitForInt <= 0;
-            d_WaitForInt <= 0;
-            d_IrqResponse <= 0;
+            WaitForInt_q <= 0;
+            IrqResponse_q <= 0;
+            NoIrq_q <= 0;
         end
     end
 endmodule
