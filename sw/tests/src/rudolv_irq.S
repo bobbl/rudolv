@@ -131,9 +131,12 @@ test_14:
         li      x7, 0x90
         ENABLE_SOFTINT
         wfi
-        li      x4, 0x80000094          # cause: software interrupt
+        j       1f                      # jump after wfi can be problematic
+        nop
+        nop
+        j       restore_fail
+1:      li      x4, 0x80000094          # cause: software interrupt
         bne     x7, x4, restore_fail
-
 
 
 
@@ -202,6 +205,26 @@ test_24:
         li      x4, 0x80000074          # cause: software interrupt
         bne     x7, x4, restore_fail
 
+
+        #-------------------------------------------------------------
+        # Test 25: SWI=1 then mret to set IE=1 => trap back-to-back to mret
+        #-------------------------------------------------------------
+test_25:
+        li      TESTNUM, 25
+        li      x7, 0x70
+        li      x4, 0x80
+        csrs    mstatus, x4             # MSTATUS.MPIE=1
+        la      x4, target_25
+        csrw    mepc, x4
+        mret                            # set IE to MPIE => trap
+        li      x7, 0x666
+        nop
+        nop
+        nop
+
+target_25:
+        li      x4, 0x80000074          # cause: software interrupt
+        bne     x7, x4, restore_fail
 
 
 
