@@ -126,7 +126,7 @@ as a static always not taken prediction.
 
 | instruction class  | examples                                       | cycles |
 | ------------------ | ---------------------------------------------- | ------ |
-| RV32M              | MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU | 34     |
+| RV32M              | MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU | 35     |
 | pipeline flush     | FENCE.I                                        | 3      |
 | exception          | ECALL, EBREAK                                  | 3      |
 | unconditional jump | JAL, JALR                                      | 3      |
