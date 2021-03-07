@@ -73,20 +73,23 @@ module Pipeline #(
     reg d_SaveFetch;
     reg d_Bubble;
 
+    // mul/div
     reg StartMulDiv_q;
-    reg [WORD_WIDTH-1:0] q_MulB;
-    reg [WORD_WIDTH:0] q_MulC;
-    reg q_SelMulLowOrHigh;
-    reg e_MulASigned;
-    reg e_MulBSigned;
-    reg q_MulHSign;
 
-    reg [WORD_WIDTH-1:0] q_DivQuot;
-    reg [WORD_WIDTH:0] q_DivRem;
-    reg q_SelRemOrDiv;
-    reg e_DivSigned;
-    reg q_DivResultSign;
-    reg q_SelDivOrMul;
+    reg DivSigned_q;            // control signals for first cycle
+    reg MulASigned_q;
+    reg MulBSigned_q;
+
+    reg SelRemOrDiv_q;          // control signals for every cycle
+    reg SelDivOrMul_q;
+
+    reg SelMulLowOrHigh_q;      // control signals for last cycle
+    reg DivResultSign_q;
+    reg MulHSign_q;
+
+    reg [WORD_WIDTH-1:0] DivQuot_q;
+    reg [WORD_WIDTH:0] DivRem_q;
+    reg [2*WORD_WIDTH:0] Long_q;
 
     // execute
     reg e_InsnJALR;
@@ -439,6 +442,9 @@ module Pipeline #(
     reg TrapEnter_v;
 
     reg StartMulDiv_v;
+    reg SelRemOrDiv_v;
+    reg SelDivOrMul_v;
+    reg SelMulLowOrHigh_v;
 
     always @* begin
         ExcInvalidInsn = 1;
@@ -491,7 +497,10 @@ module Pipeline #(
         TrapEnter_v     = 0;
         InsnMRET_v      = 0;
 
-        StartMulDiv_v = 0;
+        StartMulDiv_v   = 0;
+        SelRemOrDiv_v   = SelRemOrDiv_q;
+        SelDivOrMul_v   = SelDivOrMul_q;
+        SelMulLowOrHigh_v = SelMulLowOrHigh_q;
 
         if (m_Kill) begin
             ExcInvalidInsn = 0;
@@ -679,8 +688,11 @@ module Pipeline #(
                         MCAux_v = 31;
                         MCRegNo_v = d_Insn[11:7];
                         MCBubble_v = 1;
-                        StartMulDiv_v = 1;
 
+                        StartMulDiv_v = 1;
+                        SelRemOrDiv_v = d_Insn[13];
+                        SelDivOrMul_v = d_Insn[14];
+                        SelMulLowOrHigh_v = (d_Insn[13:12]==2'b00);
 
                     end else begin // arith
                         ExcInvalidInsn = d_Insn[31] | (d_Insn[29:26]!=0) |
@@ -933,71 +945,75 @@ module Pipeline #(
 
 
 
-    // multi cycle instructions
+    // mul/div unit
 
     // control signals for first cycle
-    wire DivSigned = ~d_Insn[12] & d_Insn[14];
-    wire MulBSigned = ~d_Insn[13];
-    wire MulASigned = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
+    wire DivSigned_v = ~d_Insn[12] & d_Insn[14];
+    wire MulASigned_v = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
+    wire MulBSigned_v = ~d_Insn[13];
 
-    // control signals for every cycle
-    wire SelRemOrDiv = StartMulDiv_v ? d_Insn[13] : q_SelRemOrDiv;
-    wire SelDivOrMul = StartMulDiv_v ? d_Insn[14] : q_SelDivOrMul;
-
-    // control signals for last cycle
-    wire DivResultSign = StartMulDiv_q
-        ? (e_DivSigned & (e_A[31] ^ (~q_SelRemOrDiv & e_B[31])) 
-            & (e_B!=0 || q_SelRemOrDiv))
-        : q_DivResultSign;
-    wire MulHSign = StartMulDiv_q
-        ? (e_MulBSigned & e_B[WORD_WIDTH-1]) 
-        : q_MulHSign;
-    wire SelMulLowOrHigh = StartMulDiv_v
-        ? (d_Insn[13:12]==2'b00)
-        : q_SelMulLowOrHigh;
-
-    wire [WORD_WIDTH:0] vDivDiff = q_DivRem - {1'b0, q_MulB};
-    wire vDivNegative = (q_MulC[WORD_WIDTH-1:0]!=0) | vDivDiff[WORD_WIDTH];
-    wire [WORD_WIDTH-1:0] DivQuot = {q_DivQuot[WORD_WIDTH-2:0], ~vDivNegative};
-    wire [WORD_WIDTH+1:0] vAddMulC =
-        {q_MulC[WORD_WIDTH], q_MulC}
-            + (q_MulB[0] ? {q_DivRem[WORD_WIDTH], q_DivRem}
+    wire [WORD_WIDTH:0] DivDiff_t = DivRem_q - {1'b0, Long_q[WORD_WIDTH-1:0]};
+    wire DivNegative_t = (Long_q[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff_t[WORD_WIDTH];
+    wire [WORD_WIDTH+1:0] LongAdd_t =
+        {Long_q[2*WORD_WIDTH], Long_q[2*WORD_WIDTH:WORD_WIDTH]}
+            + (Long_q[0] ? {DivRem_q[WORD_WIDTH], DivRem_q}
                          : {(WORD_WIDTH+2){1'b0}});
 
+    wire [WORD_WIDTH-1:0] AbsA_t = (DivSigned_q & e_A[WORD_WIDTH-1]) ? (-e_A) : e_A;
+    wire [WORD_WIDTH-1:0] AbsB_t = (DivSigned_q & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B;
 
-    wire [WORD_WIDTH:0] DivRem = StartMulDiv_q
-        ?   {e_MulASigned & e_A[WORD_WIDTH-1],
-            (e_DivSigned  & e_A[WORD_WIDTH-1]) ? (-e_A) : e_A}
-        : ((vDivNegative | ~q_SelDivOrMul) 
-            ? q_DivRem
-            : {1'b0, vDivDiff[WORD_WIDTH-1:0]});
-    wire [WORD_WIDTH+1:0] vMulCShifted = StartMulDiv_q
-        ? {2'b0,
-           q_SelDivOrMul 
-                ? ((e_DivSigned & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B)
-                : {(WORD_WIDTH){1'b0}}
-          }
-        : vAddMulC;
-    wire [WORD_WIDTH:0] MulC = vMulCShifted[WORD_WIDTH+1:1];
+    wire [WORD_WIDTH-1:0] DivQuot_v = {DivQuot_q[WORD_WIDTH-2:0], ~DivNegative_t};
 
-    wire [WORD_WIDTH-1:0] MulB = StartMulDiv_q 
-        ? (q_SelDivOrMul ? {e_B[0], {(WORD_WIDTH-1){1'b0}}} 
-                         : e_B)
-        : {vAddMulC[0], q_MulB[WORD_WIDTH-1:1]};
+    reg DivResultSign_v;
+    reg MulHSign_v;
+    reg [WORD_WIDTH:0] DivRem_v;
+    reg [2*WORD_WIDTH:0] Long_v;
+    reg [WORD_WIDTH-1:0] MulDivResult_v;
 
+    always @* begin
 
+        // mul/div arithmetic step
+        if (StartMulDiv_q) begin
+            DivResultSign_v = DivSigned_q &
+                (e_A[31] ^ (~SelRemOrDiv_q & e_B[31])) & 
+                (e_B!=0 || SelRemOrDiv_q);
+            MulHSign_v = MulBSigned_q & e_B[WORD_WIDTH-1];
 
+            DivRem_v = {MulASigned_q & e_A[WORD_WIDTH-1], AbsA_t};
+            if (SelDivOrMul_q) begin
+                Long_v = {2'b0, AbsB_t, {(WORD_WIDTH-1){1'b0}}};
+            end else begin
+                Long_v = {{(WORD_WIDTH+1){1'b0}}, e_B};
+            end
+        end else begin
+            DivResultSign_v = DivResultSign_q;
+            MulHSign_v = MulHSign_q;
 
-    wire [WORD_WIDTH-1:0] vMulResHi = q_MulHSign
-        ? (q_MulC[WORD_WIDTH-1:0] - q_DivRem[WORD_WIDTH-1:0])
-        :  q_MulC[WORD_WIDTH-1:0];
-    wire [WORD_WIDTH-1:0] vDivRem = q_SelRemOrDiv 
-        ? q_DivRem[WORD_WIDTH-1:0]
-        : q_DivQuot;
+            DivRem_v = (DivNegative_t | ~SelDivOrMul_q)
+                ? DivRem_q
+                : {1'b0, DivDiff_t[WORD_WIDTH-1:0]};
+            Long_v = {LongAdd_t[WORD_WIDTH+1:0], Long_q[WORD_WIDTH-1:1]};
+        end
 
-    wire [WORD_WIDTH-1:0] MulDivResult_v = q_SelDivOrMul
-        ? (q_DivResultSign   ? (-vDivRem) : vDivRem)
-        : (q_SelMulLowOrHigh ? q_MulB     : vMulResHi);
+        // mul/div result computation
+        if (SelDivOrMul_q) begin
+            MulDivResult_v = DivResultSign_q ? (-DivRem_t) : DivRem_t;
+        end else begin
+            if (SelMulLowOrHigh_q) begin
+                MulDivResult_v = Long_q[WORD_WIDTH-1:0];
+            end else if (MulHSign_q) begin
+                MulDivResult_v = Long_q[2*WORD_WIDTH-1:WORD_WIDTH] -
+                                 DivRem_q[WORD_WIDTH-1:0];
+            end else begin
+                MulDivResult_v = Long_q[2*WORD_WIDTH-1:WORD_WIDTH];
+            end
+        end
+    end
+
+    wire [WORD_WIDTH-1:0] DivRem_t = SelRemOrDiv_q
+        ? DivRem_q[WORD_WIDTH-1:0]
+        : DivQuot_q;
+
 
 
 
@@ -1208,20 +1224,21 @@ module Pipeline #(
 
         StartMulDiv_q <= StartMulDiv_v;
 
-        e_MulASigned <= MulASigned;
-        e_MulBSigned <= MulBSigned;
-        q_MulHSign <= MulHSign;
-        e_DivSigned <= DivSigned;
-        q_DivResultSign <= DivResultSign;
+        DivSigned_q <= DivSigned_v;
+        MulASigned_q <= MulASigned_v;
+        MulBSigned_q <= MulBSigned_v;
 
-        q_MulB <= MulB;
-        q_MulC <= MulC;
-        q_DivQuot <= DivQuot;
-        q_DivRem <= DivRem;
+        SelRemOrDiv_q <= SelRemOrDiv_v;
+        SelDivOrMul_q <= SelDivOrMul_v;
 
-        q_SelMulLowOrHigh <= SelMulLowOrHigh;
-        q_SelRemOrDiv <= SelRemOrDiv;
-        q_SelDivOrMul <= SelDivOrMul;
+        DivResultSign_q <= DivResultSign_v;
+        MulHSign_q <= MulHSign_v;
+        SelMulLowOrHigh_q <= SelMulLowOrHigh_v;
+
+        DivQuot_q <= DivQuot_v;
+        DivRem_q <= DivRem_v;
+        Long_q <= Long_v;
+
 
 
 
@@ -1382,9 +1399,8 @@ module Pipeline #(
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 */
 
-        $display("E rem=%h %h mul=%h q_SelMulLowOrHigh=%b StartMulDiv_q=%b",
-            q_DivRem, q_MulB, q_MulC, q_SelMulLowOrHigh,
-            StartMulDiv_q);
+        $display("E rem=%h mul=%h SelMulLowOrHigh_q=%b StartMulDiv_q=%b",
+            q_DivRem, q_Long, SelMulLowOrHigh_q, StartMulDiv_q);
         $display("E SelDivOrMul=%b e_DivSigned=%b div=%h MulDivResult_v=%h",
             SelDivOrMul, e_DivSigned, q_DivQuot, MulDivResult_v);
 
