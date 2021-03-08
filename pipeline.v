@@ -567,6 +567,8 @@ module Pipeline #(
                     end
                 end
                 mcMulDivWriteback: begin
+                    DecodeWrEn = (MCRegNo_q!=0); // OPTIMISE
+                        // required for forwarding
                     DecodeWrNo = {1'b0, MCRegNo_q};
                     Overwrite_v = (MCRegNo_q!=0); // OPTIMISE
                     OverwriteSelD_v = 1;
@@ -900,29 +902,27 @@ module Pipeline #(
     wire vNotBEQ = ((e_InsnBLTorBLTU & vLess) | e_BranchUncondPCRel) & ~m_Kill;
     wire vCondResultBit = e_SetCond & vLess;
 
+    wire Branch_t = vBEQ | vNotBEQ;
     wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & ~m_Kill);
         // any jump or exception
 
 
-    wire [WORD_WIDTH-1:0] AddrSum = e_A + e_Imm;
-    wire [WORD_WIDTH-1:0] NextPC = f_PC + 4;
-
-    wire [WORD_WIDTH-1:0] NextOrSum =
-        (MCBubble_q & ~m_Kill)
-            ? d_PC
-            : (e_AddrFromSum & ~m_Kill)
-                ? {AddrSum[WORD_WIDTH-1:1], 1'b0}
-                : NextPC;
+    wire [WORD_WIDTH-1:0] AddrSum_t = e_A + e_Imm;
+    wire [WORD_WIDTH-1:0] NextPC_t = f_PC + 4;
+    wire [WORD_WIDTH-1:0] NextOrSum_t =
+        (e_AddrFromSum & ~m_Kill)
+            ? {AddrSum_t[WORD_WIDTH-1:1], 1'b0}
+            : NextPC_t;
 
 
     wire [WORD_WIDTH-1:0] MemAddr =
-        (vBEQ | vNotBEQ) // taken PC-relative branch
-            ? e_PCImm 
-            : NextOrSum;
-    wire [WORD_WIDTH-1:0] FetchPC =
-        (vBEQ | vNotBEQ)
+        Branch_t // taken PC-relative branch
             ? e_PCImm
-            //: NoBranch
+            : NextOrSum_t;
+
+    wire [WORD_WIDTH-1:0] FetchPC =
+        Branch_t
+            ? e_PCImm
             : ((d_Bubble & ~m_Kill) | (WaitForInt_v & ~e_InsnJALR))
             //                         ^^^^^^^^^^
             // A WFI instruction must immediately stop to increment the PC,
@@ -930,7 +930,10 @@ module Pipeline #(
             //                                      ^^^^^^^^^^^
             // But not when the WFI is in the first delay slot of a JALR
                 ? f_PC
-                : NextOrSum;
+                : (MCBubble_q & ~m_Kill)
+                    ? d_PC
+                    : NextOrSum_t;
+
 
     wire [WORD_WIDTH-1:0] DecodePC =
         ((d_Bubble | StartMulDiv_v | MCBubble_q) & ~m_Kill)
@@ -1049,7 +1052,7 @@ module Pipeline #(
 
 
     wire [WORD_WIDTH-1:0] ExcWrData2 =
-        MemMisaligned   ? AddrSum       // MTVAL for mem access
+        MemMisaligned   ? AddrSum_t     // MTVAL for mem access
                         : d_PC;         // MEPC 
 
 
@@ -1119,7 +1122,7 @@ module Pipeline #(
 
     // memory signals, generated in execute stage
 
-    wire [1:0] AddrOfs = AddrSum[1:0];
+    wire [1:0] AddrOfs = AddrSum_t[1:0];
     //wire [1:0] AddrOfs = {
     //    e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
     //    e_A[0] ^ e_Imm[0]};
@@ -1403,10 +1406,10 @@ module Pipeline #(
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
 */
 
-        $display("E rem=%h mul=%h SelMulLowOrHigh_q=%b StartMulDiv_q=%b",
-            q_DivRem, q_Long, SelMulLowOrHigh_q, StartMulDiv_q);
-        $display("E SelDivOrMul=%b e_DivSigned=%b div=%h MulDivResult_v=%h",
-            SelDivOrMul, e_DivSigned, q_DivQuot, MulDivResult_v);
+        $display("E rem=%h long=%h SelMulLowOrHigh_q=%b StartMulDiv_q=%b",
+            DivRem_q, Long_q, SelMulLowOrHigh_q, StartMulDiv_q);
+        $display("E SelDivOrMul_v=%b DivSigned_q=%b div=%h MulDivResult_v=%h",
+            SelDivOrMul_v, DivSigned_q, DivQuot_q, MulDivResult_v);
 
         $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b JumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcGrubbyInsn,
@@ -1466,8 +1469,10 @@ module Pipeline #(
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
 
+/*
         $display("Z AddrSum=%h NextOrSum=%h",
-            AddrSum, NextOrSum);
+            AddrSum_t, NextOrSum_t);
+*/
 
 /*
         $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b",
@@ -1485,10 +1490,10 @@ module Pipeline #(
 
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
-        $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelM=%b",
+        $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelE=%b",
             Overwrite_v, OverwriteE_q, OverwriteM_q,
             OverwriteVal_v, OverwriteValE_q, OverwriteValM_q,
-            OverwriteSelM_q);
+            OverwriteSelE_q);
 
 
 //        $display("  DecodeWrNo=%b e_WrNo=%d ExecuteWrNo=%d m_WrNo=%d",
