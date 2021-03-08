@@ -78,14 +78,14 @@ module Pipeline #(
 
     reg DivSigned_q;            // control signals for first cycle
     reg MulASigned_q;
-    reg MulBSigned_q;
+    reg InsnMULH_q;
 
     reg SelRemOrDiv_q;          // control signals for every cycle
     reg SelDivOrMul_q;
 
     reg SelMulLowOrHigh_q;      // control signals for last cycle
-    reg DivResultSign_q;
-    reg MulHSign_q;
+    reg MulDivResNeg_q;
+    reg MulDivResAdd_q;
 
     reg [WORD_WIDTH-1:0] DivQuot_q;
     reg [WORD_WIDTH:0] DivRem_q;
@@ -690,7 +690,7 @@ module Pipeline #(
                         MCBubble_v = 1;
 
                         StartMulDiv_v = 1;
-                        SelRemOrDiv_v = d_Insn[13];
+                        SelRemOrDiv_v = d_Insn[13] | InsnMULH_v;
                         SelDivOrMul_v = d_Insn[14];
                         SelMulLowOrHigh_v = (d_Insn[13:12]==2'b00);
 
@@ -950,7 +950,7 @@ module Pipeline #(
     // control signals for first cycle
     wire DivSigned_v = ~d_Insn[12] & d_Insn[14];
     wire MulASigned_v = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
-    wire MulBSigned_v = ~d_Insn[13];
+    wire InsnMULH_v = (d_Insn[14:12]==3'b001);
 
     wire [WORD_WIDTH:0] DivDiff_t = DivRem_q - {1'b0, Long_q[WORD_WIDTH-1:0]};
     wire DivNegative_t = (Long_q[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff_t[WORD_WIDTH];
@@ -964,8 +964,8 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] DivQuot_v = {DivQuot_q[WORD_WIDTH-2:0], ~DivNegative_t};
 
-    reg DivResultSign_v;
-    reg MulHSign_v;
+    reg MulDivResNeg_v;
+    reg MulDivResAdd_v;
     reg [WORD_WIDTH:0] DivRem_v;
     reg [2*WORD_WIDTH:0] Long_v;
     reg [WORD_WIDTH-1:0] MulDivResult_v;
@@ -974,10 +974,15 @@ module Pipeline #(
 
         // mul/div arithmetic step
         if (StartMulDiv_q) begin
-            DivResultSign_v = DivSigned_q &
-                (e_A[31] ^ (~SelRemOrDiv_q & e_B[31])) & 
-                (e_B!=0 || SelRemOrDiv_q);
-            MulHSign_v = MulBSigned_q & e_B[WORD_WIDTH-1];
+            MulDivResNeg_v =
+                (DivSigned_q &
+                (e_A[WORD_WIDTH-1] ^ (~SelRemOrDiv_q & e_B[WORD_WIDTH-1])) &
+                (e_B!=0 || SelRemOrDiv_q))
+                |
+                (InsnMULH_q & e_B[WORD_WIDTH-1]);
+            MulDivResAdd_v = SelDivOrMul_q
+                |
+                (InsnMULH_q & e_B[WORD_WIDTH-1]);
 
             DivRem_v = {MulASigned_q & e_A[WORD_WIDTH-1], AbsA_t};
             if (SelDivOrMul_q) begin
@@ -986,8 +991,8 @@ module Pipeline #(
                 Long_v = {{(WORD_WIDTH+1){1'b0}}, e_B};
             end
         end else begin
-            DivResultSign_v = DivResultSign_q;
-            MulHSign_v = MulHSign_q;
+            MulDivResNeg_v = MulDivResNeg_q;
+            MulDivResAdd_v = MulDivResAdd_q;
 
             DivRem_v = (DivNegative_t | ~SelDivOrMul_q)
                 ? DivRem_q
@@ -996,24 +1001,23 @@ module Pipeline #(
         end
 
         // mul/div result computation
-        if (SelDivOrMul_q) begin
-            MulDivResult_v = DivResultSign_q ? (-DivRem_t) : DivRem_t;
-        end else begin
-            if (SelMulLowOrHigh_q) begin
-                MulDivResult_v = Long_q[WORD_WIDTH-1:0];
-            end else if (MulHSign_q) begin
-                MulDivResult_v = Long_q[2*WORD_WIDTH-1:WORD_WIDTH] -
-                                 DivRem_q[WORD_WIDTH-1:0];
-            end else begin
-                MulDivResult_v = Long_q[2*WORD_WIDTH-1:WORD_WIDTH];
-            end
-        end
+        MulDivResult_v =
+            (SelDivOrMul_q ? {WORD_WIDTH{1'b0}}
+                           : (SelMulLowOrHigh_q ? Long_q[WORD_WIDTH-1:0]
+                                                : Long_q[2*WORD_WIDTH-1:WORD_WIDTH]))
+            +
+            (MulDivResAdd_q ? NotDivRem_t : {WORD_WIDTH{1'b0}})
+            +
+            {{(WORD_WIDTH-1){1'b0}}, MulDivResNeg_q};
+
+
     end
 
     wire [WORD_WIDTH-1:0] DivRem_t = SelRemOrDiv_q
         ? DivRem_q[WORD_WIDTH-1:0]
         : DivQuot_q;
 
+    wire [WORD_WIDTH-1:0] NotDivRem_t = MulDivResNeg_q ? (~DivRem_t) : DivRem_t;
 
 
 
@@ -1226,13 +1230,13 @@ module Pipeline #(
 
         DivSigned_q <= DivSigned_v;
         MulASigned_q <= MulASigned_v;
-        MulBSigned_q <= MulBSigned_v;
+        InsnMULH_q <= InsnMULH_v;
 
         SelRemOrDiv_q <= SelRemOrDiv_v;
         SelDivOrMul_q <= SelDivOrMul_v;
 
-        DivResultSign_q <= DivResultSign_v;
-        MulHSign_q <= MulHSign_v;
+        MulDivResNeg_q <= MulDivResNeg_v;
+        MulDivResAdd_q <= MulDivResAdd_v;
         SelMulLowOrHigh_q <= SelMulLowOrHigh_v;
 
         DivQuot_q <= DivQuot_v;
