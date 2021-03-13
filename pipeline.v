@@ -46,6 +46,14 @@ module Pipeline #(
     localparam [5:0] REG_CSR_MTVAL    = 6'b110011;
 
 
+// suffixes
+// _i input of module
+// _o output of module
+// _q register output
+// _d signal that feeds a register input
+// _v variable inside a process
+// _w wire: intermediate signal that connects signals or registers
+
 
 // ---------------------------------------------------------------------
 // real registers
@@ -68,10 +76,10 @@ module Pipeline #(
     reg MCBubble_q;
 
     reg [WORD_WIDTH-1:0] d_PC;
-    reg [31:0] d_DelayedInsn;
-    reg d_DelayedInsnGrubby;
-    reg d_SaveFetch;
-    reg d_Bubble;
+    reg [31:0] DelayedInsn_q;
+    reg DelayedInsnGrubby_q;
+    reg BubbleM_q;
+    reg BubbleE_q;
 
     // mul/div
     reg StartMulDiv_q;
@@ -216,10 +224,11 @@ module Pipeline #(
     reg DecodeGrubbyInsn;
     reg [5:0] RdNo1;
     always @* begin
-        if ((d_Bubble | d_SaveFetch) & ~m_Kill) begin
-            RdNo1 = {1'b0, d_DelayedInsn[19:15]};
-            Insn = d_DelayedInsn;
-            DecodeGrubbyInsn = d_DelayedInsnGrubby;
+        if ((/*BubbleE_q |*/ BubbleM_q | MC_q) & ~m_Kill) begin
+            // BubbleE_q | MC_q = MC_q
+            RdNo1 = {1'b0, DelayedInsn_q[19:15]};
+            Insn = DelayedInsn_q;
+            DecodeGrubbyInsn = DelayedInsnGrubby_q;
         end else begin
             RdNo1 = {1'b0, mem_rdata[19:15]};
             Insn = mem_rdata;
@@ -228,6 +237,19 @@ module Pipeline #(
         if (ModRdNo1[5]) RdNo1 = ModRdNo1;
     end
 
+    wire BubbleE_d = BubbleE_q & ~m_Kill;
+
+    reg [31:0] DelayedInsn_d;
+    reg DelayedInsnGrubby_d;
+    always @* begin
+        if (((BubbleD_d & BubbleM_q) | MCBubble_q) & ~m_Kill) begin
+            DelayedInsn_d = DelayedInsn_q;
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+        end else begin
+            DelayedInsn_d = mem_rdata;
+            DelayedInsnGrubby_d = mem_rgrubby;
+        end
+    end
 
 
 
@@ -258,7 +280,7 @@ module Pipeline #(
                 end
             endcase
         end
-        if (TrapEnter_v) begin
+        if (TrapEnter_d) begin
             MModeIntEnable = 0;
             MModePriorIntEnable = f_MModeIntEnable;
         end
@@ -333,7 +355,6 @@ module Pipeline #(
         //         ^^ ^
         // for all other opcodes, LTU and InverBranch don't mind
 
-    wire SaveFetch      = (d_Bubble | (Bubble & ~d_SaveFetch)) & ~m_Kill;
 
 
 
@@ -358,7 +379,7 @@ module Pipeline #(
         e_CsrAddr   <= d_Insn[31:20];
     end
 
-    assign retired    = ~d_Bubble & ~m_Kill & ~w_Kill;
+    assign retired    = ~BubbleE_q & ~m_Kill & ~w_Kill;
     assign csr_read   = e_CsrRead;
     assign csr_modify = e_CsrModify;
     assign csr_wdata  = e_CsrWData;
@@ -381,9 +402,9 @@ module Pipeline #(
     endcase
 
 
-    wire IrqResponse_v = f_MModeIntEnable &
+    wire IrqResponse_d = f_MModeIntEnable &
         (SoftwareIrq_q | TimerIrq_q | ExternalIrq_q) &
-        ~NoIrq_v;    // no interrup the 2nd cycle after a jump or branch
+        ~NoIrq_d;    // no interrup the 2nd cycle after a jump or branch
 
 
     localparam [7:0] mcNop = 0;
@@ -405,15 +426,15 @@ module Pipeline #(
     reg CsrRead;
     reg CsrFromExt; // only to avoid write enable in second cycle of CSR Insn
     reg [1:0] CsrOp;
-    reg Bubble;
+    reg BubbleD_d;
 
     reg InsnBEQ;
     reg InsnBLTorBLTU;
     reg InsnJALR;
     reg BranchUncondPCRel;
     reg ReturnPC;
-    reg NoIrq_v;
-    reg WaitForInt_v;
+    reg NoIrq_d;
+    reg WaitForInt_d;
 
     reg NegB;
     reg SelSum;
@@ -428,23 +449,23 @@ module Pipeline #(
     reg [1:0] MemWidth;
 
     reg [5:0] ModRdNo1;
-    reg MC_v;
-    reg [7:0] MCState_v;
-    reg [5:0] MCAux_v;
-    reg [4:0] MCRegNo_v;
-    reg MCBubble_v;
+    reg MC_d;
+    reg [7:0] MCState_d;
+    reg [5:0] MCAux_d;
+    reg [4:0] MCRegNo_d;
+    reg MCBubble_d;
 
     reg [WORD_WIDTH-1:0] Imm;
-    reg Overwrite_v;              // overwrite result in M-stage (used by exceptions
-    reg [WORD_WIDTH-1:0] OverwriteVal_v;
-    reg OverwriteSelD_v;
-    reg InsnMRET_v;
-    reg TrapEnter_v;
+    reg Overwrite_d;              // overwrite result in M-stage (used by exceptions
+    reg [WORD_WIDTH-1:0] OverwriteVal_d;
+    reg OverwriteSelD_d;
+    reg InsnMRET_d;
+    reg TrapEnter_d;
 
-    reg StartMulDiv_v;
-    reg SelRemOrDiv_v;
-    reg SelDivOrMul_v;
-    reg SelMulLowOrHigh_v;
+    reg StartMulDiv_d;
+    reg SelRemOrDiv_d;
+    reg SelDivOrMul_d;
+    reg SelMulLowOrHigh_d;
 
     always @* begin
         ExcInvalidInsn = 1;
@@ -459,17 +480,17 @@ module Pipeline #(
         CsrRead = 0;
         CsrFromExt = 0;
         CsrOp = 0;
-        Bubble = 0;
+        BubbleD_d = 0;
 
         InsnBEQ         = 0;
         InsnBLTorBLTU   = 0;
         InsnJALR        = 0;
         BranchUncondPCRel    = 0;
         ReturnPC        = 0;
-        NoIrq_v           = 0;
+        NoIrq_d           = 0;
             // don't allow interrupt in 2nd cycle, because d_PC is
             // not set correctly, which will result in a wrong MEPC
-        WaitForInt_v    = WaitForInt_q;
+        WaitForInt_d    = WaitForInt_q;
 
         NegB            = 0;
         SelSum          = 0;
@@ -484,40 +505,40 @@ module Pipeline #(
         MemWidth        = 2'b11; // no memory access
 
         ModRdNo1        = 0; // don't change the register read in the next cycle
-        MC_v            = 0;
-        MCState_v       = 0;
-        MCAux_v         = MCAux_q - 1;
-        MCRegNo_v       = MCRegNo_q;
-        MCBubble_v      = 0;
+        MC_d            = 0;
+        MCState_d       = 0;
+        MCAux_d         = MCAux_q - 1;
+        MCRegNo_d       = MCRegNo_q;
+        MCBubble_d      = 0;
 
         Imm             = ImmISU;
-        Overwrite_v     = 0;
-        OverwriteVal_v  = 0;
-        OverwriteSelD_v = 0;
-        TrapEnter_v     = 0;
-        InsnMRET_v      = 0;
+        Overwrite_d     = 0;
+        OverwriteVal_d  = 0;
+        OverwriteSelD_d = 0;
+        TrapEnter_d     = 0;
+        InsnMRET_d      = 0;
 
-        StartMulDiv_v   = 0;
-        SelRemOrDiv_v   = SelRemOrDiv_q;
-        SelDivOrMul_v   = SelDivOrMul_q;
-        SelMulLowOrHigh_v = SelMulLowOrHigh_q;
+        StartMulDiv_d   = 0;
+        SelRemOrDiv_d   = SelRemOrDiv_q;
+        SelDivOrMul_d   = SelDivOrMul_q;
+        SelMulLowOrHigh_d = SelMulLowOrHigh_q;
 
         if (m_Kill) begin
             ExcInvalidInsn = 0;
             DecodeWrEn = 0;
-            WaitForInt_v = 0;
+            WaitForInt_d = 0;
             if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
                 ModRdNo1       = REG_CSR_MTVEC;
-                MC_v           = 1;
-                MCState_v      = mcJumpReg;
-                TrapEnter_v    = 1;
+                MC_d           = 1;
+                MCState_d      = mcJumpReg;
+                TrapEnter_d    = 1;
             end
 
         end else if (d_GrubbyInsn) begin
             ModRdNo1       = REG_CSR_MTVEC;
-            MC_v           = 1;
-            MCState_v      = mcJumpReg;
-            TrapEnter_v    = 1;
+            MC_d           = 1;
+            MCState_d      = mcJumpReg;
+            TrapEnter_d    = 1;
 
         // microcoded cycles of multi-cycle instructions
         end else if (MC_q) begin
@@ -540,40 +561,41 @@ module Pipeline #(
                 mcJumpReg: begin // MRET
                     // jump to adddress in first register (MTVEC)
                     DecodeWrEn  = 0;
-                    NoIrq_v       = 1;
+                    NoIrq_d       = 1;
                     InsnJALR    = 1;
                     AddrFromSum = 1;
                     Imm         = 0;
                 end
                 mcException: begin 
                     // jump to adddress in first register (MEPC) and write MCAUSE
-                    NoIrq_v       = 1;
+                    NoIrq_d       = 1;
                     InsnJALR    = 1;
                     AddrFromSum = 1;
                     Imm         = 0;
-                    Overwrite_v = 1;
-                    OverwriteVal_v = {MCAux_q[4], {(WORD_WIDTH-5){1'b0}}, MCAux_q[3:0]};
+                    Overwrite_d = 1;
+                    OverwriteVal_d = {MCAux_q[4], {(WORD_WIDTH-5){1'b0}}, MCAux_q[3:0]};
                     DecodeWrNo = REG_CSR_MCAUSE;
                 end
                 mcMulDiv: begin
                     DecodeWrEn = 0;
                     if (MCAux_q != 0) begin
-                        MC_v = 1;
-                        MCState_v = mcMulDiv;
-                        MCBubble_v = 1;
+                        MC_d = 1;
+                        MCState_d = mcMulDiv;
+                        MCBubble_d = 1;
                     end else begin
-                        MC_v = 1;
-                        MCState_v = mcMulDivWriteback;
+                        MC_d = 1;
+                        MCState_d = mcMulDivWriteback;
+MCBubble_d = 1;
                     end
                 end
                 mcMulDivWriteback: begin
                     DecodeWrEn = (MCRegNo_q!=0); // OPTIMISE
                         // required for forwarding
                     DecodeWrNo = {1'b0, MCRegNo_q};
-                    Overwrite_v = (MCRegNo_q!=0); // OPTIMISE
-                    OverwriteSelD_v = 1;
-                    MC_v = 1;
-                    MCState_v = mcMulDivLast;
+                    Overwrite_d = (MCRegNo_q!=0); // OPTIMISE
+                    OverwriteSelD_d = 1;
+                    MC_d = 1;
+                    MCState_d = mcMulDivLast;
                 end
                 mcMulDivLast: begin
                     // just do nothing because result is not yet available
@@ -588,20 +610,20 @@ module Pipeline #(
             if (IrqResponse_q) begin
 
                 if (ExternalIrq_q) begin
-                    MCAux_v = 6'h1b;
+                    MCAux_d = 6'h1b;
                 end else if (SoftwareIrq_q) begin
-                    MCAux_v = 6'h13;
+                    MCAux_d = 6'h13;
                 end else begin
-                    MCAux_v = 6'h17;
+                    MCAux_d = 6'h17;
                 end
-                WaitForInt_v = 0;
-                Overwrite_v = 1;
-                OverwriteVal_v = d_PC;
+                WaitForInt_d = 0;
+                Overwrite_d = 1;
+                OverwriteVal_d = d_PC;
                 DecodeWrNo = REG_CSR_MEPC;
                 ModRdNo1 = REG_CSR_MTVEC;
-                MC_v = 1;
-                MCState_v = mcException;
-                TrapEnter_v = 1;
+                MC_d = 1;
+                MCState_d = mcException;
+                TrapEnter_d = 1;
             end
             // else do nothing and wait for interrupt
 
@@ -623,14 +645,14 @@ module Pipeline #(
                     ExcInvalidInsn = 0;
                     BranchUncondPCRel = 1;
                     ReturnPC       = 1;
-                    NoIrq_v          = 1;
+                    NoIrq_d          = 1;
                 end
                 5'b11001: begin // JALR
                     ExcInvalidInsn = (d_Insn[14:12]!=3'b000);
                     ReturnPC       = 1;
-                    NoIrq_v          = 1;
+                    NoIrq_d          = 1;
 
-                    // disable JALR, if it is the memory bubble and there is no memory exception
+                    // disable JALR, if it is the memory BubbleD_d and there is no memory exception
                     // TODO: get rid of it
                     if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
                         InsnJALR    = 1;
@@ -642,31 +664,31 @@ module Pipeline #(
                     DecodeWrEn     = 0;
                     InsnBEQ        = (d_Insn[14:13]==2'b00);
                     InsnBLTorBLTU  = d_Insn[14];
-                    NoIrq_v          = 1;
+                    NoIrq_d          = 1;
                     NegB           = 1;
                     SelLogic       = InsnBEQ ? 2'b00 : 2'b01;
                 end
                 5'b00000: begin // load
                     ExcInvalidInsn = (d_Insn[13] & (d_Insn[14] | d_Insn[12]));
-                    Bubble         = 1;
+                    BubbleD_d         = 1;
                     AddrFromSum    = 1;
                     MemWidth       = d_Insn[13:12];
                     ModRdNo1       = REG_CSR_MTVEC;
                         // read MTVEC in 2nd cycle, so that its value is
                         // available if Exc is raised
-                    MC_v           = 1;
-                    MCState_v      = mcMem;
+                    MC_d           = 1;
+                    MCState_d      = mcMem;
                 end
                 5'b01000: begin // store
                     ExcInvalidInsn = (d_Insn[14] | (d_Insn[13] & d_Insn[12]));
                     DecodeWrEn     = 0;
-                    Bubble         = 1;
+                    BubbleD_d         = 1;
                     AddrFromSum    = 1;
                     MemStore       = 1;
                     MemWidth       = d_Insn[13:12];
                     ModRdNo1       = REG_CSR_MTVEC;
-                    MC_v           = 1;
-                    MCState_v      = mcMem;
+                    MC_d           = 1;
+                    MCState_d      = mcMem;
                 end
                 5'b00100: begin // immediate
                     ExcInvalidInsn = ~d_Insn[13] & d_Insn[12] &
@@ -685,16 +707,16 @@ module Pipeline #(
                     if (d_Insn[25]) begin // RVM
                         ExcInvalidInsn = (d_Insn[31:26]!=0);
 
-                        MC_v = 1;
-                        MCState_v = mcMulDiv;
-                        MCAux_v = 31;
-                        MCRegNo_v = d_Insn[11:7];
-                        MCBubble_v = 1;
+                        MC_d = 1;
+                        MCState_d = mcMulDiv;
+                        MCAux_d = 31;
+                        MCRegNo_d = d_Insn[11:7];
+                        MCBubble_d = 1;
 
-                        StartMulDiv_v = 1;
-                        SelRemOrDiv_v = d_Insn[13] | InsnMULH_v;
-                        SelDivOrMul_v = d_Insn[14];
-                        SelMulLowOrHigh_v = (d_Insn[13:12]==2'b00);
+                        StartMulDiv_d = 1;
+                        SelRemOrDiv_d = d_Insn[13] | InsnMULH_d;
+                        SelDivOrMul_d = d_Insn[14];
+                        SelMulLowOrHigh_d = (d_Insn[13:12]==2'b00);
 
                     end else begin // arith
                         ExcInvalidInsn = d_Insn[31] | (d_Insn[29:26]!=0) |
@@ -713,9 +735,9 @@ module Pipeline #(
                     BranchUncondPCRel = d_Insn[12];
                 end
                 5'b11100: begin // system
-                    Bubble = 1;
-                    MC_v = 1;
-                    MCState_v = mcNop;
+                    BubbleD_d = 1;
+                    MC_d = 1;
+                    MCState_d = mcNop;
                     if (d_Insn[13] | d_Insn[12]) begin
                         // RVZicsr
                         ExcInvalidInsn = 0;
@@ -725,52 +747,52 @@ module Pipeline #(
                         CsrFromExt = ~CsrFromReg;
                         CsrOp      = d_Insn[13:12];
                         ModRdNo1   = {1'b1, vCsrTranslate};
-                        MC_v       = 1;
-                        MCState_v  = mcCsr;
+                        MC_d       = 1;
+                        MCState_d  = mcCsr;
                     end else begin
                         if (d_Insn[19:7]==0) begin
                             ExcInvalidInsn = 0;
                             case (d_Insn[31:20])
                                 12'h000: begin // ECALL
-                                    Overwrite_v = 1;
-                                    OverwriteVal_v = d_PC;
+                                    Overwrite_d = 1;
+                                    OverwriteVal_d = d_PC;
                                     DecodeWrNo = REG_CSR_MEPC;
                                     ModRdNo1 = REG_CSR_MTVEC;
-                                    MC_v = 1;
-                                    MCState_v = mcException;
-                                    MCAux_v = 6'h0b;
-                                    TrapEnter_v = 1;
+                                    MC_d = 1;
+                                    MCState_d = mcException;
+                                    MCAux_d = 6'h0b;
+                                    TrapEnter_d = 1;
                                 end
                                 12'h001: begin // EBREAK
-                                    Overwrite_v = 1;
-                                    OverwriteVal_v = d_PC;
+                                    Overwrite_d = 1;
+                                    OverwriteVal_d = d_PC;
                                     DecodeWrNo = REG_CSR_MEPC;
                                     ModRdNo1 = REG_CSR_MTVEC;
-                                    MC_v = 1;
-                                    MCState_v = mcException;
-                                    MCAux_v = 6'h03;
-                                    TrapEnter_v = 1;
+                                    MC_d = 1;
+                                    MCState_d = mcException;
+                                    MCAux_d = 6'h03;
+                                    TrapEnter_d = 1;
                                 end
                                 12'h002: begin // URET
                                     ModRdNo1 = REG_CSR_MEPC;
-                                    MC_v = 1;
-                                    MCState_v = mcJumpReg;
-                                    InsnMRET_v = 1;
+                                    MC_d = 1;
+                                    MCState_d = mcJumpReg;
+                                    InsnMRET_d = 1;
                                 end
                                 12'h102: begin // SRET
                                     ModRdNo1 = REG_CSR_MEPC;
-                                    MC_v = 1;
-                                    MCState_v = mcJumpReg;
-                                    InsnMRET_v = 1;
+                                    MC_d = 1;
+                                    MCState_d = mcJumpReg;
+                                    InsnMRET_d = 1;
                                 end
                                 12'h302: begin // MRET
                                     ModRdNo1 = REG_CSR_MEPC;
-                                    MC_v = 1;
-                                    MCState_v = mcJumpReg;
-                                    InsnMRET_v = 1;
+                                    MC_d = 1;
+                                    MCState_d = mcJumpReg;
+                                    InsnMRET_d = 1;
                                 end
                                 12'h105: begin // WFI
-                                    WaitForInt_v = 1;
+                                    WaitForInt_d = 1;
                                 end
                                 default: begin
                                     ExcInvalidInsn = 1;
@@ -902,28 +924,28 @@ module Pipeline #(
     wire vNotBEQ = ((e_InsnBLTorBLTU & vLess) | e_BranchUncondPCRel) & ~m_Kill;
     wire vCondResultBit = e_SetCond & vLess;
 
-    wire Branch_t = vBEQ | vNotBEQ;
+    wire Branch_w = vBEQ | vNotBEQ;
     wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & ~m_Kill);
         // any jump or exception
 
 
-    wire [WORD_WIDTH-1:0] AddrSum_t = e_A + e_Imm;
-    wire [WORD_WIDTH-1:0] NextPC_t = f_PC + 4;
-    wire [WORD_WIDTH-1:0] NextOrSum_t =
+    wire [WORD_WIDTH-1:0] AddrSum_w = e_A + e_Imm;
+    wire [WORD_WIDTH-1:0] NextPC_w = f_PC + 4;
+    wire [WORD_WIDTH-1:0] NextOrSum_w =
         (e_AddrFromSum & ~m_Kill)
-            ? {AddrSum_t[WORD_WIDTH-1:1], 1'b0}
-            : NextPC_t;
+            ? {AddrSum_w[WORD_WIDTH-1:1], 1'b0}
+            : NextPC_w;
 
 
     wire [WORD_WIDTH-1:0] MemAddr =
-        Branch_t // taken PC-relative branch
+        Branch_w // taken PC-relative branch
             ? e_PCImm
-            : NextOrSum_t;
+            : NextOrSum_w;
 
     wire [WORD_WIDTH-1:0] FetchPC =
-        Branch_t
+        Branch_w
             ? e_PCImm
-            : ((d_Bubble & ~m_Kill) | (WaitForInt_v & ~e_InsnJALR))
+            : ((BubbleE_q & ~m_Kill) | (WaitForInt_d & ~e_InsnJALR))
             //                         ^^^^^^^^^^
             // A WFI instruction must immediately stop to increment the PC,
             // otherwise the MEPC will be wrong in the trap handler.
@@ -932,11 +954,11 @@ module Pipeline #(
                 ? f_PC
                 : (MCBubble_q & ~m_Kill)
                     ? d_PC
-                    : NextOrSum_t;
+                    : NextOrSum_w;
 
 
     wire [WORD_WIDTH-1:0] DecodePC =
-        ((d_Bubble | StartMulDiv_v | MCBubble_q) & ~m_Kill)
+        ((BubbleE_q /*| StartMulDiv_d*/ | MCBubble_q) & ~m_Kill)
             ? d_PC
             : f_PC;
 
@@ -951,76 +973,76 @@ module Pipeline #(
     // mul/div unit
 
     // control signals for first cycle
-    wire DivSigned_v = ~d_Insn[12] & d_Insn[14];
-    wire MulASigned_v = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
-    wire InsnMULH_v = (d_Insn[14:12]==3'b001);
+    wire DivSigned_d = ~d_Insn[12] & d_Insn[14];
+    wire MulASigned_d = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
+    wire InsnMULH_d = (d_Insn[14:12]==3'b001);
 
-    wire [WORD_WIDTH:0] DivDiff_t = DivRem_q - {1'b0, Long_q[WORD_WIDTH-1:0]};
-    wire DivNegative_t = (Long_q[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff_t[WORD_WIDTH];
-    wire [WORD_WIDTH+1:0] LongAdd_t =
+    wire [WORD_WIDTH:0] DivDiff_w = DivRem_q - {1'b0, Long_q[WORD_WIDTH-1:0]};
+    wire DivNegative_w = (Long_q[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff_w[WORD_WIDTH];
+    wire [WORD_WIDTH+1:0] LongAdd_w =
         {Long_q[2*WORD_WIDTH], Long_q[2*WORD_WIDTH:WORD_WIDTH]}
             + (Long_q[0] ? {DivRem_q[WORD_WIDTH], DivRem_q}
                          : {(WORD_WIDTH+2){1'b0}});
 
-    wire [WORD_WIDTH-1:0] AbsA_t = (DivSigned_q & e_A[WORD_WIDTH-1]) ? (-e_A) : e_A;
-    wire [WORD_WIDTH-1:0] AbsB_t = (DivSigned_q & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B;
+    wire [WORD_WIDTH-1:0] AbsA_w = (DivSigned_q & e_A[WORD_WIDTH-1]) ? (-e_A) : e_A;
+    wire [WORD_WIDTH-1:0] AbsB_w = (DivSigned_q & e_B[WORD_WIDTH-1]) ? (-e_B) : e_B;
 
-    wire [WORD_WIDTH-1:0] DivQuot_v = {DivQuot_q[WORD_WIDTH-2:0], ~DivNegative_t};
+    wire [WORD_WIDTH-1:0] DivQuot_d = {DivQuot_q[WORD_WIDTH-2:0], ~DivNegative_w};
 
-    reg MulDivResNeg_v;
-    reg MulDivResAdd_v;
-    reg [WORD_WIDTH:0] DivRem_v;
-    reg [2*WORD_WIDTH:0] Long_v;
-    reg [WORD_WIDTH-1:0] MulDivResult_v;
+    reg MulDivResNeg_d;
+    reg MulDivResAdd_d;
+    reg [WORD_WIDTH:0] DivRem_d;
+    reg [2*WORD_WIDTH:0] Long_d;
+    reg [WORD_WIDTH-1:0] MulDivResult_d;
 
     always @* begin
 
         // mul/div arithmetic step
         if (StartMulDiv_q) begin
-            MulDivResNeg_v =
+            MulDivResNeg_d =
                 (DivSigned_q &
                 (e_A[WORD_WIDTH-1] ^ (~SelRemOrDiv_q & e_B[WORD_WIDTH-1])) &
                 (e_B!=0 || SelRemOrDiv_q))
                 |
                 (InsnMULH_q & e_B[WORD_WIDTH-1]);
-            MulDivResAdd_v = SelDivOrMul_q
+            MulDivResAdd_d = SelDivOrMul_q
                 |
                 (InsnMULH_q & e_B[WORD_WIDTH-1]);
 
-            DivRem_v = {MulASigned_q & e_A[WORD_WIDTH-1], AbsA_t};
+            DivRem_d = {MulASigned_q & e_A[WORD_WIDTH-1], AbsA_w};
             if (SelDivOrMul_q) begin
-                Long_v = {2'b0, AbsB_t, {(WORD_WIDTH-1){1'b0}}};
+                Long_d = {2'b0, AbsB_w, {(WORD_WIDTH-1){1'b0}}};
             end else begin
-                Long_v = {{(WORD_WIDTH+1){1'b0}}, e_B};
+                Long_d = {{(WORD_WIDTH+1){1'b0}}, e_B};
             end
         end else begin
-            MulDivResNeg_v = MulDivResNeg_q;
-            MulDivResAdd_v = MulDivResAdd_q;
+            MulDivResNeg_d = MulDivResNeg_q;
+            MulDivResAdd_d = MulDivResAdd_q;
 
-            DivRem_v = (DivNegative_t | ~SelDivOrMul_q)
+            DivRem_d = (DivNegative_w | ~SelDivOrMul_q)
                 ? DivRem_q
-                : {1'b0, DivDiff_t[WORD_WIDTH-1:0]};
-            Long_v = {LongAdd_t[WORD_WIDTH+1:0], Long_q[WORD_WIDTH-1:1]};
+                : {1'b0, DivDiff_w[WORD_WIDTH-1:0]};
+            Long_d = {LongAdd_w[WORD_WIDTH+1:0], Long_q[WORD_WIDTH-1:1]};
         end
 
         // mul/div result computation
-        MulDivResult_v =
+        MulDivResult_d =
             (SelDivOrMul_q ? {WORD_WIDTH{1'b0}}
                            : (SelMulLowOrHigh_q ? Long_q[WORD_WIDTH-1:0]
                                                 : Long_q[2*WORD_WIDTH-1:WORD_WIDTH]))
             +
-            (MulDivResAdd_q ? NotDivRem_t : {WORD_WIDTH{1'b0}})
+            (MulDivResAdd_q ? NotDivRem_w : {WORD_WIDTH{1'b0}})
             +
             {{(WORD_WIDTH-1){1'b0}}, MulDivResNeg_q};
 
 
     end
 
-    wire [WORD_WIDTH-1:0] DivRem_t = SelRemOrDiv_q
+    wire [WORD_WIDTH-1:0] DivRem_w = SelRemOrDiv_q
         ? DivRem_q[WORD_WIDTH-1:0]
         : DivQuot_q;
 
-    wire [WORD_WIDTH-1:0] NotDivRem_t = MulDivResNeg_q ? (~DivRem_t) : DivRem_t;
+    wire [WORD_WIDTH-1:0] NotDivRem_w = MulDivResNeg_q ? (~DivRem_w) : DivRem_w;
 
 
 
@@ -1052,7 +1074,7 @@ module Pipeline #(
 
 
     wire [WORD_WIDTH-1:0] ExcWrData2 =
-        MemMisaligned   ? AddrSum_t     // MTVAL for mem access
+        MemMisaligned   ? AddrSum_w     // MTVAL for mem access
                         : d_PC;         // MEPC 
 
 
@@ -1061,11 +1083,11 @@ module Pipeline #(
                         : e_ExcWrData2;
 
 
-    wire [WORD_WIDTH-1:0] OverwriteValM_v = OverwriteValM_q;
-    wire [WORD_WIDTH-1:0] OverwriteValE_v = OverwriteSelE_q ? MulDivResult_v : OverwriteValE_q;
+    wire [WORD_WIDTH-1:0] OverwriteValM_d = OverwriteValM_q;
+    wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q ? MulDivResult_d : OverwriteValE_q;
 
     wire [WORD_WIDTH-1:0] CsrResult =
-        OverwriteM_q ? OverwriteValM_v
+        OverwriteM_q ? OverwriteValM_d
                      : (vExcOverwrite ? ((e_ExcJump | e_ExcGrubbyJump) ? e_ExcWrData2 // MTVAL for jump
                                                                        : m_ExcWrData)
                                       : vCsrOrALU);
@@ -1122,7 +1144,7 @@ module Pipeline #(
 
     // memory signals, generated in execute stage
 
-    wire [1:0] AddrOfs = AddrSum_t[1:0];
+    wire [1:0] AddrOfs = AddrSum_w[1:0];
     //wire [1:0] AddrOfs = {
     //    e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
     //    e_A[0] ^ e_Imm[0]};
@@ -1213,38 +1235,36 @@ module Pipeline #(
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
         d_CsrTranslate <= vCsrTranslate;
-        MC_q <= MC_v;
-        MCState_q <= MCState_v;
-        MCAux_q <= MCAux_v;
-        MCRegNo_q <= MCRegNo_v;
-        MCBubble_q <= MCBubble_v;
+        MC_q <= MC_d;
+        MCState_q <= MCState_d;
+        MCAux_q <= MCAux_d;
+        MCRegNo_q <= MCRegNo_d;
+        MCBubble_q <= MCBubble_d;
 
-        if (SaveFetch) begin
-            d_DelayedInsn <= mem_rdata;
-            d_DelayedInsnGrubby <= mem_rgrubby;
-        end
-        d_SaveFetch <= SaveFetch;
-        d_Bubble <= Bubble;
+        DelayedInsn_q <= DelayedInsn_d;
+        DelayedInsnGrubby_q <= DelayedInsnGrubby_d;
+        BubbleM_q <= BubbleE_d;
+        BubbleE_q <= BubbleD_d;
 
 
 
 
-        StartMulDiv_q <= StartMulDiv_v;
+        StartMulDiv_q <= StartMulDiv_d;
 
-        DivSigned_q <= DivSigned_v;
-        MulASigned_q <= MulASigned_v;
-        InsnMULH_q <= InsnMULH_v;
+        DivSigned_q <= DivSigned_d;
+        MulASigned_q <= MulASigned_d;
+        InsnMULH_q <= InsnMULH_d;
 
-        SelRemOrDiv_q <= SelRemOrDiv_v;
-        SelDivOrMul_q <= SelDivOrMul_v;
+        SelRemOrDiv_q <= SelRemOrDiv_d;
+        SelDivOrMul_q <= SelDivOrMul_d;
 
-        MulDivResNeg_q <= MulDivResNeg_v;
-        MulDivResAdd_q <= MulDivResAdd_v;
-        SelMulLowOrHigh_q <= SelMulLowOrHigh_v;
+        MulDivResNeg_q <= MulDivResNeg_d;
+        MulDivResAdd_q <= MulDivResAdd_d;
+        SelMulLowOrHigh_q <= SelMulLowOrHigh_d;
 
-        DivQuot_q <= DivQuot_v;
-        DivRem_q <= DivRem_v;
-        Long_q <= Long_v;
+        DivQuot_q <= DivQuot_d;
+        DivRem_q <= DivRem_d;
+        Long_q <= Long_d;
 
 
 
@@ -1319,12 +1339,12 @@ module Pipeline #(
         m_WriteMTVAL        <= WriteMTVAL;
         m_Cause             <= Cause;
 
-        OverwriteE_q        <= Overwrite_v;
-        OverwriteValE_q     <= OverwriteVal_v;
+        OverwriteE_q        <= Overwrite_d;
+        OverwriteValE_q     <= OverwriteVal_d;
         OverwriteM_q        <= OverwriteE_q & ~m_Kill;
-        OverwriteValM_q     <= OverwriteValE_v;
-        OverwriteSelE_q     <= OverwriteSelD_v;
-        InsnMRET_E_q        <= InsnMRET_v;
+        OverwriteValM_q     <= OverwriteValE_d;
+        OverwriteSelE_q     <= OverwriteSelD_d;
+        InsnMRET_E_q        <= InsnMRET_d;
         InsnMRET_M_q        <= InsnMRET_E_q;
 
         // csr
@@ -1340,9 +1360,9 @@ module Pipeline #(
         // interrupt handling
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
-        WaitForInt_q        <= WaitForInt_v | IrqResponse_v;
-        IrqResponse_q       <= IrqResponse_v;
-        NoIrq_q             <= NoIrq_v;
+        WaitForInt_q        <= WaitForInt_d | IrqResponse_d;
+        IrqResponse_q       <= IrqResponse_d;
+        NoIrq_q             <= NoIrq_d;
         SoftwareIrq_q       <= irq_software;
         TimerIrq_q          <= irq_timer;
         ExternalIrq_q       <= irq_external;
@@ -1394,10 +1414,10 @@ module Pipeline #(
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2);
-        $display("D Bubble=%b SaveFetch=%b f_PC=%h",
-            d_Bubble, d_SaveFetch, f_PC);
-        $display("D MC=%b State=%h Aux=%h MCBubble_v=%b",
-            MC_q, MCState_q, MCAux_q, MCBubble_v);
+        $display("D Bubble=%b%b f_PC=%h Delayed=%h",
+            BubbleE_q, BubbleM_q, f_PC, DelayedInsn_q);
+        $display("D MC=%b State=%h Aux=%h MCBubble_d=%b",
+            MC_q, MCState_q, MCAux_q, MCBubble_d);
 
         $display("E a=%h b=%h i=%h -> %h -> x%d wrenDE=%b%b",
             e_A, e_B, e_Imm, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
@@ -1408,8 +1428,8 @@ module Pipeline #(
 
         $display("E rem=%h long=%h SelMulLowOrHigh_q=%b StartMulDiv_q=%b",
             DivRem_q, Long_q, SelMulLowOrHigh_q, StartMulDiv_q);
-        $display("E SelDivOrMul_v=%b DivSigned_q=%b div=%h MulDivResult_v=%h",
-            SelDivOrMul_v, DivSigned_q, DivQuot_q, MulDivResult_v);
+        $display("E SelDivOrMul_d=%b DivSigned_q=%b div=%h MulDivResult_d=%h",
+            SelDivOrMul_d, DivSigned_q, DivQuot_q, MulDivResult_d);
 
         $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b JumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcGrubbyInsn,
@@ -1471,7 +1491,7 @@ module Pipeline #(
 
 /*
         $display("Z AddrSum=%h NextOrSum=%h",
-            AddrSum_t, NextOrSum_t);
+            AddrSum_w, NextOrSum_w);
 */
 
 /*
@@ -1491,8 +1511,8 @@ module Pipeline #(
         $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
             MemResult, m_MemSign, m_MemByte);
         $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelE=%b",
-            Overwrite_v, OverwriteE_q, OverwriteM_q,
-            OverwriteVal_v, OverwriteValE_q, OverwriteValM_q,
+            Overwrite_d, OverwriteE_q, OverwriteM_q,
+            OverwriteVal_d, OverwriteValE_q, OverwriteValM_q,
             OverwriteSelE_q);
 
 
@@ -1516,7 +1536,7 @@ module Pipeline #(
             SoftwareIrq_q,
             TimerIrq_q,
             ExternalIrq_q,
-            WaitForInt_v, WaitForInt_q, IrqResponse_v, IrqResponse_q);
+            WaitForInt_d, WaitForInt_q, IrqResponse_d, IrqResponse_q);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1532,10 +1552,10 @@ module Pipeline #(
 
             d_Insn <= 32'h13;
             MC_q <= 0;
-            d_SaveFetch <= 0;
-            d_Bubble <= 0;
-            d_DelayedInsn <= 'h13;
-            d_DelayedInsnGrubby <= 0;
+            BubbleM_q <= 0;
+            BubbleE_q <= 0;
+            DelayedInsn_q <= 'h13;
+            DelayedInsnGrubby_q <= 0;
 
             StartMulDiv_q <= 0;
 

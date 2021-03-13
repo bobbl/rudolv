@@ -116,12 +116,12 @@ test_13:
         li      x10, 1000000000
         li      x11, 1000000
         ENABLE_SOFTINT
-        div     x12, x10, x11
+        div     x10, x10, x11
         jal     wait_for_int            # wait, handler should modify x7
         li      x4, 0x80000404          # cause: software interrupt
         bne     x7, x4, restore_fail
         li      x4, 1000                # division result correct?
-        bne     x12, x4, restore_fail
+        bne     x10, x4, restore_fail
 
         #-------------------------------------------------------------
         # Test 14: IE=1 then SWI=1 => trap (interrupt wfi)
