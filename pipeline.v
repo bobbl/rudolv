@@ -199,7 +199,6 @@ module Pipeline #(
 
     reg f_MModeIntEnable;        // mstatus.mie
     reg f_MModePriorIntEnable;   // mstatus.mpie
-    reg WaitForInt_q;
     reg IrqResponse_q;
     reg NoIrq_q;
     reg SoftwareIrq_q;
@@ -410,6 +409,7 @@ module Pipeline #(
     localparam [7:0] mcNop = 0;
     localparam [7:0] mcCsr = 1;
     localparam [7:0] mcMem = 2;
+    localparam [7:0] mcWFI = 3;
     localparam [7:0] mcJumpReg = 4;
     localparam [7:0] mcException = 5;
     localparam [7:0] mcMulDiv = 6;
@@ -434,7 +434,6 @@ module Pipeline #(
     reg BranchUncondPCRel;
     reg ReturnPC;
     reg NoIrq_d;
-    reg WaitForInt_d;
 
     reg NegB;
     reg SelSum;
@@ -490,7 +489,6 @@ module Pipeline #(
         NoIrq_d           = 0;
             // don't allow interrupt in 2nd cycle, because d_PC is
             // not set correctly, which will result in a wrong MEPC
-        WaitForInt_d    = WaitForInt_q;
 
         NegB            = 0;
         SelSum          = 0;
@@ -526,7 +524,6 @@ module Pipeline #(
         if (m_Kill) begin
             ExcInvalidInsn = 0;
             DecodeWrEn = 0;
-            WaitForInt_d = 0;
             if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
                 ModRdNo1       = REG_CSR_MTVEC;
                 MC_d           = 1;
@@ -558,6 +555,14 @@ module Pipeline #(
                         Imm = 0;
                     end
                 end
+                mcWFI: begin // WFI
+                    DecodeWrEn     = 0;
+                    if (~IrqResponse_q) begin
+                        MC_d = 1;
+                        MCState_d = mcWFI;
+                        MCBubble_d = 1;
+                    end
+                end
                 mcJumpReg: begin // MRET
                     // jump to adddress in first register (MTVEC)
                     DecodeWrEn  = 0;
@@ -578,14 +583,12 @@ module Pipeline #(
                 end
                 mcMulDiv: begin
                     DecodeWrEn = 0;
+                    MC_d = 1;
+                    MCBubble_d = 1;
                     if (MCAux_q != 0) begin
-                        MC_d = 1;
                         MCState_d = mcMulDiv;
-                        MCBubble_d = 1;
                     end else begin
-                        MC_d = 1;
                         MCState_d = mcMulDivWriteback;
-MCBubble_d = 1;
                     end
                 end
                 mcMulDivWriteback: begin
@@ -606,26 +609,21 @@ MCBubble_d = 1;
             endcase
 
 
-        end else if (WaitForInt_q) begin
-            if (IrqResponse_q) begin
-
-                if (ExternalIrq_q) begin
-                    MCAux_d = 6'h1b;
-                end else if (SoftwareIrq_q) begin
-                    MCAux_d = 6'h13;
-                end else begin
-                    MCAux_d = 6'h17;
-                end
-                WaitForInt_d = 0;
-                Overwrite_d = 1;
-                OverwriteVal_d = d_PC;
-                DecodeWrNo = REG_CSR_MEPC;
-                ModRdNo1 = REG_CSR_MTVEC;
-                MC_d = 1;
-                MCState_d = mcException;
-                TrapEnter_d = 1;
+        end else if (IrqResponse_q) begin
+            if (ExternalIrq_q) begin
+                MCAux_d = 6'h1b;
+            end else if (SoftwareIrq_q) begin
+                MCAux_d = 6'h13;
+            end else begin
+                MCAux_d = 6'h17;
             end
-            // else do nothing and wait for interrupt
+            Overwrite_d = 1;
+            OverwriteVal_d = d_PC;
+            DecodeWrNo = REG_CSR_MEPC;
+            ModRdNo1 = REG_CSR_MTVEC;
+            MC_d = 1;
+            MCState_d = mcException;
+            TrapEnter_d = 1;
 
 
 
@@ -792,7 +790,9 @@ MCBubble_d = 1;
                                     InsnMRET_d = 1;
                                 end
                                 12'h105: begin // WFI
-                                    WaitForInt_d = 1;
+                                    MC_d = 1;
+                                    MCState_d = mcWFI;
+                                    MCBubble_d = 1;
                                 end
                                 default: begin
                                     ExcInvalidInsn = 1;
@@ -945,12 +945,7 @@ MCBubble_d = 1;
     wire [WORD_WIDTH-1:0] FetchPC =
         Branch_w
             ? e_PCImm
-            : ((BubbleE_q & ~m_Kill) | (WaitForInt_d & ~e_InsnJALR))
-            //                         ^^^^^^^^^^
-            // A WFI instruction must immediately stop to increment the PC,
-            // otherwise the MEPC will be wrong in the trap handler.
-            //                                      ^^^^^^^^^^^
-            // But not when the WFI is in the first delay slot of a JALR
+            : (BubbleE_q & ~m_Kill)
                 ? f_PC
                 : (MCBubble_q & ~m_Kill)
                     ? d_PC
@@ -958,7 +953,7 @@ MCBubble_d = 1;
 
 
     wire [WORD_WIDTH-1:0] DecodePC =
-        ((BubbleE_q /*| StartMulDiv_d*/ | MCBubble_q) & ~m_Kill)
+        ((BubbleE_q | MCBubble_q) & ~m_Kill)
             ? d_PC
             : f_PC;
 
@@ -1360,7 +1355,6 @@ MCBubble_d = 1;
         // interrupt handling
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
-        WaitForInt_q        <= WaitForInt_d | IrqResponse_d;
         IrqResponse_q       <= IrqResponse_d;
         NoIrq_q             <= NoIrq_d;
         SoftwareIrq_q       <= irq_software;
@@ -1383,8 +1377,14 @@ MCBubble_d = 1;
 `ifdef DEBUG
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
             mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
-        $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h",
-            d_PC, d_PC, d_Insn, Insn);
+        if (MC_q==0) begin
+            $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h MC=no",
+                d_PC, d_PC, d_Insn, Insn);
+        end else begin
+            $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h \033[1;33mMC=%h\033[0m",
+                d_PC, d_PC, d_Insn, Insn, MCState_q);
+        end
+
         $display("R  0 %h %h %h %h %h %h %h %h", 
             RegSet.regs[0], RegSet.regs[1], RegSet.regs[2], RegSet.regs[3], 
             RegSet.regs[4], RegSet.regs[5], RegSet.regs[6], RegSet.regs[7]);
@@ -1416,8 +1416,8 @@ MCBubble_d = 1;
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2);
         $display("D Bubble=%b%b f_PC=%h Delayed=%h",
             BubbleE_q, BubbleM_q, f_PC, DelayedInsn_q);
-        $display("D MC=%b State=%h Aux=%h MCBubble_d=%b",
-            MC_q, MCState_q, MCAux_q, MCBubble_d);
+        $display("MC Aux=%h MCBubble_d=%b",
+            MCAux_q, MCBubble_d);
 
         $display("E a=%h b=%h i=%h -> %h -> x%d wrenDE=%b%b",
             e_A, e_B, e_Imm, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
@@ -1490,11 +1490,6 @@ MCBubble_d = 1;
             RegSet.regs[REG_CSR_MTVAL]);
 
 /*
-        $display("Z AddrSum=%h NextOrSum=%h",
-            AddrSum_w, NextOrSum_w);
-*/
-
-/*
         $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b",
             vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp);
         $display("C vCsrOrALU=%h CsrResult=%h",
@@ -1528,15 +1523,12 @@ MCBubble_d = 1;
             MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
 
 
-
-
-
-        $display("I MIE=%b MPIE=%b Software=%b Timer=%b External=%b WFI_F=b%b IR=%b%b",
+        $display("I MIE=%b MPIE=%b Software=%b Timer=%b External=%b IRdq=%b%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
             SoftwareIrq_q,
             TimerIrq_q,
             ExternalIrq_q,
-            WaitForInt_d, WaitForInt_q, IrqResponse_d, IrqResponse_q);
+            IrqResponse_d, IrqResponse_q);
 
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
@@ -1567,7 +1559,7 @@ MCBubble_d = 1;
 
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
-            WaitForInt_q <= 0;
+//            WaitForInt_q <= 0;
             IrqResponse_q <= 0;
             NoIrq_q <= 0;
         end

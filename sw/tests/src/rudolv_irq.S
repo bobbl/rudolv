@@ -116,12 +116,12 @@ test_13:
         li      x10, 1000000000
         li      x11, 1000000
         ENABLE_SOFTINT
-        div     x10, x10, x11
+        div     x12, x10, x11
         jal     wait_for_int            # wait, handler should modify x7
         li      x4, 0x80000404          # cause: software interrupt
         bne     x7, x4, restore_fail
         li      x4, 1000                # division result correct?
-        bne     x10, x4, restore_fail
+        bne     x12, x4, restore_fail
 
         #-------------------------------------------------------------
         # Test 14: IE=1 then SWI=1 => trap (interrupt wfi)
@@ -269,6 +269,23 @@ test_32:
         bne     x7, x4, restore_fail
 
 
+        #-------------------------------------------------------------
+        # Test 33: IE=1 then timer int => trap (interrupt wfi in subroutine)
+        #-------------------------------------------------------------
+test_33:
+        li      TESTNUM, 33
+        li      x7, 0x50
+
+        ENABLE_INTS
+        li      x4, 50
+        csrw    CSR_TIMER, x4
+
+        jal     sub_wfi                 # does not work if wfi is just a nop
+
+        li      x4, 0x80000058          # cause: timer interrupt
+        bne     x7, x4, restore_fail
+
+
 
 
 
@@ -349,8 +366,6 @@ restore_fail:
 
 
 
-
-
 # Wait x6 cycles
 # If am interrupt occurs, x7 will be clobbered
 
@@ -363,6 +378,12 @@ loop:
         sub     x9, x9, x8
         blt     x9, x6, loop
         ret
+
+
+sub_wfi:
+        wfi
+        ret
+        j       restore_fail
 
 
 trap_disable_softint:
