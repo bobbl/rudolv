@@ -95,6 +95,9 @@ test_3:
         li      x4, -1
         li      x5, -2
 target_3:
+        auipc   x6, 0
+        la      x7, target_3
+        bne     x6, x7, fail
         bnez    x4, fail
         bnez    x5, fail
         csrr    x4, mscratch

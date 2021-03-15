@@ -650,7 +650,7 @@ module Pipeline #(
                     ReturnPC       = 1;
                     NoIrq_d          = 1;
 
-                    // disable JALR, if it is the memory BubbleD_d and there is no memory exception
+                    // disable JALR, if it is the memory bubble and there is no memory exception
                     // TODO: get rid of it
                     if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
                         InsnJALR    = 1;
@@ -925,7 +925,20 @@ module Pipeline #(
     wire vCondResultBit = e_SetCond & vLess;
 
     wire Branch_w = vBEQ | vNotBEQ;
-    wire Kill = vBEQ | vNotBEQ | (e_InsnJALR & ~m_Kill);
+/*
+    wire Equal_w = (vLogicResult == ~0);
+    wire Less_w = (Sum[31] & (e_A[31] ^ e_B[31])) ^
+                 ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
+    wire vCondResultBit = e_SetCond & Less_w;
+    wire Branch_w = ~m_Kill & (
+        (e_InsnBEQ       & (e_InvertBranch ^ Equal_w)) |
+        (e_InsnBLTorBLTU & (e_InvertBranch ^  Less_w)) |
+         e_BranchUncondPCRel
+    );
+*/
+
+
+    wire Kill = Branch_w | (e_InsnJALR & ~m_Kill);
         // any jump or exception
 
 
@@ -956,7 +969,8 @@ module Pipeline #(
         ((BubbleE_q | MCBubble_q) & ~m_Kill)
             ? d_PC
             : f_PC;
-
+// without m_Kill, PC is not correctly set in the first instruction at a jump
+// target, if a multicycle insn follows the jump insn
 
 
 
