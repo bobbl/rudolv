@@ -61,7 +61,7 @@ module Pipeline #(
 
 
     // fetch
-    reg [WORD_WIDTH-1:0] f_PC;
+    reg [WORD_WIDTH-1:0] FetchAddr_q;
 
     // decode
     reg [31:0] d_Insn;
@@ -73,13 +73,17 @@ module Pipeline #(
     reg [5:0] MCAux_q;
     reg [4:0] MCRegNo_q;
     reg [4:0] d_CsrTranslate;
-    reg MCBubble_q;
 
-    reg [WORD_WIDTH-1:0] d_PC;
+    reg [WORD_WIDTH-1:0] PC_q;
     reg [31:0] DelayedInsn_q;
     reg DelayedInsnGrubby_q;
     reg BubbleM_q;
     reg BubbleE_q;
+
+//    reg [31:0] AlignedInsn_q;
+    reg [31:0] PartialInsn_q;
+    reg OddPC_q;
+    reg RealignedPC_q;
 
     // mul/div
     reg StartMulDiv_q;
@@ -156,8 +160,6 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_ExcWrData;
     reg e_ExcGrubbyInsn;
     reg m_ExcGrubbyInsn;
-    reg d_ExcJump;
-    reg e_ExcJump;
     reg f_ExcGrubbyJump;
     reg d_ExcGrubbyJump;
     reg e_ExcGrubbyJump;
@@ -208,6 +210,10 @@ module Pipeline #(
     reg d_GrubbyInsn;
 
 
+// deprecated
+    wire f_PC = FetchAddr_q;
+    wire d_PC = PC_q;
+
 
 // ---------------------------------------------------------------------
 // combinational circuits
@@ -218,37 +224,7 @@ module Pipeline #(
 
     // fetch
     // set instruction word for decode
-
-    reg [31:0] Insn;
-    reg DecodeGrubbyInsn;
-    reg [5:0] RdNo1;
-    always @* begin
-        if ((/*BubbleE_q |*/ BubbleM_q | MC_q) & ~m_Kill) begin
-            // BubbleE_q | MC_q = MC_q
-            RdNo1 = {1'b0, DelayedInsn_q[19:15]};
-            Insn = DelayedInsn_q;
-            DecodeGrubbyInsn = DelayedInsnGrubby_q;
-        end else begin
-            RdNo1 = {1'b0, mem_rdata[19:15]};
-            Insn = mem_rdata;
-            DecodeGrubbyInsn = mem_rgrubby;
-        end
-        if (ModRdNo1[5]) RdNo1 = ModRdNo1;
-    end
-
     wire BubbleE_d = BubbleE_q & ~m_Kill;
-
-    reg [31:0] DelayedInsn_d;
-    reg DelayedInsnGrubby_d;
-    always @* begin
-        if (((BubbleD_d & BubbleM_q) | MCBubble_q) & ~m_Kill) begin
-            DelayedInsn_d = DelayedInsn_q;
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
-        end else begin
-            DelayedInsn_d = mem_rdata;
-            DelayedInsnGrubby_d = mem_rgrubby;
-        end
-    end
 
 
 
@@ -332,7 +308,7 @@ module Pipeline #(
         d_Insn[4] ? 4'b0000 : (d_Insn[2] ? (d_Insn[5] ? d_Insn[24:21] : 4'b0010) : d_Insn[11:8]),
         1'b0};                                                          // 0
 
-    wire [WORD_WIDTH-1:0] PCImm = d_PC + ImmBJU;
+    wire [WORD_WIDTH-1:0] PCImm = PC_q + ImmBJU;
 
 
 
@@ -415,7 +391,23 @@ module Pipeline #(
     localparam [7:0] mcMulDiv = 6;
     localparam [7:0] mcMulDivWriteback = 7;
     localparam [7:0] mcMulDivLast = 8;
+    localparam [7:0] mcUnalignedJump = 9;
 
+
+    // Fetching
+    reg [31:0] Insn;
+    reg DecodeGrubbyInsn;
+    reg [5:0] RdNo1;
+    reg [31:0] DelayedInsn_d;
+    reg DelayedInsnGrubby_d;
+
+    reg [WORD_WIDTH-1:0] FetchAddr_d;
+    reg [WORD_WIDTH-1:0] PC_d;
+    reg [31:0] AlignedInsn_d;
+    reg [31:0] PartialInsn_d;
+    reg OddPC_d;
+    reg RealignedPC_d;
+    reg RVCInsn_w;
 
     // Decoding
     reg ExcInvalidInsn;
@@ -452,7 +444,6 @@ module Pipeline #(
     reg [7:0] MCState_d;
     reg [5:0] MCAux_d;
     reg [4:0] MCRegNo_d;
-    reg MCBubble_d;
 
     reg [WORD_WIDTH-1:0] Imm;
     reg Overwrite_d;              // overwrite result in M-stage (used by exceptions
@@ -467,6 +458,13 @@ module Pipeline #(
     reg SelMulLowOrHigh_d;
 
     always @* begin
+
+
+        ////////////
+        // decode
+        ////////////
+
+
         ExcInvalidInsn = 1;
         DecodeWrEn = (d_Insn[11:7]!=0); // do not write to x0
         DecodeWrNo = {e_CsrFromReg, d_Insn[11:7]};
@@ -474,6 +472,13 @@ module Pipeline #(
             // If WrEn was set, the following second cycle of the CSR insn would
             // get the wrong value, because the forwarding condition for the execute
             // bypass was fulfilled.
+
+        FetchAddr_d = FetchAddr_q;
+        PC_d = PC_q;
+        OddPC_d = OddPC_q;
+        RealignedPC_d = 0;
+        RdNo1 = 0;
+        RVCInsn_w = 0;
 
         InsnCSR = 0;
         CsrRead = 0;
@@ -487,7 +492,7 @@ module Pipeline #(
         BranchUncondPCRel    = 0;
         ReturnPC        = 0;
         NoIrq_d           = 0;
-            // don't allow interrupt in 2nd cycle, because d_PC is
+            // don't allow interrupt in 2nd cycle, because PC_q is
             // not set correctly, which will result in a wrong MEPC
 
         NegB            = 0;
@@ -507,7 +512,6 @@ module Pipeline #(
         MCState_d       = 0;
         MCAux_d         = MCAux_q - 1;
         MCRegNo_d       = MCRegNo_q;
-        MCBubble_d      = 0;
 
         Imm             = ImmISU;
         Overwrite_d     = 0;
@@ -522,17 +526,27 @@ module Pipeline #(
         SelMulLowOrHigh_d = SelMulLowOrHigh_q;
 
         if (m_Kill) begin
+            FetchAddr_d = FetchAddr_q + 4; // continue fetching
+            PC_d = FetchAddr_q;
+
+            OddPC_d = FetchAddr_q[1];
+            if (FetchAddr_q[1]) begin
+                FetchAddr_d[1] = 0;
+                MC_d = 1;
+                MCState_d = mcUnalignedJump;
+            end
+
             ExcInvalidInsn = 0;
             DecodeWrEn = 0;
-            if (f_PC[1] | f_ExcGrubbyJump) begin // ExcJump or ExcGrubbyJump
-                ModRdNo1       = REG_CSR_MTVEC;
+            if (f_ExcGrubbyJump) begin
+                RdNo1          = REG_CSR_MTVEC;
                 MC_d           = 1;
                 MCState_d      = mcJumpReg;
                 TrapEnter_d    = 1;
             end
 
         end else if (d_GrubbyInsn) begin
-            ModRdNo1       = REG_CSR_MTVEC;
+            RdNo1          = REG_CSR_MTVEC;
             MC_d           = 1;
             MCState_d      = mcJumpReg;
             TrapEnter_d    = 1;
@@ -560,7 +574,6 @@ module Pipeline #(
                     if (~IrqResponse_q) begin
                         MC_d = 1;
                         MCState_d = mcWFI;
-                        MCBubble_d = 1;
                     end
                 end
                 mcJumpReg: begin // MRET
@@ -584,7 +597,6 @@ module Pipeline #(
                 mcMulDiv: begin
                     DecodeWrEn = 0;
                     MC_d = 1;
-                    MCBubble_d = 1;
                     if (MCAux_q != 0) begin
                         MCState_d = mcMulDiv;
                     end else begin
@@ -603,6 +615,12 @@ module Pipeline #(
                 mcMulDivLast: begin
                     // just do nothing because result is not yet available
                     DecodeWrEn = 0;
+                    FetchAddr_d = FetchAddr_q + 4;
+                end
+                mcUnalignedJump: begin
+                    // wait one cycle because of unaligned jump target
+                    DecodeWrEn = 0;
+                    FetchAddr_d = FetchAddr_q + 4;
                 end
                 default: begin
                 end
@@ -618,9 +636,9 @@ module Pipeline #(
                 MCAux_d = 6'h17;
             end
             Overwrite_d = 1;
-            OverwriteVal_d = d_PC;
+            OverwriteVal_d = PC_q;
             DecodeWrNo = REG_CSR_MEPC;
-            ModRdNo1 = REG_CSR_MTVEC;
+            RdNo1 = REG_CSR_MTVEC;
             MC_d = 1;
             MCState_d = mcException;
             TrapEnter_d = 1;
@@ -629,6 +647,8 @@ module Pipeline #(
 
         // 32 bit instruction
         end else if (d_Insn[1:0]==2'b11) begin
+            FetchAddr_d = FetchAddr_q + 4;
+            PC_d = PC_q + 4;
 
             case (d_Insn[6:2])
                 5'b01101: begin // LUI
@@ -671,7 +691,7 @@ module Pipeline #(
                     BubbleD_d         = 1;
                     AddrFromSum    = 1;
                     MemWidth       = d_Insn[13:12];
-                    ModRdNo1       = REG_CSR_MTVEC;
+                    RdNo1       = REG_CSR_MTVEC;
                         // read MTVEC in 2nd cycle, so that its value is
                         // available if Exc is raised
                     MC_d           = 1;
@@ -684,7 +704,7 @@ module Pipeline #(
                     AddrFromSum    = 1;
                     MemStore       = 1;
                     MemWidth       = d_Insn[13:12];
-                    ModRdNo1       = REG_CSR_MTVEC;
+                    RdNo1       = REG_CSR_MTVEC;
                     MC_d           = 1;
                     MCState_d      = mcMem;
                 end
@@ -705,11 +725,13 @@ module Pipeline #(
                     if (d_Insn[25]) begin // RVM
                         ExcInvalidInsn = (d_Insn[31:26]!=0);
 
+                        FetchAddr_d = FetchAddr_q;
+                            // increment not before last cycle
+
                         MC_d = 1;
                         MCState_d = mcMulDiv;
                         MCAux_d = 31;
                         MCRegNo_d = d_Insn[11:7];
-                        MCBubble_d = 1;
 
                         StartMulDiv_d = 1;
                         SelRemOrDiv_d = d_Insn[13] | InsnMULH_d;
@@ -744,7 +766,7 @@ module Pipeline #(
                         InsnCSR    = 1;
                         CsrFromExt = ~CsrFromReg;
                         CsrOp      = d_Insn[13:12];
-                        ModRdNo1   = {1'b1, vCsrTranslate};
+                        RdNo1   = {1'b1, vCsrTranslate};
                         MC_d       = 1;
                         MCState_d  = mcCsr;
                     end else begin
@@ -753,9 +775,9 @@ module Pipeline #(
                             case (d_Insn[31:20])
                                 12'h000: begin // ECALL
                                     Overwrite_d = 1;
-                                    OverwriteVal_d = d_PC;
+                                    OverwriteVal_d = PC_q;
                                     DecodeWrNo = REG_CSR_MEPC;
-                                    ModRdNo1 = REG_CSR_MTVEC;
+                                    RdNo1 = REG_CSR_MTVEC;
                                     MC_d = 1;
                                     MCState_d = mcException;
                                     MCAux_d = 6'h0b;
@@ -763,28 +785,28 @@ module Pipeline #(
                                 end
                                 12'h001: begin // EBREAK
                                     Overwrite_d = 1;
-                                    OverwriteVal_d = d_PC;
+                                    OverwriteVal_d = PC_q;
                                     DecodeWrNo = REG_CSR_MEPC;
-                                    ModRdNo1 = REG_CSR_MTVEC;
+                                    RdNo1 = REG_CSR_MTVEC;
                                     MC_d = 1;
                                     MCState_d = mcException;
                                     MCAux_d = 6'h03;
                                     TrapEnter_d = 1;
                                 end
                                 12'h002: begin // URET
-                                    ModRdNo1 = REG_CSR_MEPC;
+                                    RdNo1 = REG_CSR_MEPC;
                                     MC_d = 1;
                                     MCState_d = mcJumpReg;
                                     InsnMRET_d = 1;
                                 end
                                 12'h102: begin // SRET
-                                    ModRdNo1 = REG_CSR_MEPC;
+                                    RdNo1 = REG_CSR_MEPC;
                                     MC_d = 1;
                                     MCState_d = mcJumpReg;
                                     InsnMRET_d = 1;
                                 end
                                 12'h302: begin // MRET
-                                    ModRdNo1 = REG_CSR_MEPC;
+                                    RdNo1 = REG_CSR_MEPC;
                                     MC_d = 1;
                                     MCState_d = mcJumpReg;
                                     InsnMRET_d = 1;
@@ -792,7 +814,6 @@ module Pipeline #(
                                 12'h105: begin // WFI
                                     MC_d = 1;
                                     MCState_d = mcWFI;
-                                    MCBubble_d = 1;
                                 end
                                 default: begin
                                     ExcInvalidInsn = 1;
@@ -807,8 +828,65 @@ module Pipeline #(
 
         // compressed instruction
         end else begin
-            ExcInvalidInsn = 1;
+
+            if (OddPC_q) begin
+                OddPC_d = 0;
+                RealignedPC_d = 1;
+            end else begin
+                OddPC_d = 1;
+                RealignedPC_d = 0;
+                FetchAddr_d = FetchAddr_q + 4;
+            end
+
+            PC_d = PC_q + 2;
+//            ExcInvalidInsn = 1;
+            DecodeWrEn = 0;
+            RVCInsn_w = 1;
         end
+
+
+
+        ////////////
+        // fetch
+        ////////////
+
+        if (e_InsnJALR & ~m_Kill) begin
+            FetchAddr_d = {AddrSum_w[WORD_WIDTH-1:1], 1'b0};
+        end
+        if (Branch_w) begin
+            FetchAddr_d = e_PCImm;
+        end
+
+        if ((/*BubbleE_q |*/ BubbleM_q | (MC_q & MCState_q!=mcUnalignedJump)) & ~m_Kill) begin
+            // BubbleE_q | MC_q = MC_q
+            AlignedInsn_d = DelayedInsn_q;
+            DecodeGrubbyInsn = DelayedInsnGrubby_q;
+        end else begin
+            AlignedInsn_d = mem_rdata;
+            DecodeGrubbyInsn = mem_rgrubby;
+        end
+
+        Insn = AlignedInsn_d;
+        if (OddPC_d) begin
+            Insn = {AlignedInsn_d[15:0], PartialInsn_q[31:16]};
+        end else if (RealignedPC_d) begin
+            Insn = PartialInsn_q;
+        end
+
+        if (~RdNo1[5]) RdNo1 = {1'b0, Insn[19:15]};
+
+
+        // delayed insn
+
+        if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d | (BubbleE_q & ~m_Kill)) begin
+            DelayedInsn_d = mem_rdata;
+            DelayedInsnGrubby_d = mem_rgrubby;
+        end else begin
+            DelayedInsn_d = DelayedInsn_q;
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+        end
+
+        PartialInsn_d = RealignedPC_d ? PartialInsn_q : AlignedInsn_d;
     end
 
 
@@ -816,15 +894,6 @@ module Pipeline #(
 
 
 
-
-
-
-
-//    wire [5:0] DecodeWrNo = {e_CsrFromReg, d_Insn[11:7]};
-        // For a CSR instruction, WrNo is set, but not WrEn.
-        // If WrEn was set, the following second cycle of the CSR insn would
-        // get the wrong value, because the forwarding condition for the execute
-        // bypass was fulfilled.
 
     wire ExecuteWrEn   = ~m_Kill & (e_CsrRead | e_WrEn);
     wire [5:0] ExecuteWrNo = e_WrNo;
@@ -880,7 +949,7 @@ module Pipeline #(
         ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
         : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
     wire [WORD_WIDTH-1:0] vPCResult =
-          (e_ReturnPC ? d_PC : 0);
+          (e_ReturnPC ? PC_q : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
         e_ReturnUI ? (e_LUIorAUIPC ? {e_Imm[31:12], 12'b0} : e_PCImm) : 0;
 
@@ -941,37 +1010,17 @@ module Pipeline #(
     wire Kill = Branch_w | (e_InsnJALR & ~m_Kill);
         // any jump or exception
 
-
     wire [WORD_WIDTH-1:0] AddrSum_w = e_A + e_Imm;
-    wire [WORD_WIDTH-1:0] NextPC_w = f_PC + 4;
-    wire [WORD_WIDTH-1:0] NextOrSum_w =
-        (e_AddrFromSum & ~m_Kill)
-            ? {AddrSum_w[WORD_WIDTH-1:1], 1'b0}
-            : NextPC_w;
-
+    wire [WORD_WIDTH-1:0] NextFetchAddr_w = FetchAddr_q + 4;
 
     wire [WORD_WIDTH-1:0] MemAddr =
         Branch_w // taken PC-relative branch
-            ? e_PCImm
-            : NextOrSum_w;
-
-    wire [WORD_WIDTH-1:0] FetchPC =
-        Branch_w
-            ? e_PCImm
-            : (BubbleE_q & ~m_Kill)
-                ? f_PC
-                : (MCBubble_q & ~m_Kill)
-                    ? d_PC
-                    : NextOrSum_w;
-
-
-    wire [WORD_WIDTH-1:0] DecodePC =
-        ((BubbleE_q | MCBubble_q) & ~m_Kill)
-            ? d_PC
-            : f_PC;
-// without m_Kill, PC is not correctly set in the first instruction at a jump
-// target, if a multicycle insn follows the jump insn
-
+            ? {e_PCImm[WORD_WIDTH-1:2], 2'b00}
+            : (e_AddrFromSum & ~m_Kill)
+                ? {AddrSum_w[WORD_WIDTH-1:1], 1'b0}
+                : RealignedPC_d
+                    ? FetchAddr_q
+                    : NextFetchAddr_w;
 
 
 
@@ -1060,11 +1109,10 @@ module Pipeline #(
 
     wire ExcGrubbyInsn  = d_GrubbyInsn;
     wire ExcGrubbyJump  = e_InsnJALR & e_AGrubby & ~m_Kill;
-    wire ExcJump        = m_Kill & f_PC[1];
 
-    wire vWriteMEPC     = ExcJump | f_ExcGrubbyJump | m_ExcGrubbyInsn | m_ExcMem;
-    wire WriteMCAUSE    = ExcJump | f_ExcGrubbyJump | m_ExcGrubbyInsn | w_ExcMem;
-    wire WriteMTVAL     = d_ExcJump | d_ExcGrubbyJump | m_ExcMem;
+    wire vWriteMEPC     = f_ExcGrubbyJump | m_ExcGrubbyInsn | m_ExcMem;
+    wire WriteMCAUSE    = f_ExcGrubbyJump | m_ExcGrubbyInsn | w_ExcMem;
+    wire WriteMTVAL     = d_ExcGrubbyJump | m_ExcMem;
 
     wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
     wire MemWrEn        = m_WrEn | vExcOverwrite | OverwriteM_q;
@@ -1084,7 +1132,7 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] ExcWrData2 =
         MemMisaligned   ? AddrSum_w     // MTVAL for mem access
-                        : d_PC;         // MEPC 
+                        : PC_q;         // MEPC 
 
 
     wire [WORD_WIDTH-1:0] ExcWrData =
@@ -1097,8 +1145,8 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] CsrResult =
         OverwriteM_q ? OverwriteValM_d
-                     : (vExcOverwrite ? ((e_ExcJump | e_ExcGrubbyJump) ? e_ExcWrData2 // MTVAL for jump
-                                                                       : m_ExcWrData)
+                     : (vExcOverwrite ? (e_ExcGrubbyJump ? e_ExcWrData2 // MTVAL for jump
+                                                         : m_ExcWrData)
                                       : vCsrOrALU);
 
     // CSRs
@@ -1248,12 +1296,16 @@ module Pipeline #(
         MCState_q <= MCState_d;
         MCAux_q <= MCAux_d;
         MCRegNo_q <= MCRegNo_d;
-        MCBubble_q <= MCBubble_d;
 
+        PartialInsn_q <= PartialInsn_d;
+        OddPC_q <= OddPC_d;
+        RealignedPC_q <= RealignedPC_d;
         DelayedInsn_q <= DelayedInsn_d;
         DelayedInsnGrubby_q <= DelayedInsnGrubby_d;
         BubbleM_q <= BubbleE_d;
         BubbleE_q <= BubbleD_d;
+
+        FetchAddr_q <= FetchAddr_d;
 
 
 
@@ -1279,7 +1331,7 @@ module Pipeline #(
 
 
         // decode
-        d_PC <= DecodePC;
+        PC_q <= PC_d;
         e_A <= ForwardAE;
         e_B <= ForwardBE;
         e_AGrubby <= ForwardAEGrubby;
@@ -1323,7 +1375,6 @@ module Pipeline #(
         m_Kill <= Kill;
         m_MemSign <= MemSign;
         m_MemByte <= MemByte;
-        f_PC <= FetchPC;
 
         // mem stage
         w_WrEn <= MemWrEn;
@@ -1336,8 +1387,6 @@ module Pipeline #(
         m_ExcWrData         <= ExcWrData; 
         e_ExcGrubbyInsn     <= ExcGrubbyInsn;
         m_ExcGrubbyInsn     <= (e_ExcGrubbyInsn & ~m_Kill);
-        d_ExcJump           <= ExcJump;
-        e_ExcJump           <= d_ExcJump;
         f_ExcGrubbyJump     <= ExcGrubbyJump;
         d_ExcGrubbyJump     <= f_ExcGrubbyJump;
         e_ExcGrubbyJump     <= d_ExcGrubbyJump;
@@ -1392,11 +1441,16 @@ module Pipeline #(
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
             mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
         if (MC_q==0) begin
-            $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h MC=no",
-                d_PC, d_PC, d_Insn, Insn);
+            if (d_Insn[1:0]==2'b11) begin
+                $display("D pc=\033[1;33m%h\033[0m insn=%h next=%h \033[1;30mMC=no\033[0m",
+                    PC_q, d_Insn, Insn);
+            end else begin
+                $display("D pc=\033[1;33m%h\033[0m insn=\033[1;30m%h\033[0m%h next=%h \033[1;30mMC=no\033[0m",
+                    PC_q, d_Insn[31:16], d_Insn[15:0], Insn);
+            end
         end else begin
-            $display("D pc=\033[1;33m%h\033[0m PC%h d_Insn=%h Insn=%h \033[1;33mMC=%h\033[0m",
-                d_PC, d_PC, d_Insn, Insn, MCState_q);
+            $display("D pc=\033[1;33m%h\033[0m insn=%h next=%h \033[1;33mMC=%h:%h\033[0m",
+                PC_q, d_Insn, Insn, MCState_q, MCAux_q);
         end
 
         $display("R  0 %h %h %h %h %h %h %h %h", 
@@ -1428,10 +1482,11 @@ module Pipeline #(
 
         $display("D read x%d=%h x%d=%h", 
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2);
-        $display("D Bubble=%b%b f_PC=%h Delayed=%h",
-            BubbleE_q, BubbleM_q, f_PC, DelayedInsn_q);
-        $display("MC Aux=%h MCBubble_d=%b",
-            MCAux_q, MCBubble_d);
+        $display("D Bubble=%b%b FetchAddr_q=%h Delayed=%h",
+            BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q);
+        $display("D A:P=%h:%h align=%b%b RVC=%b",
+            AlignedInsn_d, PartialInsn_d, RealignedPC_d, OddPC_d, RVCInsn_w);
+
 
         $display("E a=%h b=%h i=%h -> %h -> x%d wrenDE=%b%b",
             e_A, e_B, e_Imm, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
@@ -1445,16 +1500,13 @@ module Pipeline #(
         $display("E SelDivOrMul_d=%b DivSigned_q=%b div=%h MulDivResult_d=%h",
             SelDivOrMul_d, DivSigned_q, DivQuot_q, MulDivResult_d);
 
-        $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b JumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
+        $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcGrubbyInsn,
             e_ExcGrubbyInsn,
             m_ExcGrubbyInsn,
             f_ExcGrubbyJump,
             d_ExcGrubbyJump,
             e_ExcGrubbyJump,
-            ExcJump,
-            d_ExcJump,
-            e_ExcJump,
             MemMisaligned,
             m_ExcMem,
             w_ExcMem,
@@ -1462,7 +1514,7 @@ module Pipeline #(
             );
 
 
-        if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchPC);
+        if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchAddr_d);
 
 /*
         $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
@@ -1544,6 +1596,9 @@ module Pipeline #(
             ExternalIrq_q,
             IrqResponse_d, IrqResponse_q);
 
+$display("Y Branch_w=%b e_PCImm=%h BubbleE_q=%b m_Kill=%b FetchAddr_q=%h FetchAddr_d=%h",
+    Branch_w, e_PCImm, BubbleE_q, m_Kill, FetchAddr_q, FetchAddr_d);
+
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
         if (w_WrEn) $display("W x%d<-%h",w_WrNo, w_WrData);
@@ -1554,9 +1609,10 @@ module Pipeline #(
             e_AddrFromSum <= 0;
             e_MemStore <= 0;
             e_MemWidth <= 2'b11;
-            f_PC <= 32'hf0000000;
+            FetchAddr_q <= 32'hf0000000;
 
             d_Insn <= 32'h13;
+            OddPC_q <= 0;
             MC_q <= 0;
             BubbleM_q <= 0;
             BubbleE_q <= 0;
