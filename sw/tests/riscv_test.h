@@ -7,19 +7,14 @@
 #define RVTEST_RV64U
 
 #define RVTEST_CODE_BEGIN       \
-    .section .text.crt;         \
-    .global _start;             \
-_start:                         \
-    j _start2;                  \
-    .text;                      \
-_start2:
+    .section .text.crt          ;\
+    .global _start              ;\
+_start:                         ;\
+    .weak mtvec_handler         ;\
+    la x11, mtvec_handler       ;\
+    csrw mtvec, x11             ;
 
-/*  If .text starts directly at address 0, the linker has problems with
-        la x1, foo
-    when foo is in the .data section with pc-relative addressing.
-    The linker gives the following error:
-        relocation truncated to fit: R_RISCV_PCREL_LO12_I
-*/
+
 
 #define RVTEST_CODE_END
 
@@ -52,6 +47,26 @@ _start2:
     .word -1                    ;\
     .global end_signature       ;\
     end_signature:
+
+#define RVTEST_RV64M
+
+// from encoding.h
+#define CAUSE_MISALIGNED_FETCH 0
+#define CAUSE_ILLEGAL_INSTRUCTION 2
+#define CAUSE_BREAKPOINT 3
+#define CAUSE_MISALIGNED_LOAD 4
+#define CAUSE_MISALIGNED_STORE 6
+#define CAUSE_USER_ECALL 8
+
+#define MCONTROL_LOAD 1
+#define MCONTROL_STORE 2
+#define MCONTROL_EXECUTE 4
+#define MCONTROL_M 64
+
+#define MSTATUS_MIE 8
+#define MSTATUS_MPP (3<<11)
+#define MSTATUS_TVM (1<<20)
+#define MSTATUS_TSR (1<<22)
 
 
 #endif

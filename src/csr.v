@@ -18,6 +18,7 @@
 
 // Machine IDs (from priv spec) and clock frequency (RudolV extension)
 module CsrIDs #(
+    parameter [31:0] ISA = 0,
     parameter [31:0] VENDORID = 0,
     parameter [31:0] ARCHID = 0,
     parameter [31:0] IMPID = 0,
@@ -45,6 +46,7 @@ module CsrIDs #(
     assign valid = q_Valid;
     assign rdata = q_RData;
 
+    reg q_enISA;
     reg q_enVendor;
     reg q_enArch;
     reg q_enImp;
@@ -53,14 +55,16 @@ module CsrIDs #(
 
     always @(posedge clk) begin
         // E stage: read CSR
-        q_Valid <= q_enVendor | q_enArch | q_enImp | q_enHart | q_enKHz;
-        q_RData <= (q_enVendor ? VENDORID : 32'b0)
+        q_Valid <= q_enISA | q_enVendor | q_enArch | q_enImp | q_enHart | q_enKHz;
+        q_RData <= (q_enISA    ? ISA      : 32'b0)
+                 | (q_enVendor ? VENDORID : 32'b0)
                  | (q_enArch   ? ARCHID   : 32'b0)
                  | (q_enImp    ? IMPID    : 32'b0)
                  | (q_enHart   ? HARTID   : 32'b0)
                  | (q_enKHz    ? KHZ      : 32'b0);
 
         // D stage: decode CSR address
+        q_enISA    <= (addr == 12'h301);
         q_enVendor <= (addr == 12'hF11);
         q_enArch   <= (addr == 12'hF12);
         q_enImp    <= (addr == 12'hF13);
@@ -486,6 +490,7 @@ endmodule
 
 // Combines the usally used CSR: ID, Counter, UART, Timer, LEDs
 module CsrDefault #(
+    parameter [31:0] ISA = 0,
     parameter [31:0] VENDORID = 0,
     parameter [31:0] ARCHID = 0,
     parameter [31:0] IMPID = 0,
@@ -537,6 +542,12 @@ module CsrDefault #(
     assign valid = IDsValid | CounterValid | UartValid | TimerValid;
 
     CsrIDs #(
+        .ISA(ISA),
+        .VENDORID(VENDORID),
+        .ARCHID(ARCHID),
+        .IMPID(IMPID),
+        .HARTID(HARTID),
+
         .BASE_ADDR(CSR_KHZ),
         .KHZ(CLOCK_RATE/1000)
     ) IDs (

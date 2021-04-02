@@ -77,6 +77,7 @@ module top
     wire        csr_valid = IDsValid | CounterValid | PinsValid | TimerValid;
 
     CsrIDs #(
+        .ISA(32'h40001100), // RV32IM
         .BASE_ADDR(CSR_KHZ),
         .KHZ(1000) // assume 1 MHz
     ) csr_ids (
