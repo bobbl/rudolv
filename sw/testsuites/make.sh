@@ -39,7 +39,7 @@ do
             # write configuration
             echo "export XLEN ?= 32" > Makefile.include
             echo "export RISCV_TARGET ?= rudolv" >> Makefile.include
-            echo "export TARGETDIR ?= $(cd ../arch-test-target; pwd)" >> Makefile.include
+            echo "export TARGETDIR ?= $(cd ../arch_test_target; pwd)" >> Makefile.include
                 # must be an absolute path
             echo "export RISCV_PREFIX ?= $RV32I_PREFIX" >> Makefile.include
             echo "JOBS ?= -j1" >> Makefile.include
@@ -47,6 +47,7 @@ do
             make RISCV_DEVICE=I verify
             make RISCV_DEVICE=M verify
             make RISCV_DEVICE=Zifencei verify
+            make RISCV_DEVICE=privilege verify
             ;;
 
         *)

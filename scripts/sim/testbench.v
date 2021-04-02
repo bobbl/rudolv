@@ -258,6 +258,7 @@ module top
         q_CsrAddr  <= csr_addr;
 
         if (csr_modify==1) begin
+
             case (q_CsrAddr)
 
                 (CSR_IRQBOMB): begin
@@ -305,7 +306,7 @@ module top
             endcase
         end
 
-        if (dut.Insn == 'h006F && dut.d_PC==dut.f_PC+8) begin
+        if (dut.Insn_d == 'h006F && dut.d_PC==dut.f_PC+8) begin
             $display("exit due to infinite loop");
             $finish;
         end

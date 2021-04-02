@@ -4,7 +4,10 @@
 
 #define RVMODEL_BOOT            \
     .global _start             ;\
-_start:                        ;
+_start:                        ;\
+    csrw mtvec, x0             ;
+    // Otherwise MTVEC would be undefined in simulation.
+    // That's a problem for exit_cleanup in RVTEST_CODE_END.
 
 #define RVMODEL_HALT       \
     la t0, begin_signature      ;\

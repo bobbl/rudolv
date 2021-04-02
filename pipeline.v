@@ -64,7 +64,7 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] FetchAddr_q;
 
     // decode
-    reg [31:0] d_Insn;
+    reg [31:0] Insn_q;
     reg [5:0] d_RdNo1;
     reg [5:0] d_RdNo2;
 
@@ -126,7 +126,7 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] e_A;
     reg [WORD_WIDTH-1:0] e_B;
-    reg [WORD_WIDTH-1:0] e_Imm;
+    reg [WORD_WIDTH-1:0] ImmMisc_q;
     reg [WORD_WIDTH-1:0] e_PCImm;
     reg e_AGrubby;
     reg e_BGrubby;
@@ -211,8 +211,8 @@ module Pipeline #(
 
 
 // deprecated
-    wire f_PC = FetchAddr_q;
-    wire d_PC = PC_q;
+    wire [WORD_WIDTH-1:0] f_PC = FetchAddr_q;
+    wire [WORD_WIDTH-1:0] d_PC = PC_q;
 
 
 // ---------------------------------------------------------------------
@@ -272,7 +272,27 @@ module Pipeline #(
     // decode
 
 
-    wire [WORD_WIDTH-1:0] ImmI = {{21{d_Insn[31]}}, d_Insn[30:20]};
+    wire [WORD_WIDTH-1:0] ImmI_w = {{21{Insn_q[31]}}, Insn_q[30:20]};
+
+    //                                        31..10| 9| 8| 7| 6| 5| 4| 3|2|1|0
+    // ImmCIW for C.ADDI4SPN   (opcode 000:00)   -  |10| 9| 8| 7|12|11| 5|6|-|-
+    // ImmCI for C.ADDI        (opcode 000:01)  12  |12|12|12|12|12| 6| 5|4|3|2
+    // ImmCI for C.LI          (opcode 010:01)  12  |12|12|12|12|12| 6| 5|4|3|2
+    //           C.ADDI16SP    (opcode 011:01)  12  |12| 4| 3| 5| 2| 6| -|-|-|-
+    // ImmCI for arith         (opcode 100:01)  12  |12|12|12|12|12| 6| 5|4|3|2
+    //       for C.SLLI        (opcode 000:10)   ?  | ?| ?| ?| ?| ?| 6| 5|4|3|2
+    wire [WORD_WIDTH-1:0] ImmCI_w = {
+        Insn_q[0] ? {22{Insn_q[12]}} : 22'b0,
+        Insn_q[0] ? Insn_q[12] : Insn_q[10],
+        ~Insn_q[0] ? Insn_q[9:7] : Insn_q[13] ? {Insn_q[4:3], Insn_q[5]} : {3{Insn_q[12]}},
+        Insn_q[13] ? Insn_q[2] : Insn_q[12],
+        (Insn_q[1] | Insn_q[0]) ? Insn_q[6] : Insn_q[11],
+        Insn_q[13] ? 1'b0 : Insn_q[5],
+        (~Insn_q[1] & ~Insn_q[0]) ? Insn_q[6] : Insn_q[13] ? 1'b0 : Insn_q[4],
+        ((~Insn_q[1] & ~Insn_q[0]) | Insn_q[13]) ? 2'b00 : Insn_q[3:2]};
+
+    wire [WORD_WIDTH-1:0] ImmALU_w = (Insn_q[1] & Insn_q[0]) ? ImmI_w : ImmCI_w;
+        // Immediate for ALU input B
 
 
     //                               31|30..12|11..5 | 4..0
@@ -286,37 +306,75 @@ module Pipeline #(
     // since ReturnImm clears them in the ALU.
     // In fact, this should reduce LUT-size and not harm clock rate, but it does.
     // TRY: check later in more complex design
-    wire [WORD_WIDTH-1:0] ImmISU = { // 31 LE
-        d_Insn[31],                                                     // 31
-        (d_Insn[4] & d_Insn[2]) ? d_Insn[30:12] : {19{d_Insn[31]}},     // 30..12
-        d_Insn[4] ? d_Insn[21:15] : d_Insn[31:25],                      // 11..5
-        (d_Insn[6:5]==2'b01) ? d_Insn[11:7] : d_Insn[24:20]};           // 4..0
+    wire [WORD_WIDTH-1:0] ImmISU_w = { // 31 LE
+        Insn_q[31],                                                     // 31
+        (Insn_q[4] & Insn_q[2]) ? Insn_q[30:12] : {19{Insn_q[31]}},     // 30..12
+        Insn_q[4] ? Insn_q[21:15] : Insn_q[31:25],                      // 11..5
+        (Insn_q[6:5]==2'b01) ? Insn_q[11:7] : Insn_q[24:20]};           // 4..0
+
+    //                                        31..17|16..12|11..8| 7| 6| 5| 4| 3|2|1|0
+    // ImmCL for C.LW and C.SW (opcode x10:00)   -  |   -  |  -  | -| 5|12|11|10|6|-|-
+    //       for C.LWSP        (opcode 010:10)   -  |   -  |  -  | 3| 2|12| 6| 5|4|-|-
+    //       for C.SWSP        (opcode 110:10)   -  |   -  |  -  | 8| 7|12|11|10|9|-|-
+    //           C.LUI         (opcode 011:01)  12  | 6..2 |  -  | -| -| -| -| -|-|-|-
+    wire [WORD_WIDTH-1:0] ImmCS_w = {
+        Insn_q[0] ? {{15{Insn_q[12]}}, Insn_q[6:2]} : 20'b0,
+        4'b0,
+        Insn_q[1] & (Insn_q[15] ? Insn_q[8] : Insn_q[3]),
+        Insn_q[1] ? (Insn_q[15] ? Insn_q[7] : Insn_q[2]) : (Insn_q[0] ? 1'b0 : Insn_q[5]),
+        ~Insn_q[0] & Insn_q[12],
+        (Insn_q[1] & ~Insn_q[15]) ? Insn_q[6:5] : Insn_q[11:10],
+        Insn_q[1] ? (Insn_q[15] ? Insn_q[9] : Insn_q[4]) : (Insn_q[0] ? 1'b0 : Insn_q[6]),
+        2'b00};
+
+    wire [WORD_WIDTH-1:0] ImmMisc_w = (Insn_q[1] & Insn_q[0]) ? ImmISU_w : ImmCS_w;
+        // Immediate added to first Register A (loads, stores, JALR)
+        // also used for CSRs and LUI
+
+
 
     //                                31|30..20|19..13|12|11|10..5 | 4..1 |0
     // ImmB for branch (opcode 11000) 31|  31  |  31  |31| 7|30..25|11..8 |-
     // ImmJ for JAL    (opcode 11011) 31|  31  |19..13|12|20|30..25|24..21|-
     // ImmU for AUIPC  (opcode 00101) 31|30..20|19..13|12| -|   -  |   -  |-
     //  4 for  FENCE.I (opcode 00011)                   -|         | --X- |-
-    wire [WORD_WIDTH-1:0] ImmBJU = { // 30 LE
-        d_Insn[31],                                                     // 31
-        d_Insn[4] ? d_Insn[30:20] : {11{d_Insn[31]}},                   // 30..20
-        d_Insn[2] ? d_Insn[19:13] : {7{d_Insn[31]}},                    // 19..13
-        d_Insn[2] ? ((d_Insn[4] | d_Insn[5]) & d_Insn[12]) : d_Insn[31], // 12
-        ~d_Insn[4] & (d_Insn[2] ? d_Insn[20] : d_Insn[7]),              // 11
-        d_Insn[4] ? 6'b000000 : d_Insn[30:25],                          // 10..5
-        //{4{~d_Insn[4]}} & (d_Insn[2] ? d_Insn[24:21] : d_Insn[11:8]),   // 4..1
-        d_Insn[4] ? 4'b0000 : (d_Insn[2] ? (d_Insn[5] ? d_Insn[24:21] : 4'b0010) : d_Insn[11:8]),
+    wire [WORD_WIDTH-1:0] ImmBJU_w = { // 30 LE
+        Insn_q[31],                                                     // 31
+        Insn_q[4] ? Insn_q[30:20] : {11{Insn_q[31]}},                   // 30..20
+        Insn_q[2] ? Insn_q[19:13] : {7{Insn_q[31]}},                    // 19..13
+        Insn_q[2] ? ((Insn_q[4] | Insn_q[5]) & Insn_q[12]) : Insn_q[31], // 12
+        ~Insn_q[4] & (Insn_q[2] ? Insn_q[20] : Insn_q[7]),              // 11
+        Insn_q[4] ? 6'b000000 : Insn_q[30:25],                          // 10..5
+        //{4{~Insn_q[4]}} & (Insn_q[2] ? Insn_q[24:21] : Insn_q[11:8]),   // 4..1
+        Insn_q[4] ? 4'b0000 : (Insn_q[2] ? (Insn_q[5] ? Insn_q[24:21] : 4'b0010) : Insn_q[11:8]),
         1'b0};                                                          // 0
 
-    wire [WORD_WIDTH-1:0] PCImm = PC_q + ImmBJU;
+    //                                        31..11|10| 9..8|7|6|5| 4| 3|2|1|0
+    // ImmCB for C.J/C.JAL     (opcode x01:10)  12  |8 |10..9|6|7|2|11| 5|4|3|-
+    // ImmCJ for C:BEQZ/C.BNEZ (opcode 11x:10)  12  |12|  12 |6|5|2|11|10|4|3|-
+    wire [WORD_WIDTH-1:0] ImmCBCJ_w = {
+        {21{Insn_q[12]}},
+        Insn_q[14] ? {3{Insn_q[12]}} : {Insn_q[8], Insn_q[10], Insn_q[9]},
+        Insn_q[6],
+        Insn_q[14] ? Insn_q[5] : Insn_q[7],
+        Insn_q[2],
+        Insn_q[11],
+        Insn_q[14] ? Insn_q[10] : Insn_q[5],
+        Insn_q[4],
+        Insn_q[3],
+        1'b0};
+
+    wire [WORD_WIDTH-1:0] ImmPCRel_w = (Insn_q[1] & Insn_q[0]) ? ImmBJU_w : ImmCBCJ_w;
+
+    wire [WORD_WIDTH-1:0] PCImm = PC_q + ImmPCRel_w;
 
 
 
 
-    wire ShiftArith     = d_Insn[30];
-    wire InvertBranch   =  d_Insn[6] & d_Insn[12]; 
+    wire ShiftArith     = Insn_q[30];
+    wire InvertBranch   =  Insn_q[6] & Insn_q[12]; 
         // set for BNE or BGE or BGEU, but not for SLT..SLTIU
-    wire LTU = d_Insn[6] ? d_Insn[13] : d_Insn[12];
+    wire LTU = Insn_q[6] ? Insn_q[13] : Insn_q[12];
         // select unsigned or signed comparison
         //     funct3 opcode  LTU InvertBranch
         // BLT    100 1100011  0   0
@@ -346,19 +404,19 @@ module Pipeline #(
     reg [11:0] e_CsrAddr;
 
     always @(posedge clk) begin
-        e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~d_Insn[13] | (d_Insn[19:15]!=0))) 
-            ? d_Insn[13:12] : 2'b00};
-        e_CsrWData  <= d_Insn[14] ? {{(WORD_WIDTH-5){1'b0}}, d_Insn[19:15]} : ForwardAE;
+        e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~Insn_q[13] | (Insn_q[19:15]!=0))) 
+            ? Insn_q[13:12] : 2'b00};
+        e_CsrWData  <= Insn_q[14] ? {{(WORD_WIDTH-5){1'b0}}, Insn_q[19:15]} : ForwardAE;
 
         // for internal CSRs
-        e_CsrAddr   <= d_Insn[31:20];
+        e_CsrAddr   <= Insn_q[31:20];
     end
 
     assign retired    = ~BubbleE_q & ~m_Kill & ~w_Kill;
     assign csr_read   = e_CsrRead;
     assign csr_modify = e_CsrModify;
     assign csr_wdata  = e_CsrWData;
-    assign csr_addr   = d_Insn[31:20];
+    assign csr_addr   = Insn_q[31:20];
 
 
     // internal CSRs
@@ -388,6 +446,7 @@ module Pipeline #(
     localparam [7:0] mcWFI = 3;
     localparam [7:0] mcJumpReg = 4;
     localparam [7:0] mcException = 5;
+    localparam [7:0] mcExcWrCause            = 10;
     localparam [7:0] mcMulDiv = 6;
     localparam [7:0] mcMulDivWriteback = 7;
     localparam [7:0] mcMulDivLast = 8;
@@ -395,9 +454,10 @@ module Pipeline #(
 
 
     // Fetching
-    reg [31:0] Insn;
+    reg [31:0] Insn_d;
     reg DecodeGrubbyInsn;
     reg [5:0] RdNo1;
+    reg [5:0] RdNo2;
     reg [31:0] DelayedInsn_d;
     reg DelayedInsnGrubby_d;
 
@@ -445,7 +505,7 @@ module Pipeline #(
     reg [5:0] MCAux_d;
     reg [4:0] MCRegNo_d;
 
-    reg [WORD_WIDTH-1:0] Imm;
+    reg [WORD_WIDTH-1:0] ImmMisc_d;
     reg Overwrite_d;              // overwrite result in M-stage (used by exceptions
     reg [WORD_WIDTH-1:0] OverwriteVal_d;
     reg OverwriteSelD_d;
@@ -466,8 +526,8 @@ module Pipeline #(
 
 
         ExcInvalidInsn = 1;
-        DecodeWrEn = (d_Insn[11:7]!=0); // do not write to x0
-        DecodeWrNo = {e_CsrFromReg, d_Insn[11:7]};
+        DecodeWrEn = (Insn_q[11:7]!=0); // do not write to x0
+        DecodeWrNo = {e_CsrFromReg, Insn_q[11:7]};
             // For a CSR instruction, WrNo is set, but not WrEn.
             // If WrEn was set, the following second cycle of the CSR insn would
             // get the wrong value, because the forwarding condition for the execute
@@ -513,7 +573,8 @@ module Pipeline #(
         MCAux_d         = MCAux_q - 1;
         MCRegNo_d       = MCRegNo_q;
 
-        Imm             = ImmISU;
+        ImmMisc_d             = ImmMisc_w;
+            // used for memory accesses, JALR, CSR and LUI
         Overwrite_d     = 0;
         OverwriteVal_d  = 0;
         OverwriteSelD_d = 0;
@@ -566,7 +627,7 @@ module Pipeline #(
                     if (MemMisaligned) begin
                         InsnJALR = 1;
                         AddrFromSum = 1;
-                        Imm = 0;
+                        ImmMisc_d = 0;
                     end
                 end
                 mcWFI: begin // WFI
@@ -582,14 +643,28 @@ module Pipeline #(
                     NoIrq_d       = 1;
                     InsnJALR    = 1;
                     AddrFromSum = 1;
-                    Imm         = 0;
+                    ImmMisc_d         = 0;
                 end
                 mcException: begin 
-                    // jump to adddress in first register (MEPC) and write MCAUSE
-                    NoIrq_d       = 1;
-                    InsnJALR    = 1;
+                    // jump to adddress in first register (MEPC) and write MTVAL
+                    NoIrq_d = 1;
+                    InsnJALR = 1;
                     AddrFromSum = 1;
-                    Imm         = 0;
+                    ImmMisc_d = 0;
+                    Overwrite_d = 1;
+                    if (MCAux_q==(6'h03 + 1)) begin
+                        // EBREAK exception: MTVAL=PC
+                        OverwriteVal_d = OverwriteValE_q;
+                    end else begin
+                        OverwriteVal_d = 0;
+                    end
+                    DecodeWrNo = REG_CSR_MTVAL;
+                    MC_d = 1;
+                    MCState_d = mcExcWrCause;
+                end
+                mcExcWrCause: begin 
+                    // write MCAUSE
+                    NoIrq_d = 1;
                     Overwrite_d = 1;
                     OverwriteVal_d = {MCAux_q[4], {(WORD_WIDTH-5){1'b0}}, MCAux_q[3:0]};
                     DecodeWrNo = REG_CSR_MCAUSE;
@@ -629,11 +704,11 @@ module Pipeline #(
 
         end else if (IrqResponse_q) begin
             if (ExternalIrq_q) begin
-                MCAux_d = 6'h1b;
+                MCAux_d = 6'h1b + 1;
             end else if (SoftwareIrq_q) begin
-                MCAux_d = 6'h13;
+                MCAux_d = 6'h13 + 1;
             end else begin
-                MCAux_d = 6'h17;
+                MCAux_d = 6'h17 + 1;
             end
             Overwrite_d = 1;
             OverwriteVal_d = PC_q;
@@ -646,11 +721,11 @@ module Pipeline #(
 
 
         // 32 bit instruction
-        end else if (d_Insn[1:0]==2'b11) begin
+        end else if (Insn_q[1:0]==2'b11) begin
             FetchAddr_d = FetchAddr_q + 4;
             PC_d = PC_q + 4;
 
-            case (d_Insn[6:2])
+            case (Insn_q[6:2])
                 5'b01101: begin // LUI
                     ExcInvalidInsn = 0;
                     ReturnUI       = 1;
@@ -666,7 +741,7 @@ module Pipeline #(
                     NoIrq_d          = 1;
                 end
                 5'b11001: begin // JALR
-                    ExcInvalidInsn = (d_Insn[14:12]!=3'b000);
+                    ExcInvalidInsn = (Insn_q[14:12]!=3'b000);
                     ReturnPC       = 1;
                     NoIrq_d          = 1;
 
@@ -678,19 +753,19 @@ module Pipeline #(
                     end
                 end
                 5'b11000: begin // branch
-                    ExcInvalidInsn = (d_Insn[14:13]==2'b01);
+                    ExcInvalidInsn = (Insn_q[14:13]==2'b01);
                     DecodeWrEn     = 0;
-                    InsnBEQ        = (d_Insn[14:13]==2'b00);
-                    InsnBLTorBLTU  = d_Insn[14];
+                    InsnBEQ        = (Insn_q[14:13]==2'b00);
+                    InsnBLTorBLTU  = Insn_q[14];
                     NoIrq_d          = 1;
                     NegB           = 1;
                     SelLogic       = InsnBEQ ? 2'b00 : 2'b01;
                 end
                 5'b00000: begin // load
-                    ExcInvalidInsn = (d_Insn[13] & (d_Insn[14] | d_Insn[12]));
+                    ExcInvalidInsn = (Insn_q[13] & (Insn_q[14] | Insn_q[12]));
                     BubbleD_d         = 1;
                     AddrFromSum    = 1;
-                    MemWidth       = d_Insn[13:12];
+                    MemWidth       = Insn_q[13:12];
                     RdNo1       = REG_CSR_MTVEC;
                         // read MTVEC in 2nd cycle, so that its value is
                         // available if Exc is raised
@@ -698,32 +773,32 @@ module Pipeline #(
                     MCState_d      = mcMem;
                 end
                 5'b01000: begin // store
-                    ExcInvalidInsn = (d_Insn[14] | (d_Insn[13] & d_Insn[12]));
+                    ExcInvalidInsn = (Insn_q[14] | (Insn_q[13] & Insn_q[12]));
                     DecodeWrEn     = 0;
                     BubbleD_d         = 1;
                     AddrFromSum    = 1;
                     MemStore       = 1;
-                    MemWidth       = d_Insn[13:12];
+                    MemWidth       = Insn_q[13:12];
                     RdNo1       = REG_CSR_MTVEC;
                     MC_d           = 1;
                     MCState_d      = mcMem;
                 end
                 5'b00100: begin // immediate
-                    ExcInvalidInsn = ~d_Insn[13] & d_Insn[12] &
-                        (d_Insn[31] | (d_Insn[29:25]!=0) |
-                        (d_Insn[30] & ~d_Insn[14]));
-                    NegB = ~d_Insn[14] & (d_Insn[13] | d_Insn[12]);
+                    ExcInvalidInsn = ~Insn_q[13] & Insn_q[12] &
+                        (Insn_q[31] | (Insn_q[29:25]!=0) |
+                        (Insn_q[30] & ~Insn_q[14]));
+                    NegB = ~Insn_q[14] & (Insn_q[13] | Insn_q[12]);
                         // SLLI, SLTI, SLTIU
-                    SelSum   = ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADDI
-                    SetCond  = ~d_Insn[14] &  d_Insn[13]; // SLTI, SLTIU
-                    EnShift  = ~d_Insn[13] &  d_Insn[12]; // SLLI, SRAI, SRLI
-                    vSelImm  = ~d_Insn[5]; // only for forwarding
-                    SelLogic =  d_Insn[14] ? d_Insn[13:12] : 2'b01;
+                    SelSum   = ~Insn_q[14] & ~Insn_q[13] & ~Insn_q[12]; // ADDI
+                    SetCond  = ~Insn_q[14] &  Insn_q[13]; // SLTI, SLTIU
+                    EnShift  = ~Insn_q[13] &  Insn_q[12]; // SLLI, SRAI, SRLI
+                    vSelImm  = ~Insn_q[5]; // only for forwarding
+                    SelLogic =  Insn_q[14] ? Insn_q[13:12] : 2'b01;
                         // ANDI, ORI, XORI
                 end
                 5'b01100: begin
-                    if (d_Insn[25]) begin // RVM
-                        ExcInvalidInsn = (d_Insn[31:26]!=0);
+                    if (Insn_q[25]) begin // RVM
+                        ExcInvalidInsn = (Insn_q[31:26]!=0);
 
                         FetchAddr_d = FetchAddr_q;
                             // increment not before last cycle
@@ -731,48 +806,48 @@ module Pipeline #(
                         MC_d = 1;
                         MCState_d = mcMulDiv;
                         MCAux_d = 31;
-                        MCRegNo_d = d_Insn[11:7];
+                        MCRegNo_d = Insn_q[11:7];
 
                         StartMulDiv_d = 1;
-                        SelRemOrDiv_d = d_Insn[13] | InsnMULH_d;
-                        SelDivOrMul_d = d_Insn[14];
-                        SelMulLowOrHigh_d = (d_Insn[13:12]==2'b00);
+                        SelRemOrDiv_d = Insn_q[13] | InsnMULH_d;
+                        SelDivOrMul_d = Insn_q[14];
+                        SelMulLowOrHigh_d = (Insn_q[13:12]==2'b00);
 
                     end else begin // arith
-                        ExcInvalidInsn = d_Insn[31] | (d_Insn[29:26]!=0) |
-                            (d_Insn[30] & (d_Insn[13] | (d_Insn[14]!=d_Insn[12])));
-                        NegB     = ~d_Insn[14] & // SUB, SLL, SLT, SLTU
-                                   (d_Insn[13] | d_Insn[12] | d_Insn[30]);
-                        SelSum   = ~d_Insn[14] & ~d_Insn[13] & ~d_Insn[12]; // ADD, SUB
-                        SetCond  = ~d_Insn[14] &  d_Insn[13]; // SLT, SLTU
-                        EnShift  = ~d_Insn[13] &  d_Insn[12]; // SLL, SRA, SRL
-                        SelLogic =  d_Insn[14] ? d_Insn[13:12] : 2'b01; // AND, OR, XOR
+                        ExcInvalidInsn = Insn_q[31] | (Insn_q[29:26]!=0) |
+                            (Insn_q[30] & (Insn_q[13] | (Insn_q[14]!=Insn_q[12])));
+                        NegB     = ~Insn_q[14] & // SUB, SLL, SLT, SLTU
+                                   (Insn_q[13] | Insn_q[12] | Insn_q[30]);
+                        SelSum   = ~Insn_q[14] & ~Insn_q[13] & ~Insn_q[12]; // ADD, SUB
+                        SetCond  = ~Insn_q[14] &  Insn_q[13]; // SLT, SLTU
+                        EnShift  = ~Insn_q[13] &  Insn_q[12]; // SLL, SRA, SRL
+                        SelLogic =  Insn_q[14] ? Insn_q[13:12] : 2'b01; // AND, OR, XOR
                     end
                 end
                 5'b00011: begin // fence
-                    ExcInvalidInsn = d_Insn[14] | d_Insn[13];
+                    ExcInvalidInsn = Insn_q[14] | Insn_q[13];
                     DecodeWrEn = 0;
-                    BranchUncondPCRel = d_Insn[12];
+                    BranchUncondPCRel = Insn_q[12];
                 end
                 5'b11100: begin // system
                     BubbleD_d = 1;
                     MC_d = 1;
                     MCState_d = mcNop;
-                    if (d_Insn[13] | d_Insn[12]) begin
+                    if (Insn_q[13] | Insn_q[12]) begin
                         // RVZicsr
                         ExcInvalidInsn = 0;
                         CsrRead    = DecodeWrEn & ~CsrFromReg;
                         DecodeWrEn = DecodeWrEn & CsrFromReg;
                         InsnCSR    = 1;
                         CsrFromExt = ~CsrFromReg;
-                        CsrOp      = d_Insn[13:12];
+                        CsrOp      = Insn_q[13:12];
                         RdNo1   = {1'b1, vCsrTranslate};
                         MC_d       = 1;
                         MCState_d  = mcCsr;
                     end else begin
-                        if (d_Insn[19:7]==0) begin
+                        if (Insn_q[19:7]==0) begin
                             ExcInvalidInsn = 0;
-                            case (d_Insn[31:20])
+                            case (Insn_q[31:20])
                                 12'h000: begin // ECALL
                                     Overwrite_d = 1;
                                     OverwriteVal_d = PC_q;
@@ -780,7 +855,7 @@ module Pipeline #(
                                     RdNo1 = REG_CSR_MTVEC;
                                     MC_d = 1;
                                     MCState_d = mcException;
-                                    MCAux_d = 6'h0b;
+                                    MCAux_d = 6'h0b + 1;
                                     TrapEnter_d = 1;
                                 end
                                 12'h001: begin // EBREAK
@@ -790,7 +865,7 @@ module Pipeline #(
                                     RdNo1 = REG_CSR_MTVEC;
                                     MC_d = 1;
                                     MCState_d = mcException;
-                                    MCAux_d = 6'h03;
+                                    MCAux_d = 6'h03 + 1;
                                     TrapEnter_d = 1;
                                 end
                                 12'h002: begin // URET
@@ -866,14 +941,33 @@ module Pipeline #(
             DecodeGrubbyInsn = mem_rgrubby;
         end
 
-        Insn = AlignedInsn_d;
+        Insn_d = AlignedInsn_d;
         if (OddPC_d) begin
-            Insn = {AlignedInsn_d[15:0], PartialInsn_q[31:16]};
+            Insn_d = {AlignedInsn_d[15:0], PartialInsn_q[31:16]};
         end else if (RealignedPC_d) begin
-            Insn = PartialInsn_q;
+            Insn_d = PartialInsn_q;
         end
 
-        if (~RdNo1[5]) RdNo1 = {1'b0, Insn[19:15]};
+
+        // register numbers for next insn
+
+        if (~RdNo1[5]) begin
+            if (Insn_d[0] & Insn_d[1]) begin
+                RdNo1 = {1'b0, Insn_d[19:15]};  // rs1
+            end else if (~Insn_d[1] & (Insn_d[14] | Insn_d[15])) begin
+                RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs1'
+            end else begin
+                RdNo1 = {1'b0, Insn_d[11:7]};  // RVC rs1
+            end
+        end
+
+        if (~Insn_d[1]) begin
+            RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
+        end else if (Insn_d[0]) begin
+            RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
+        end else begin
+            RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
+        end
 
 
         // delayed insn
@@ -916,7 +1010,7 @@ module Pipeline #(
     wire FwdBE = e_WrEn & (d_RdNo2 == e_WrNo) & ~vSelImm;
     wire FwdBM = m_WrEn & (d_RdNo2 == m_WrNo) & ~vSelImm;
     wire FwdBW = w_WrEn & (d_RdNo2 == w_WrNo);
-    wire [WORD_WIDTH-1:0] ForwardImm = vSelImm ? ImmI : 0;
+    wire [WORD_WIDTH-1:0] ForwardImm = vSelImm ? ImmALU_w : 0;
     wire [WORD_WIDTH-1:0] ForwardBR = vSelImm ?    0 : (FwdBW ? w_WrData : regset_rd2);
     wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBR | ForwardImm);
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}};
@@ -951,7 +1045,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vPCResult =
           (e_ReturnPC ? PC_q : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
-        e_ReturnUI ? (e_LUIorAUIPC ? {e_Imm[31:12], 12'b0} : e_PCImm) : 0;
+        e_ReturnUI ? (e_LUIorAUIPC ? {ImmMisc_q[31:12], 12'b0} : e_PCImm) : 0;
 
     // OPTIMIZE? vFastResult has one input left
     wire [WORD_WIDTH-1:0] vFastResult = 
@@ -1010,7 +1104,7 @@ module Pipeline #(
     wire Kill = Branch_w | (e_InsnJALR & ~m_Kill);
         // any jump or exception
 
-    wire [WORD_WIDTH-1:0] AddrSum_w = e_A + e_Imm;
+    wire [WORD_WIDTH-1:0] AddrSum_w = e_A + ImmMisc_q;
     wire [WORD_WIDTH-1:0] NextFetchAddr_w = FetchAddr_q + 4;
 
     wire [WORD_WIDTH-1:0] MemAddr =
@@ -1031,9 +1125,9 @@ module Pipeline #(
     // mul/div unit
 
     // control signals for first cycle
-    wire DivSigned_d = ~d_Insn[12] & d_Insn[14];
-    wire MulASigned_d = (d_Insn[13:12] != 2'b11) & ~d_Insn[14];
-    wire InsnMULH_d = (d_Insn[14:12]==3'b001);
+    wire DivSigned_d = ~Insn_q[12] & Insn_q[14];
+    wire MulASigned_d = (Insn_q[13:12] != 2'b11) & ~Insn_q[14];
+    wire InsnMULH_d = (Insn_q[14:12]==3'b001);
 
     wire [WORD_WIDTH:0] DivDiff_w = DivRem_q - {1'b0, Long_q[WORD_WIDTH-1:0]};
     wire DivNegative_w = (Long_q[2*WORD_WIDTH-1:WORD_WIDTH]!=0) | DivDiff_w[WORD_WIDTH];
@@ -1155,7 +1249,7 @@ module Pipeline #(
     reg CsrFromReg;
     always @* begin
         CsrFromReg <= InsnCSR;
-        case (d_Insn[31:20])
+        case (Insn_q[31:20])
             12'h305: vCsrTranslate <= REG_CSR_MTVEC;
             12'h340: vCsrTranslate <= REG_CSR_MSCRATCH;
             12'h341: vCsrTranslate <= REG_CSR_MEPC;
@@ -1166,18 +1260,18 @@ module Pipeline #(
                 CsrFromReg <= 0;
             end
         endcase
-        vCsrTranslate <= {1'b1, d_Insn[26], d_Insn[23:20]};
+        vCsrTranslate <= {1'b1, Insn_q[26], Insn_q[23:20]};
     end
 */
-    wire [4:0] vCsrTranslate = {d_Insn[26], d_Insn[23:20]};
-    wire CsrFromReg = (InsnCSR & ~m_Kill) && (d_Insn[31:27]==5'b00110) && 
-        (d_Insn[25:23]==3'b0) &&
+    wire [4:0] vCsrTranslate = {Insn_q[26], Insn_q[23:20]};
+    wire CsrFromReg = (InsnCSR & ~m_Kill) && (Insn_q[31:27]==5'b00110) && 
+        (Insn_q[25:23]==3'b0) &&
         (
-         (d_Insn[22:20]==3'b100) || // mie, mip
-         ((~d_Insn[26]) && (d_Insn[22:20]==3'b101)) || // mtvec
-         ((d_Insn[26]) && (~d_Insn[22]))); // mscratch, mepc, mcause, mtval
+         (Insn_q[22:20]==3'b100) || // mie, mip
+         ((~Insn_q[26]) && (Insn_q[22:20]==3'b101)) || // mtvec
+         ((Insn_q[26]) && (~Insn_q[22]))); // mscratch, mepc, mcause, mtval
 
-    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, e_Imm[9:5]} : e_A;
+    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, ImmMisc_q[9:5]} : e_A;
 
     wire [WORD_WIDTH-1:0] CsrModified = ~m_CsrOp[1]
         ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
@@ -1203,8 +1297,8 @@ module Pipeline #(
 
     wire [1:0] AddrOfs = AddrSum_w[1:0];
     //wire [1:0] AddrOfs = {
-    //    e_A[1] ^ e_Imm[1] ^ (e_A[0] & e_Imm[0]),
-    //    e_A[0] ^ e_Imm[0]};
+    //    e_A[1] ^ ImmMisc_q[1] ^ (e_A[0] & ImmMisc_q[0]),
+    //    e_A[0] ^ ImmMisc_q[0]};
 
     reg [12:0] MemSignals;
     always @* case ({e_MemWidth, AddrOfs})
@@ -1265,8 +1359,8 @@ module Pipeline #(
 
     // register set
 
-//    wire [5:0] RdNo1 = {RdNo1Aux, Insn[19:15]};
-    wire [5:0] RdNo2 = {1'b0, Insn[24:20]};
+//    wire [5:0] RdNo1 = {RdNo1Aux, Insn_d[19:15]};
+//    wire [5:0] RdNo2 = {1'b0, Insn_d[24:20]};
 
     assign regset_we = MemWrEn;
     assign regset_wa = MemWrNo;
@@ -1288,7 +1382,7 @@ module Pipeline #(
     always @(posedge clk) begin
 
         // fetch
-        d_Insn <= Insn;
+        Insn_q <= Insn_d;
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
         d_CsrTranslate <= vCsrTranslate;
@@ -1336,7 +1430,7 @@ module Pipeline #(
         e_B <= ForwardBE;
         e_AGrubby <= ForwardAEGrubby;
         e_BGrubby <= ForwardBEGrubby;
-        e_Imm <= Imm;
+        ImmMisc_q <= ImmMisc_d;
         e_PCImm <= PCImm;
 
         e_WrEn <= DecodeWrEn;
@@ -1349,7 +1443,7 @@ module Pipeline #(
         e_ShiftArith <= ShiftArith;
         e_ReturnPC <= ReturnPC;
         e_ReturnUI <= ReturnUI;
-        e_LUIorAUIPC <= d_Insn[5];
+        e_LUIorAUIPC <= Insn_q[5];
 
         e_SelSum <= SelSum;
         e_SetCond <= SetCond;
@@ -1366,7 +1460,7 @@ module Pipeline #(
         e_InvertBranch <= InvertBranch;
         w_Kill <= m_Kill; 
 
-        e_InsnBit14 <= d_Insn[14];
+        e_InsnBit14 <= Insn_q[14];
 
         // execute
         m_WrEn <= ExecuteWrEn;
@@ -1399,7 +1493,7 @@ module Pipeline #(
 
         OverwriteE_q        <= Overwrite_d;
         OverwriteValE_q     <= OverwriteVal_d;
-        OverwriteM_q        <= OverwriteE_q & ~m_Kill;
+        OverwriteM_q        <= OverwriteE_q;
         OverwriteValM_q     <= OverwriteValE_d;
         OverwriteSelE_q     <= OverwriteSelD_d;
         InsnMRET_E_q        <= InsnMRET_d;
@@ -1441,16 +1535,16 @@ module Pipeline #(
         $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
             mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
         if (MC_q==0) begin
-            if (d_Insn[1:0]==2'b11) begin
+            if (Insn_q[1:0]==2'b11) begin
                 $display("D pc=\033[1;33m%h\033[0m insn=%h next=%h \033[1;30mMC=no\033[0m",
-                    PC_q, d_Insn, Insn);
+                    PC_q, Insn_q, Insn_d);
             end else begin
                 $display("D pc=\033[1;33m%h\033[0m insn=\033[1;30m%h\033[0m%h next=%h \033[1;30mMC=no\033[0m",
-                    PC_q, d_Insn[31:16], d_Insn[15:0], Insn);
+                    PC_q, Insn_q[31:16], Insn_q[15:0], Insn_d);
             end
         end else begin
             $display("D pc=\033[1;33m%h\033[0m insn=%h next=%h \033[1;33mMC=%h:%h\033[0m",
-                PC_q, d_Insn, Insn, MCState_q, MCAux_q);
+                PC_q, Insn_q, Insn_d, MCState_q, MCAux_q);
         end
 
         $display("R  0 %h %h %h %h %h %h %h %h", 
@@ -1489,7 +1583,7 @@ module Pipeline #(
 
 
         $display("E a=%h b=%h i=%h -> %h -> x%d wrenDE=%b%b",
-            e_A, e_B, e_Imm, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
+            e_A, e_B, ImmMisc_q, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
 /*
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
@@ -1611,7 +1705,7 @@ $display("Y Branch_w=%b e_PCImm=%h BubbleE_q=%b m_Kill=%b FetchAddr_q=%h FetchAd
             e_MemWidth <= 2'b11;
             FetchAddr_q <= 32'hf0000000;
 
-            d_Insn <= 32'h13;
+            Insn_q <= 32'h13;
             OddPC_q <= 0;
             MC_q <= 0;
             BubbleM_q <= 0;
