@@ -126,7 +126,8 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] e_A;
     reg [WORD_WIDTH-1:0] e_B;
-    reg [WORD_WIDTH-1:0] ImmMisc_q;
+    reg [WORD_WIDTH-1:0] ImmUpper_q;
+    reg [11:0] Imm12PlusReg_q;
     reg [WORD_WIDTH-1:0] e_PCImm;
     reg e_AGrubby;
     reg e_BGrubby;
@@ -295,41 +296,43 @@ module Pipeline #(
         // Immediate for ALU input B
 
 
-    //                               31|30..12|11..5 | 4..0
-    // ImmI for JALR  (opcode 11011) 31|  31  |31..25|24..20
-    // ImmI for load  (opcode 00000) 31|  31  |31..25|24..20
-    // ImmS for store (opcode 01000) 31|  31  |31..25|11..7
-    // ImmU for LUI   (opcode 01101) 31|30..12|   ?  |  ?
-    //      for CSR   (opcode 11100) ? |   ?  |21..15|  ?
+    //                                      31..17|16..12|11..5|4..0
+    //        CSR     (opcode xxx:11100:11) 31..17|16..12|  ?  | ?    only 19..15
+    // ImmU   LUI     (opcode xxx:01101:11) 31..17|16..12|  -  | -
+    // ImmCIW C.LUI   (opcode 011:xxxxx:01)   12  | 6..2 |  -  | -
+    // ImmCI  C.LI    (opcode 010:xxxxx:01)   12  |  12  | 12  |6..2
+    wire [WORD_WIDTH-1:0] ImmUpper_w = {
+        Insn_q[1] ? Insn_q[31:17] : {15{Insn_q[12]}},
+        Insn_q[1] ? Insn_q[16:13] : Insn_q[13] ? Insn_q[6:3] : {4{Insn_q[12]}},
+        (~Insn_q[1] &  Insn_q[13]) ? Insn_q[2] : Insn_q[12],
+        (~Insn_q[1] & ~Insn_q[13]) ? {{7{Insn_q[12]}}, Insn_q[6:2]} : 12'b0
+    };
 
-    // Optimisation: For LUI the lowest 12 bits must not be set correctly to 0,
-    // since ReturnImm clears them in the ALU.
-    // In fact, this should reduce LUT-size and not harm clock rate, but it does.
-    // TRY: check later in more complex design
-    wire [WORD_WIDTH-1:0] ImmISU_w = { // 31 LE
-        Insn_q[31],                                                     // 31
-        (Insn_q[4] & Insn_q[2]) ? Insn_q[30:12] : {19{Insn_q[31]}},     // 30..12
-        Insn_q[4] ? Insn_q[21:15] : Insn_q[31:25],                      // 11..5
-        (Insn_q[6:5]==2'b01) ? Insn_q[11:7] : Insn_q[24:20]};           // 4..0
+    //                                       11..8| 7| 6| 5| 4| 3| 2| 1| 0
+    // ImmI for JALR  (opcode xxx:11011:11) 31..28|27|26|25|24|23|22|21|20
+    // ImmI for load  (opcode xxx:00000:11) 31..28|27|26|25|24|23|22|21|20
+    // ImmS for store (opcode xxx:01000:11) 31..28|27|26|25|11|10| 9| 8| 7
+    // C.LW and C.SW  (opcode x10:xxxxx:00)    -  | -| 5|12|11|10| 6| -| -
+    // C.LWSP         (opcode 010:xxxxx:10)    -  | 3| 2|12| 6| 5| 4| -| -
+    // C.SWSP         (opcode 110:xxxxx:10)    -  | 8| 7|12|11|10| 9| -| -
+    wire [11:0] Imm12PlusReg_w = {
+        (Insn_q[1] & Insn_q[0]) ? Insn_q[31:28] : 4'b0000,
+        ~Insn_q[1] ?      1'b0 : Insn_q[0] ? Insn_q[27] : Insn_q[15] ? Insn_q[8] : Insn_q[3],
+        ~Insn_q[1] ? Insn_q[5] : Insn_q[0] ? Insn_q[26] : Insn_q[15] ? Insn_q[7] : Insn_q[2],
+        (Insn_q[1] & Insn_q[0]) ? Insn_q[25] : Insn_q[12],
+        Insn_q[0] ? ((Insn_q[5] & ~Insn_q[6])  ? Insn_q[11:10] : Insn_q[24:23])
+                  : ((Insn_q[1] & ~Insn_q[15]) ? Insn_q[6:5]   : Insn_q[11:10]),
+        Insn_q[0] ? ((Insn_q[5] & ~Insn_q[6])  ? Insn_q[9] : Insn_q[22])
+                  : (~Insn_q[1] ? Insn_q[6] : Insn_q[15] ? Insn_q[9] : Insn_q[4]),
+        Insn_q[0] ? ((Insn_q[5] & ~Insn_q[6])  ? Insn_q[8:7] : Insn_q[21:20])
+                  : 2'b00
+    };
 
-    //                                        31..17|16..12|11..8| 7| 6| 5| 4| 3|2|1|0
-    // ImmCL for C.LW and C.SW (opcode x10:00)   -  |   -  |  -  | -| 5|12|11|10|6|-|-
-    //       for C.LWSP        (opcode 010:10)   -  |   -  |  -  | 3| 2|12| 6| 5|4|-|-
-    //       for C.SWSP        (opcode 110:10)   -  |   -  |  -  | 8| 7|12|11|10|9|-|-
-    //           C.LUI         (opcode 011:01)  12  | 6..2 |  -  | -| -| -| -| -|-|-|-
-    wire [WORD_WIDTH-1:0] ImmCS_w = {
-        Insn_q[0] ? {{15{Insn_q[12]}}, Insn_q[6:2]} : 20'b0,
-        4'b0,
-        Insn_q[1] & (Insn_q[15] ? Insn_q[8] : Insn_q[3]),
-        Insn_q[1] ? (Insn_q[15] ? Insn_q[7] : Insn_q[2]) : (Insn_q[0] ? 1'b0 : Insn_q[5]),
-        ~Insn_q[0] & Insn_q[12],
-        (Insn_q[1] & ~Insn_q[15]) ? Insn_q[6:5] : Insn_q[11:10],
-        Insn_q[1] ? (Insn_q[15] ? Insn_q[9] : Insn_q[4]) : (Insn_q[0] ? 1'b0 : Insn_q[6]),
-        2'b00};
 
-    wire [WORD_WIDTH-1:0] ImmMisc_w = (Insn_q[1] & Insn_q[0]) ? ImmISU_w : ImmCS_w;
-        // Immediate added to first Register A (loads, stores, JALR)
-        // also used for CSRs and LUI
+
+
+
+
 
 
 
@@ -368,6 +371,10 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] PCImm = PC_q + ImmPCRel_w;
 
+    // OPTIMISATION: combine e_PCImm and ImmUpper_q
+
+
+
 
 
 
@@ -386,7 +393,7 @@ module Pipeline #(
         // SLTI   010 0110011  0   0
         // SLTIU  011 0110011  1   0
         //         ^^ ^
-        // for all other opcodes, LTU and InverBranch don't mind
+        // for all other opcodes, LTU and InvertBranch don't mind
 
 
 
@@ -452,6 +459,10 @@ module Pipeline #(
     localparam [7:0] mcMulDivLast = 8;
     localparam [7:0] mcUnalignedJump = 9;
 
+    wire [5:0] Reg1I_w =  {1'b0, Insn_d[19:15]};  // RVI rs1
+    wire [5:0] Reg1C_w =  {1'b0, Insn_d[11:7]};   // RVC rs1
+    wire [5:0] Reg1Cp_w = {3'b001, Insn_d[4:2]};  // RVC rs1'
+
 
     // Fetching
     reg [31:0] Insn_d;
@@ -505,7 +516,8 @@ module Pipeline #(
     reg [5:0] MCAux_d;
     reg [4:0] MCRegNo_d;
 
-    reg [WORD_WIDTH-1:0] ImmMisc_d;
+    reg [WORD_WIDTH-1:0] ImmUpper_d;
+    reg [11:0] Imm12PlusReg_d;
     reg Overwrite_d;              // overwrite result in M-stage (used by exceptions
     reg [WORD_WIDTH-1:0] OverwriteVal_d;
     reg OverwriteSelD_d;
@@ -526,12 +538,8 @@ module Pipeline #(
 
 
         ExcInvalidInsn = 1;
-        DecodeWrEn = (Insn_q[11:7]!=0); // do not write to x0
-        DecodeWrNo = {e_CsrFromReg, Insn_q[11:7]};
-            // For a CSR instruction, WrNo is set, but not WrEn.
-            // If WrEn was set, the following second cycle of the CSR insn would
-            // get the wrong value, because the forwarding condition for the execute
-            // bypass was fulfilled.
+        DecodeWrEn = 0;
+        DecodeWrNo = 0; // don't care
 
         FetchAddr_d = FetchAddr_q;
         PC_d = PC_q;
@@ -573,8 +581,9 @@ module Pipeline #(
         MCAux_d         = MCAux_q - 1;
         MCRegNo_d       = MCRegNo_q;
 
-        ImmMisc_d             = ImmMisc_w;
-            // used for memory accesses, JALR, CSR and LUI
+        ImmUpper_d       = ImmUpper_w; // used for LUI, C.LUI, C.LI and CSR
+        Imm12PlusReg_d  = Imm12PlusReg_w; // used for memory accesses and JALR
+
         Overwrite_d     = 0;
         OverwriteVal_d  = 0;
         OverwriteSelD_d = 0;
@@ -598,7 +607,6 @@ module Pipeline #(
             end
 
             ExcInvalidInsn = 0;
-            DecodeWrEn = 0;
             if (f_ExcGrubbyJump) begin
                 RdNo1          = REG_CSR_MTVEC;
                 MC_d           = 1;
@@ -616,22 +624,19 @@ module Pipeline #(
         end else if (MC_q) begin
             case (MCState_q)
                 mcNop: begin
-                    DecodeWrEn     = 0;
                 end
                 mcCsr: begin // 2nd cycle of CSR access
                     DecodeWrEn     = e_CsrFromReg;
                     DecodeWrNo     = {1'b1, d_CsrTranslate};
                 end
                 mcMem: begin // 2nd cycle of memory access
-                    DecodeWrEn     = 0;
                     if (MemMisaligned) begin
                         InsnJALR = 1;
                         AddrFromSum = 1;
-                        ImmMisc_d = 0;
+                        Imm12PlusReg_d = 0;
                     end
                 end
                 mcWFI: begin // WFI
-                    DecodeWrEn     = 0;
                     if (~IrqResponse_q) begin
                         MC_d = 1;
                         MCState_d = mcWFI;
@@ -639,18 +644,17 @@ module Pipeline #(
                 end
                 mcJumpReg: begin // MRET
                     // jump to adddress in first register (MTVEC)
-                    DecodeWrEn  = 0;
                     NoIrq_d       = 1;
                     InsnJALR    = 1;
                     AddrFromSum = 1;
-                    ImmMisc_d         = 0;
+                    Imm12PlusReg_d = 0;
                 end
                 mcException: begin 
                     // jump to adddress in first register (MEPC) and write MTVAL
                     NoIrq_d = 1;
                     InsnJALR = 1;
                     AddrFromSum = 1;
-                    ImmMisc_d = 0;
+                    Imm12PlusReg_d = 0;
                     Overwrite_d = 1;
                     if (MCAux_q==(6'h03 + 1)) begin
                         // EBREAK exception: MTVAL=PC
@@ -670,7 +674,6 @@ module Pipeline #(
                     DecodeWrNo = REG_CSR_MCAUSE;
                 end
                 mcMulDiv: begin
-                    DecodeWrEn = 0;
                     MC_d = 1;
                     if (MCAux_q != 0) begin
                         MCState_d = mcMulDiv;
@@ -689,12 +692,10 @@ module Pipeline #(
                 end
                 mcMulDivLast: begin
                     // just do nothing because result is not yet available
-                    DecodeWrEn = 0;
                     FetchAddr_d = FetchAddr_q + 4;
                 end
                 mcUnalignedJump: begin
                     // wait one cycle because of unaligned jump target
-                    DecodeWrEn = 0;
                     FetchAddr_d = FetchAddr_q + 4;
                 end
                 default: begin
@@ -724,6 +725,9 @@ module Pipeline #(
         end else if (Insn_q[1:0]==2'b11) begin
             FetchAddr_d = FetchAddr_q + 4;
             PC_d = PC_q + 4;
+
+            DecodeWrEn = (Insn_q[11:7]!=0); // do not write to x0
+            DecodeWrNo = {e_CsrFromReg, Insn_q[11:7]};
 
             case (Insn_q[6:2])
                 5'b01101: begin // LUI
@@ -903,7 +907,6 @@ module Pipeline #(
 
         // compressed instruction
         end else begin
-
             if (OddPC_q) begin
                 OddPC_d = 0;
                 RealignedPC_d = 1;
@@ -912,11 +915,68 @@ module Pipeline #(
                 RealignedPC_d = 0;
                 FetchAddr_d = FetchAddr_q + 4;
             end
-
             PC_d = PC_q + 2;
-//            ExcInvalidInsn = 1;
-            DecodeWrEn = 0;
             RVCInsn_w = 1;
+
+
+            case ({Insn_q[15:13], Insn_q[1:0]})
+                5'b00000: begin // C.ADDI4SPN
+                    if (Insn_q[4:2]!=0) begin
+                        ExcInvalidInsn = 0;
+                        SelSum = 1;
+                        vSelImm = 1;
+                        DecodeWrEn = 1;
+                        DecodeWrNo = {3'b001, Insn_q[4:2]};
+                    end
+                end
+                5'b01000: begin // C.LW
+                    ExcInvalidInsn = 0;
+                    BubbleD_d = 1;
+                    AddrFromSum = 1;
+                    MemWidth = 2'b11;
+                    RdNo1 = REG_CSR_MTVEC;
+                        // read MTVEC in 2nd cycle, so that its value is
+                        // available if Exc is raised
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {3'b001, Insn_q[4:2]};
+                    MC_d = 1;
+                    MCState_d = mcMem;
+                end
+                5'b11000: begin // C.SW
+                    ExcInvalidInsn = 0;
+                    BubbleD_d = 1;
+                    AddrFromSum = 1;
+                    MemStore = 1;
+                    MemWidth = 2'b11;
+                    RdNo1 = REG_CSR_MTVEC;
+                    MC_d = 1;
+                    MCState_d = mcMem;
+                end
+                5'b00001: begin // C.ADDI
+                    ExcInvalidInsn = 0;
+                    SelSum = 1;
+                    vSelImm = 1;
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {1'b0, Insn_q[11:7]};
+                end
+                5'b00101: begin // C.JAL
+                    ExcInvalidInsn = 0;
+                    BranchUncondPCRel = 1;
+                    ReturnPC = 1;
+                    NoIrq_d = 1;
+                end
+
+
+
+
+
+
+
+
+                default: begin
+                    ExcInvalidInsn = 1;
+                end
+            endcase
         end
 
 
@@ -951,14 +1011,41 @@ module Pipeline #(
 
         // register numbers for next insn
 
+
+
+
         if (~RdNo1[5]) begin
+
+            if (~Insn_d[1]) begin
+                if (~Insn_d[0]) begin // 00
+                    if (Insn_d[15:13]==3'b000)  RdNo1 = 2;
+                    else                        RdNo1 = Reg1Cp_w;
+                end else begin // 01
+                    if (~Insn_d[15])            RdNo1 = Reg1C_w;
+                    else                        RdNo1 = Reg1Cp_w;
+                end
+            end else begin
+                if (~Insn_d[0]) begin // 10
+                    if (Insn_d[14:13]==2'b00)   RdNo1 = Reg1C_w;
+                    else                        RdNo1 = 2;
+                end else begin // 11
+                                                RdNo1 = Reg1I_w;
+                end
+            end
+/*
+
             if (Insn_d[0] & Insn_d[1]) begin
                 RdNo1 = {1'b0, Insn_d[19:15]};  // rs1
+
+            end else if (Insn_d[1] & (Insn_d[13] | Insn_d[14])) begin
+                RdNo1 = 2; // SP
+
             end else if (~Insn_d[1] & (Insn_d[14] | Insn_d[15])) begin
-                RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs1'
+                RdNo1 = {3'b001, Insn_d[4:2]};  // RVC rs1'
             end else begin
                 RdNo1 = {1'b0, Insn_d[11:7]};  // RVC rs1
             end
+*/
         end
 
         if (~Insn_d[1]) begin
@@ -1045,7 +1132,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vPCResult =
           (e_ReturnPC ? PC_q : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
-        e_ReturnUI ? (e_LUIorAUIPC ? {ImmMisc_q[31:12], 12'b0} : e_PCImm) : 0;
+        e_ReturnUI ? (e_LUIorAUIPC ? {ImmUpper_q[31:12], 12'b0} : e_PCImm) : 0;
 
     // OPTIMIZE? vFastResult has one input left
     wire [WORD_WIDTH-1:0] vFastResult = 
@@ -1104,7 +1191,9 @@ module Pipeline #(
     wire Kill = Branch_w | (e_InsnJALR & ~m_Kill);
         // any jump or exception
 
-    wire [WORD_WIDTH-1:0] AddrSum_w = e_A + ImmMisc_q;
+    wire [WORD_WIDTH-1:0] AddrSum_w = e_A +
+        {{(WORD_WIDTH-12){Imm12PlusReg_q[11]}}, Imm12PlusReg_q};
+
     wire [WORD_WIDTH-1:0] NextFetchAddr_w = FetchAddr_q + 4;
 
     wire [WORD_WIDTH-1:0] MemAddr =
@@ -1271,7 +1360,7 @@ module Pipeline #(
          ((~Insn_q[26]) && (Insn_q[22:20]==3'b101)) || // mtvec
          ((Insn_q[26]) && (~Insn_q[22]))); // mscratch, mepc, mcause, mtval
 
-    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, ImmMisc_q[9:5]} : e_A;
+    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, ImmUpper_q[19:15]} : e_A;
 
     wire [WORD_WIDTH-1:0] CsrModified = ~m_CsrOp[1]
         ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
@@ -1297,8 +1386,8 @@ module Pipeline #(
 
     wire [1:0] AddrOfs = AddrSum_w[1:0];
     //wire [1:0] AddrOfs = {
-    //    e_A[1] ^ ImmMisc_q[1] ^ (e_A[0] & ImmMisc_q[0]),
-    //    e_A[0] ^ ImmMisc_q[0]};
+    //    e_A[1] ^ Imm12PlusReg_q[1] ^ (e_A[0] & Imm12PlusReg_q[0]),
+    //    e_A[0] ^ Imm12PlusReg_q[0]};
 
     reg [12:0] MemSignals;
     always @* case ({e_MemWidth, AddrOfs})
@@ -1430,7 +1519,8 @@ module Pipeline #(
         e_B <= ForwardBE;
         e_AGrubby <= ForwardAEGrubby;
         e_BGrubby <= ForwardBEGrubby;
-        ImmMisc_q <= ImmMisc_d;
+        ImmUpper_q <= ImmUpper_d;
+        Imm12PlusReg_q <= Imm12PlusReg_d;
         e_PCImm <= PCImm;
 
         e_WrEn <= DecodeWrEn;
@@ -1582,8 +1672,8 @@ module Pipeline #(
             AlignedInsn_d, PartialInsn_d, RealignedPC_d, OddPC_d, RVCInsn_w);
 
 
-        $display("E a=%h b=%h i=%h -> %h -> x%d wrenDE=%b%b",
-            e_A, e_B, ImmMisc_q, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
+        $display("E a=%h b=%h iu=%h -> %h -> x%d wrenDE=%b%b",
+            e_A, e_B, ImmUpper_q, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
 /*
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
