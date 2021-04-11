@@ -107,13 +107,13 @@ module Pipeline #(
     reg e_InsnJALR;
     reg e_InsnBEQ;
     reg e_InsnBLTorBLTU;
-    reg e_InvertBranch;
+    reg InvertBranch_q;
     reg [1:0] e_SelLogic;
     reg e_EnShift;
-    reg e_ShiftArith;
+    reg ShiftRight_q;
+    reg ShiftArith_q;
     reg e_ReturnPC;
     reg e_ReturnUI;
-    reg e_LUIorAUIPC;
     reg e_BranchUncondPCRel;
 
     reg e_SetCond;
@@ -137,7 +137,6 @@ module Pipeline #(
     reg [5:0] e_WrNo;
 
     reg  e_InsnBit14;
-    wire e_ShiftRight      = e_InsnBit14;
     wire e_MemUnsignedLoad = e_InsnBit14;
     wire e_CsrSelImm       = e_InsnBit14;
 
@@ -301,12 +300,17 @@ module Pipeline #(
     // ImmU   LUI     (opcode xxx:01101:11) 31..17|16..12|  -  | -
     // ImmCIW C.LUI   (opcode 011:xxxxx:01)   12  | 6..2 |  -  | -
     // ImmCI  C.LI    (opcode 010:xxxxx:01)   12  |  12  | 12  |6..2
-    wire [WORD_WIDTH-1:0] ImmUpper_w = {
+    // ImmU+PC AUIPC  (opcode xxx:00101:11)
+    wire [WORD_WIDTH-1:0] ImmUpper2_w = {
         Insn_q[1] ? Insn_q[31:17] : {15{Insn_q[12]}},
         Insn_q[1] ? Insn_q[16:13] : Insn_q[13] ? Insn_q[6:3] : {4{Insn_q[12]}},
         (~Insn_q[1] &  Insn_q[13]) ? Insn_q[2] : Insn_q[12],
         (~Insn_q[1] & ~Insn_q[13]) ? {{7{Insn_q[12]}}, Insn_q[6:2]} : 12'b0
     };
+    wire [WORD_WIDTH-1:0] ImmUpper_w =
+        (Insn_q[1] & ~Insn_q[5]) ? (PC_q + {Insn_q[31:12], 12'b0}) : ImmUpper2_w;
+
+
 
     //                                       11..8| 7| 6| 5| 4| 3| 2| 1| 0
     // ImmI for JALR  (opcode xxx:11011:11) 31..28|27|26|25|24|23|22|21|20
@@ -315,7 +319,8 @@ module Pipeline #(
     // C.LW and C.SW  (opcode x10:xxxxx:00)    -  | -| 5|12|11|10| 6| -| -
     // C.LWSP         (opcode 010:xxxxx:10)    -  | 3| 2|12| 6| 5| 4| -| -
     // C.SWSP         (opcode 110:xxxxx:10)    -  | 8| 7|12|11|10| 9| -| -
-    wire [11:0] Imm12PlusReg_w = {
+    // C.JR/JALR      (opcode 100:00000:10)    -  | -| -| -| -| -| -| -| -
+    wire [11:0] Imm12PlusReg2_w = {
         (Insn_q[1] & Insn_q[0]) ? Insn_q[31:28] : 4'b0000,
         ~Insn_q[1] ?      1'b0 : Insn_q[0] ? Insn_q[27] : Insn_q[15] ? Insn_q[8] : Insn_q[3],
         ~Insn_q[1] ? Insn_q[5] : Insn_q[0] ? Insn_q[26] : Insn_q[15] ? Insn_q[7] : Insn_q[2],
@@ -328,6 +333,58 @@ module Pipeline #(
                   : 2'b00
     };
 
+    wire [11:0] Imm12PlusReg_w = (~Insn_q[0] & Insn_q[1] & ~Insn_q[14])
+        ? 0 // C.JR or C.JALR
+        : Imm12PlusReg2_w;
+
+
+
+
+/*
+    //                          31..20|19..12|11|10| 9| 8| 7| 6| 5| 4| 3| 2| 1|0
+    // ImmJ JAL    (xxx:11011:11) 31  |19..12|20|30|29|28|27|26|25|24|23|22|21|-
+    // ImmB branch (xxx:11000:11) 31  |  31  | 7|30|29|28|27|26|25|11|10| 9| 8|-
+    // 4  FENCE.I  (xxx:00011:11)  -  |     -| -| -| -| -| -| -| -| -| -| X| -|-
+    // C.J/C.JAL   (x01:xxxxx:10) 12  |  12  |12| 8|10| 9| 6| 7| 2|11| 5| 4| 3|-
+    // C.BEQZ/BNEZ (11x:xxxxx:10) 12  |  12  |12|12|12|12| 6| 5| 2|11|10| 4| 3|-
+    wire [20:0] Imm21PCRel_w = {
+        ~Insn_q[0] ? Insn_q[12] : (Insn_q[5] & Insn_q[31]), // 20
+        ~Insn_q[0] ? {8{Insn_q[12]}} : ~Insn_q[5] ? 8'b0
+            : Insn_q[2] ? Insn_q[19:12] : {8{Insn_q[31]}}, // 19..12
+        ~Insn_q[0] ? Insn_q[12] : ~Insn_q[5] ? 1'b0
+            : Insn_q[2] ? Insn_q[20] : Insn_q[7], // 11
+        ~Insn_q[0] ? (Insn_q[14] ? {3{Insn_q[12]}} : {Insn_q[8], Insn_q[10], Insn_q[9]})
+                   : (Insn_q[5] ? Insn_q[30:28] : 3'b0), // 10..8
+        ~Insn_q[0] ? Insn_q[6]
+                   : (Insn_q[5] & Insn_q[27]), // 7
+        ~Insn_q[0] ? (Insn_q[14] ? Insn_q[12] : Insn_q[8])
+                   : (Insn_q[5] & Insn_q[30]), // 6
+        ~Insn_q[0] ? Insn_q[2]
+                   : (Insn_q[5] & Insn_q[25]), // 5
+*/
+
+
+    //                          31..20|19..12|11|10| 9| 8| 7| 6| 5| 4| 3| 2| 1|0
+    // JAL         (xxx:11011:11) 31  |19..12|20|30|29|28|27|26|25|24|23|22|21|-
+    // branch      (xxx:11000:11) 31  |  31  | 7|30|29|28|27|26|25|11|10| 9| 8|-
+    // 4  FENCE.I  (xxx:00011:11)  -  |     -| -| -| -| -| -| -| -| -| -| X| -|-
+    // C.BEQZ/BNEZ (11x:xxxxx:10) 12  |  12  |12|12|12|12| 6| 5| 2|11|10| 4| 3|-
+    // C.J/C.JAL   (x01:xxxxx:10) 12  |  12  |12| 8|10| 9| 6| 7| 2|11| 5| 4| 3|-
+    wire [20:0] ImmJ_w = {Insn_q[31], Insn_q[19:12], Insn_q[20], Insn_q[30:21], 1'b0};
+    wire [20:0] ImmB_w = {{9{Insn_q[31]}}, Insn_q[7], Insn_q[30:25], Insn_q[11:8], 1'b0};
+    wire [20:0] ImmCB_w = {{13{Insn_q[12]}}, Insn_q[6], Insn_q[5], Insn_q[2],
+        Insn_q[11], Insn_q[10], Insn_q[4:3], 1'b0};
+    wire [20:0] ImmCJ_w = {{10{Insn_q[12]}}, Insn_q[8], Insn_q[10], Insn_q[9],
+        Insn_q[6], Insn_q[7], Insn_q[2], Insn_q[11], Insn_q[5:3], 1'b0};
+
+    wire [20:0] Imm21PCRel_w =
+        Insn_q[0] ? (Insn_q[5]  ? (Insn_q[2] ? ImmJ_w  // JAL
+                                             : ImmB_w) // branch
+                                : 32'h4)               // FENCE.I
+                  : (Insn_q[14] ? ImmCB_w              // C.branch
+                                : ImmCJ_w);            // C.jump
+
+    wire [WORD_WIDTH-1:0] PCImm = PC_q + {{11{Imm21PCRel_w[20]}}, Imm21PCRel_w};
 
 
 
@@ -335,52 +392,14 @@ module Pipeline #(
 
 
 
+    wire ShiftRight_d   = (Insn_q[1] & Insn_q[0]) ? Insn_q[14] : Insn_q[15];
+    wire ShiftArith_d   = (Insn_q[1] & Insn_q[0]) ? Insn_q[30] : Insn_q[10];
+    wire InvertBranch_d = (Insn_q[1] & Insn_q[0])
+        ? (Insn_q[6] & Insn_q[12]) 
+            // set for BNE or BGE or BGEU, but not for SLT..SLTIU
+        : Insn_q[13];
+            // set for C.BNEZ, but not for C.BEQZ
 
-    //                                31|30..20|19..13|12|11|10..5 | 4..1 |0
-    // ImmB for branch (opcode 11000) 31|  31  |  31  |31| 7|30..25|11..8 |-
-    // ImmJ for JAL    (opcode 11011) 31|  31  |19..13|12|20|30..25|24..21|-
-    // ImmU for AUIPC  (opcode 00101) 31|30..20|19..13|12| -|   -  |   -  |-
-    //  4 for  FENCE.I (opcode 00011)                   -|         | --X- |-
-    wire [WORD_WIDTH-1:0] ImmBJU_w = { // 30 LE
-        Insn_q[31],                                                     // 31
-        Insn_q[4] ? Insn_q[30:20] : {11{Insn_q[31]}},                   // 30..20
-        Insn_q[2] ? Insn_q[19:13] : {7{Insn_q[31]}},                    // 19..13
-        Insn_q[2] ? ((Insn_q[4] | Insn_q[5]) & Insn_q[12]) : Insn_q[31], // 12
-        ~Insn_q[4] & (Insn_q[2] ? Insn_q[20] : Insn_q[7]),              // 11
-        Insn_q[4] ? 6'b000000 : Insn_q[30:25],                          // 10..5
-        //{4{~Insn_q[4]}} & (Insn_q[2] ? Insn_q[24:21] : Insn_q[11:8]),   // 4..1
-        Insn_q[4] ? 4'b0000 : (Insn_q[2] ? (Insn_q[5] ? Insn_q[24:21] : 4'b0010) : Insn_q[11:8]),
-        1'b0};                                                          // 0
-
-    //                                        31..11|10| 9..8|7|6|5| 4| 3|2|1|0
-    // ImmCB for C.J/C.JAL     (opcode x01:10)  12  |8 |10..9|6|7|2|11| 5|4|3|-
-    // ImmCJ for C:BEQZ/C.BNEZ (opcode 11x:10)  12  |12|  12 |6|5|2|11|10|4|3|-
-    wire [WORD_WIDTH-1:0] ImmCBCJ_w = {
-        {21{Insn_q[12]}},
-        Insn_q[14] ? {3{Insn_q[12]}} : {Insn_q[8], Insn_q[10], Insn_q[9]},
-        Insn_q[6],
-        Insn_q[14] ? Insn_q[5] : Insn_q[7],
-        Insn_q[2],
-        Insn_q[11],
-        Insn_q[14] ? Insn_q[10] : Insn_q[5],
-        Insn_q[4],
-        Insn_q[3],
-        1'b0};
-
-    wire [WORD_WIDTH-1:0] ImmPCRel_w = (Insn_q[1] & Insn_q[0]) ? ImmBJU_w : ImmCBCJ_w;
-
-    wire [WORD_WIDTH-1:0] PCImm = PC_q + ImmPCRel_w;
-
-    // OPTIMISATION: combine e_PCImm and ImmUpper_q
-
-
-
-
-
-
-    wire ShiftArith     = Insn_q[30];
-    wire InvertBranch   =  Insn_q[6] & Insn_q[12]; 
-        // set for BNE or BGE or BGEU, but not for SLT..SLTIU
     wire LTU = Insn_q[6] ? Insn_q[13] : Insn_q[12];
         // select unsigned or signed comparison
         //     funct3 opcode  LTU InvertBranch
@@ -461,7 +480,7 @@ module Pipeline #(
 
     wire [5:0] Reg1I_w =  {1'b0, Insn_d[19:15]};  // RVI rs1
     wire [5:0] Reg1C_w =  {1'b0, Insn_d[11:7]};   // RVC rs1
-    wire [5:0] Reg1Cp_w = {3'b001, Insn_d[4:2]};  // RVC rs1'
+    wire [5:0] Reg1Cp_w = {3'b001, Insn_d[9:7]};  // RVC rs1'
 
 
     // Fetching
@@ -581,7 +600,7 @@ module Pipeline #(
         MCAux_d         = MCAux_q - 1;
         MCRegNo_d       = MCRegNo_q;
 
-        ImmUpper_d       = ImmUpper_w; // used for LUI, C.LUI, C.LI and CSR
+        ImmUpper_d       = ImmUpper_w; // used for AUIPC, LUI, C.LUI, C.LI and CSR
         Imm12PlusReg_d  = Imm12PlusReg_w; // used for memory accesses and JALR
 
         Overwrite_d     = 0;
@@ -796,7 +815,7 @@ module Pipeline #(
                     SelSum   = ~Insn_q[14] & ~Insn_q[13] & ~Insn_q[12]; // ADDI
                     SetCond  = ~Insn_q[14] &  Insn_q[13]; // SLTI, SLTIU
                     EnShift  = ~Insn_q[13] &  Insn_q[12]; // SLLI, SRAI, SRLI
-                    vSelImm  = ~Insn_q[5]; // only for forwarding
+                    vSelImm  = 1; // only for forwarding
                     SelLogic =  Insn_q[14] ? Insn_q[13:12] : 2'b01;
                         // ANDI, ORI, XORI
                 end
@@ -933,7 +952,7 @@ module Pipeline #(
                     ExcInvalidInsn = 0;
                     BubbleD_d = 1;
                     AddrFromSum = 1;
-                    MemWidth = 2'b11;
+                    MemWidth = 2'b10;
                     RdNo1 = REG_CSR_MTVEC;
                         // read MTVEC in 2nd cycle, so that its value is
                         // available if Exc is raised
@@ -947,7 +966,7 @@ module Pipeline #(
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemStore = 1;
-                    MemWidth = 2'b11;
+                    MemWidth = 2'b10;
                     RdNo1 = REG_CSR_MTVEC;
                     MC_d = 1;
                     MCState_d = mcMem;
@@ -964,15 +983,159 @@ module Pipeline #(
                     BranchUncondPCRel = 1;
                     ReturnPC = 1;
                     NoIrq_d = 1;
+                    DecodeWrEn = 1;
+                    DecodeWrNo = 1;
                 end
+                5'b01001: begin // C.LI
+                    ExcInvalidInsn = 0;
+                    ReturnUI = 1;
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {1'b0, Insn_q[11:7]};
+                end
+                5'b01101: begin
+                    ExcInvalidInsn = 0;
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {1'b0, Insn_q[11:7]};
+                    if (Insn_q[11:7]==2) begin // C.ADDI16SP
+                        SelSum = 1;
+                        vSelImm = 1;
+                    end else begin // C.LUI
+                        ReturnUI       = 1;
+                    end
+                end
+                5'b10001: begin
+                    ExcInvalidInsn = Insn_q[12] & (Insn_q[11:0]!=2'b10);
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {3'b001, Insn_q[9:7]};
+                    if (Insn_q[11]) begin
+                        if (Insn_q[10]) begin
+                            case (Insn_q[6:5])
+                                2'b00: begin // C.SUB
+                                    NegB = 1;
+                                    SelSum = 1;
+                                end
+                                2'b01: begin // C.XOR
+                                    SelLogic = 2'b00;
+                                end
+                                2'b10: begin // C.OR
+                                    SelLogic = 2'b10;
+                                end
+                                2'b11: begin // C.AND
+                                    SelLogic = 2'b11;
+                                end
+                            endcase
+                        end else begin // C.ANDI
+                            SelLogic = 2'b11;
+                            vSelImm = 1;
+                        end
+                    end else begin // C.SRLI and C.SRAI
+                        EnShift = 1;
+                            // ShiftRight_q and ShiftArith_q are set independently
+                        vSelImm = 1;
+                    end
+                end
+                5'b10101: begin // C.J
+                    ExcInvalidInsn = 0;
+                    BranchUncondPCRel = 1;
+                    NoIrq_d = 1;
+                end
+                5'b11001: begin // C.BEQZ
+                    ExcInvalidInsn = 0;
+                    InsnBEQ        = 1;
+                        // InvertBranch_q is set independently
+                    NoIrq_d        = 1;
+                    NegB           = 1;
+                    SelLogic       = 2'b00; // xor
+                end
+                5'b11101: begin // C.BNEZ
+                    ExcInvalidInsn = 0;
+                    InsnBEQ        = 1;
+                        // InvertBranch_q is set independently
+                    NoIrq_d        = 1;
+                    NegB           = 1;
+                    SelLogic       = 2'b00; // xor
+                end
+                5'b00010: begin // C.SLLI
+                    ExcInvalidInsn = Insn_q[12];
+                    NegB = 1;
+                    EnShift = 1;
+                        // ShiftRight_q and ShiftArith_q are set independently
+                    vSelImm = 1;
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {1'b0, Insn_q[11:7]};
+                end
+                5'b01010: begin // C.LWSP
+                    ExcInvalidInsn = (Insn_q[11:7]==0);
+                    BubbleD_d = 1;
+                    AddrFromSum = 1;
+                    MemWidth = 2'b10;
+                    RdNo1 = REG_CSR_MTVEC;
+                        // read MTVEC in 2nd cycle, so that its value is
+                        // available if Exc is raised
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {1'b0, Insn_q[11:7]};
+                    MC_d = 1;
+                    MCState_d = mcMem;
+                end
+                5'b10010: begin // C.SWSP
+                    if (Insn_q[12]) begin
+                        if (Insn_q[6:2]==0) begin
+                            if (Insn_q[11:7]==0) begin // C.EBREAK
+                                Overwrite_d = 1;
+                                OverwriteVal_d = PC_q;
+                                DecodeWrNo = REG_CSR_MEPC;
+                                RdNo1 = REG_CSR_MTVEC;
+                                MC_d = 1;
+                                MCState_d = mcException;
+                                MCAux_d = 6'h03 + 1;
+                                TrapEnter_d = 1;
+                            end else begin // C.JALR
+                                ReturnPC = 1;
+                                NoIrq_d = 1;
+                                DecodeWrEn = 1;
+                                DecodeWrNo = 1;
 
+                                // disable JALR, if it is the memory bubble and there is no memory exception
+                                // TODO: get rid of it
+                                if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
+                                    InsnJALR = 1;
+                                    AddrFromSum = 1;
+                                end
+                            end
+                        end else begin // C.ADD
+                            SelSum = 1;
+                            DecodeWrEn = 1;
+                            DecodeWrNo = {1'b0, Insn_q[11:7]};
+                        end
+                    end else begin
+                        if (Insn_q[6:2]==0) begin // C.JR
+                            ExcInvalidInsn = (Insn_q[11:7]!=0);
+                            NoIrq_d = 1;
 
-
-
-
-
-
-
+                            // disable JALR, if it is the memory bubble and there is no memory exception
+                            // TODO: get rid of it
+                            if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
+                                InsnJALR    = 1;
+                                AddrFromSum = 1;
+                            end
+                        end else begin // C.MV
+                            SelSum = 1;
+                                // implicit rs1=x0
+                            DecodeWrEn = 1;
+                            DecodeWrNo = {1'b0, Insn_q[11:7]};
+                        end
+                    end
+                end
+                5'b11010: begin // C.SWSP
+                    ExcInvalidInsn = (Insn_q[11:7]==0);
+                    BubbleD_d = 1;
+                    AddrFromSum = 1;
+                    MemStore = 1;
+                    MemWidth = 2'b10;
+                    RdNo1 = REG_CSR_MTVEC;
+                    MC_d = 1;
+                    MCState_d = mcMem;
+                end
                 default: begin
                     ExcInvalidInsn = 1;
                 end
@@ -1005,14 +1168,44 @@ module Pipeline #(
         if (OddPC_d) begin
             Insn_d = {AlignedInsn_d[15:0], PartialInsn_q[31:16]};
         end else if (RealignedPC_d) begin
-            Insn_d = PartialInsn_q;
+            Insn_d = BubbleM_q ? DelayedInsn_q : PartialInsn_q;
+        end
+
+        if (~Insn_d[1]) begin
+            if (Insn_d[0] & Insn_d[14]) begin
+                RdNo2 = 0; // implicit x0 for C.BEQZ/BNEZ
+            end else begin
+                RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
+            end
+        end else if (Insn_d[0]) begin
+            RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
+        end else begin
+            RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
+        end
+
+        // delayed insn
+
+        if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d | (BubbleE_q & ~m_Kill)) begin
+            if (~OddPC_d) begin
+                DelayedInsn_d = mem_rdata;
+                DelayedInsnGrubby_d = mem_rgrubby;
+                PartialInsn_d = (RealignedPC_d) ? PartialInsn_q : AlignedInsn_d;
+            end else begin
+                DelayedInsn_d = AlignedInsn_d;
+                PartialInsn_d = PartialInsn_q;
+            end
+        end else begin
+            DelayedInsn_d = DelayedInsn_q;
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+            PartialInsn_d = RealignedPC_d
+                ? (BubbleM_q ? DelayedInsn_q : PartialInsn_q)
+                : AlignedInsn_d;
         end
 
 
+
+
         // register numbers for next insn
-
-
-
 
         if (~RdNo1[5]) begin
 
@@ -1026,48 +1219,19 @@ module Pipeline #(
                 end
             end else begin
                 if (~Insn_d[0]) begin // 10
-                    if (Insn_d[14:13]==2'b00)   RdNo1 = Reg1C_w;
-                    else                        RdNo1 = 2;
+                    if (Insn_d[14:13]==2'b00) begin
+                        // implicit x0 for C.MV
+                        if (Insn_d[15] & ~Insn_d[12] & (Insn_d[6:2]!=0))
+                                                RdNo1 = 0;
+                        else                    RdNo1 = Reg1C_w;
+                    end else                    RdNo1 = 2;
                 end else begin // 11
                                                 RdNo1 = Reg1I_w;
                 end
             end
-/*
-
-            if (Insn_d[0] & Insn_d[1]) begin
-                RdNo1 = {1'b0, Insn_d[19:15]};  // rs1
-
-            end else if (Insn_d[1] & (Insn_d[13] | Insn_d[14])) begin
-                RdNo1 = 2; // SP
-
-            end else if (~Insn_d[1] & (Insn_d[14] | Insn_d[15])) begin
-                RdNo1 = {3'b001, Insn_d[4:2]};  // RVC rs1'
-            end else begin
-                RdNo1 = {1'b0, Insn_d[11:7]};  // RVC rs1
-            end
-*/
-        end
-
-        if (~Insn_d[1]) begin
-            RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
-        end else if (Insn_d[0]) begin
-            RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
-        end else begin
-            RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
         end
 
 
-        // delayed insn
-
-        if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d | (BubbleE_q & ~m_Kill)) begin
-            DelayedInsn_d = mem_rdata;
-            DelayedInsnGrubby_d = mem_rgrubby;
-        end else begin
-            DelayedInsn_d = DelayedInsn_q;
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
-        end
-
-        PartialInsn_d = RealignedPC_d ? PartialInsn_q : AlignedInsn_d;
     end
 
 
@@ -1132,7 +1296,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] vPCResult =
           (e_ReturnPC ? PC_q : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
-        e_ReturnUI ? (e_LUIorAUIPC ? {ImmUpper_q[31:12], 12'b0} : e_PCImm) : 0;
+        e_ReturnUI ? ImmUpper_q : 0;
 
     // OPTIMIZE? vFastResult has one input left
     wire [WORD_WIDTH-1:0] vFastResult = 
@@ -1147,10 +1311,10 @@ module Pipeline #(
     // SRL (funct3 101, i30 0)  -|   -  |31|30..0
     // SRA (funct3 101, i30 1) 31|  31  |31|30..0
     wire [62:0] vShift0 = {
-        (e_ShiftRight & ~e_ShiftArith) ? 1'b0 : e_A[31],
-        ~e_ShiftRight ? e_A[30:1] : (e_ShiftArith ? {30{e_A[31]}} :  30'b0),
-        ~e_ShiftRight ? e_A[0] : e_A[31],
-        ~e_ShiftRight ? 31'b0 : e_A[30:0]};
+        (ShiftRight_q & ~ShiftArith_q) ? 1'b0 : e_A[31],
+        ~ShiftRight_q ? e_A[30:1] : (ShiftArith_q ? {30{e_A[31]}} :  30'b0),
+        ~ShiftRight_q ? e_A[0] : e_A[31],
+        ~ShiftRight_q ? 31'b0 : e_A[30:0]};
 
     wire [46:0] vShift1 = e_B[4] ? vShift0[62:16] : vShift0[46:0];
     wire [38:0] vShift2 = e_B[3] ? vShift1[46:8]  : vShift1[38:0];
@@ -1168,9 +1332,9 @@ module Pipeline #(
     // branch unit
 
     wire vEqual = (vLogicResult == ~0);
-    wire vLessXor = e_InvertBranch ^ ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
+    wire vLessXor = InvertBranch_q ^ ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
     wire vLess = (Sum[31] & (e_A[31] ^ e_B[31])) ^ vLessXor;
-    wire vBEQ = e_InsnBEQ & (e_InvertBranch ^ vEqual) & ~m_Kill;
+    wire vBEQ = e_InsnBEQ & (InvertBranch_q ^ vEqual) & ~m_Kill;
     wire vNotBEQ = ((e_InsnBLTorBLTU & vLess) | e_BranchUncondPCRel) & ~m_Kill;
     wire vCondResultBit = e_SetCond & vLess;
 
@@ -1181,8 +1345,8 @@ module Pipeline #(
                  ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
     wire vCondResultBit = e_SetCond & Less_w;
     wire Branch_w = ~m_Kill & (
-        (e_InsnBEQ       & (e_InvertBranch ^ Equal_w)) |
-        (e_InsnBLTorBLTU & (e_InvertBranch ^  Less_w)) |
+        (e_InsnBEQ       & (InvertBranch_q ^ Equal_w)) |
+        (e_InsnBLTorBLTU & (InvertBranch_q ^  Less_w)) |
          e_BranchUncondPCRel
     );
 */
@@ -1448,9 +1612,6 @@ module Pipeline #(
 
     // register set
 
-//    wire [5:0] RdNo1 = {RdNo1Aux, Insn_d[19:15]};
-//    wire [5:0] RdNo2 = {1'b0, Insn_d[24:20]};
-
     assign regset_we = MemWrEn;
     assign regset_wa = MemWrNo;
     assign regset_wd = MemResult;
@@ -1530,10 +1691,10 @@ module Pipeline #(
         e_BranchUncondPCRel <= BranchUncondPCRel;
 
         e_EnShift <= EnShift;
-        e_ShiftArith <= ShiftArith;
+        ShiftRight_q <= ShiftRight_d;
+        ShiftArith_q <= ShiftArith_d;
         e_ReturnPC <= ReturnPC;
         e_ReturnUI <= ReturnUI;
-        e_LUIorAUIPC <= Insn_q[5];
 
         e_SelSum <= SelSum;
         e_SetCond <= SetCond;
@@ -1547,7 +1708,7 @@ module Pipeline #(
         e_NegB <= NegB;
 
         e_WrNo <= DecodeWrNo;
-        e_InvertBranch <= InvertBranch;
+        InvertBranch_q <= InvertBranch_d;
         w_Kill <= m_Kill; 
 
         e_InsnBit14 <= Insn_q[14];
@@ -1664,25 +1825,24 @@ module Pipeline #(
             RegSet.regs[8][32], RegSet.regs[9][32], RegSet.regs[10][32], RegSet.regs[11][32],
             RegSet.regs[12][32], RegSet.regs[13][32], RegSet.regs[14][32], RegSet.regs[15][32]);
 
-        $display("D read x%d=%h x%d=%h", 
-            d_RdNo1, regset_rd1, d_RdNo2, regset_rd2);
-        $display("D Bubble=%b%b FetchAddr_q=%h Delayed=%h",
-            BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q);
+        $display("D read x%d=%h x%d=%h SelImm=%b %h",
+            d_RdNo1, regset_rd1, d_RdNo2, regset_rd2, vSelImm, ImmALU_w);
+        $display("D Bubble=%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
+            BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q, PartialInsn_q);
         $display("D A:P=%h:%h align=%b%b RVC=%b",
             AlignedInsn_d, PartialInsn_d, RealignedPC_d, OddPC_d, RVCInsn_w);
 
 
-        $display("E a=%h b=%h iu=%h -> %h -> x%d wrenDE=%b%b",
-            e_A, e_B, ImmUpper_q, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
+        $display("E a=%h b=%h -> %h -> x%d wrenDE=%b%b",
+            e_A, e_B, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
 /*
         $display("E logic=%h pc=%h ui=%h e_SelSum=%b e_EnShift=%b",
             vLogicResult, vPCResult, vUIResult, e_SelSum, e_EnShift);
-*/
-
         $display("E rem=%h long=%h SelMulLowOrHigh_q=%b StartMulDiv_q=%b",
             DivRem_q, Long_q, SelMulLowOrHigh_q, StartMulDiv_q);
         $display("E SelDivOrMul_d=%b DivSigned_q=%b div=%h MulDivResult_d=%h",
             SelDivOrMul_d, DivSigned_q, DivQuot_q, MulDivResult_d);
+*/
 
         $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcGrubbyInsn,
@@ -1705,8 +1865,8 @@ module Pipeline #(
             vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
         $display("  e_InsnBLTorBLTU=%b vLess=%b e_BranchUncondPCRel=%b ReturnPC=%b",
             e_InsnBLTorBLTU, vLess, e_BranchUncondPCRel, ReturnPC);
-        $display("  e_InsnBEQ=%b e_InvertBranch=%b vEqual=%b",
-            e_InsnBEQ, e_InvertBranch, vEqual);
+        $display("  e_InsnBEQ=%b InvertBranch_q=%b vEqual=%b",
+            e_InsnBEQ, InvertBranch_q, vEqual);
 */
 
 
@@ -1753,8 +1913,8 @@ module Pipeline #(
             csr_addr, csr_rdata, csr_valid);
 */
 
-        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
-            MemResult, m_MemSign, m_MemByte);
+//        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
+//            MemResult, m_MemSign, m_MemByte);
         $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelE=%b",
             Overwrite_d, OverwriteE_q, OverwriteM_q,
             OverwriteVal_d, OverwriteValE_q, OverwriteValM_q,
@@ -1769,8 +1929,8 @@ module Pipeline #(
             vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
         $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h CsrResult=%h",
             ExcWrData, e_ExcWrData2, m_ExcWrData, CsrResult);
-        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
-            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
+//        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
+//            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
 
 
         $display("I MIE=%b MPIE=%b Software=%b Timer=%b External=%b IRdq=%b%b",
@@ -1779,10 +1939,6 @@ module Pipeline #(
             TimerIrq_q,
             ExternalIrq_q,
             IrqResponse_d, IrqResponse_q);
-
-$display("Y Branch_w=%b e_PCImm=%h BubbleE_q=%b m_Kill=%b FetchAddr_q=%h FetchAddr_d=%h",
-    Branch_w, e_PCImm, BubbleE_q, m_Kill, FetchAddr_q, FetchAddr_d);
-
 
         if (m_WrEn) $display("M x%d<-%h", m_WrNo, m_WrData);
         if (w_WrEn) $display("W x%d<-%h",w_WrNo, w_WrData);
@@ -1813,7 +1969,6 @@ $display("Y Branch_w=%b e_PCImm=%h BubbleE_q=%b m_Kill=%b FetchAddr_q=%h FetchAd
 
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
-//            WaitForInt_q <= 0;
             IrqResponse_q <= 0;
             NoIrq_q <= 0;
         end
