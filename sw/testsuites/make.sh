@@ -48,6 +48,9 @@ do
             make RISCV_DEVICE=M verify
             make RISCV_DEVICE=Zifencei verify
             make RISCV_DEVICE=privilege verify
+            make RISCV_DEVICE=C verify
+
+            cd ..
             ;;
 
         *)

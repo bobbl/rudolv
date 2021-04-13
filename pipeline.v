@@ -80,7 +80,6 @@ module Pipeline #(
     reg BubbleM_q;
     reg BubbleE_q;
 
-//    reg [31:0] AlignedInsn_q;
     reg [31:0] PartialInsn_q;
     reg OddPC_q;
     reg RealignedPC_q;
@@ -368,8 +367,8 @@ module Pipeline #(
     // JAL         (xxx:11011:11) 31  |19..12|20|30|29|28|27|26|25|24|23|22|21|-
     // branch      (xxx:11000:11) 31  |  31  | 7|30|29|28|27|26|25|11|10| 9| 8|-
     // 4  FENCE.I  (xxx:00011:11)  -  |     -| -| -| -| -| -| -| -| -| -| X| -|-
-    // C.BEQZ/BNEZ (11x:xxxxx:10) 12  |  12  |12|12|12|12| 6| 5| 2|11|10| 4| 3|-
-    // C.J/C.JAL   (x01:xxxxx:10) 12  |  12  |12| 8|10| 9| 6| 7| 2|11| 5| 4| 3|-
+    // C.BEQZ/BNEZ (11x:xxxxx:01) 12  |  12  |12|12|12|12| 6| 5| 2|11|10| 4| 3|-
+    // C.J/C.JAL   (x01:xxxxx:01) 12  |  12  |12| 8|10| 9| 6| 7| 2|11| 5| 4| 3|-
     wire [20:0] ImmJ_w = {Insn_q[31], Insn_q[19:12], Insn_q[20], Insn_q[30:21], 1'b0};
     wire [20:0] ImmB_w = {{9{Insn_q[31]}}, Insn_q[7], Insn_q[30:25], Insn_q[11:8], 1'b0};
     wire [20:0] ImmCB_w = {{13{Insn_q[12]}}, Insn_q[6], Insn_q[5], Insn_q[2],
@@ -378,9 +377,9 @@ module Pipeline #(
         Insn_q[6], Insn_q[7], Insn_q[2], Insn_q[11], Insn_q[5:3], 1'b0};
 
     wire [20:0] Imm21PCRel_w =
-        Insn_q[0] ? (Insn_q[5]  ? (Insn_q[2] ? ImmJ_w  // JAL
+        Insn_q[1] ? (Insn_q[5]  ? (Insn_q[2] ? ImmJ_w  // JAL
                                              : ImmB_w) // branch
-                                : 32'h4)               // FENCE.I
+                                : 21'h4)               // FENCE.I
                   : (Insn_q[14] ? ImmCB_w              // C.branch
                                 : ImmCJ_w);            // C.jump
 
@@ -478,10 +477,6 @@ module Pipeline #(
     localparam [7:0] mcMulDivLast = 8;
     localparam [7:0] mcUnalignedJump = 9;
 
-    wire [5:0] Reg1I_w =  {1'b0, Insn_d[19:15]};  // RVI rs1
-    wire [5:0] Reg1C_w =  {1'b0, Insn_d[11:7]};   // RVC rs1
-    wire [5:0] Reg1Cp_w = {3'b001, Insn_d[9:7]};  // RVC rs1'
-
 
     // Fetching
     reg [31:0] Insn_d;
@@ -493,7 +488,6 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] FetchAddr_d;
     reg [WORD_WIDTH-1:0] PC_d;
-    reg [31:0] AlignedInsn_d;
     reg [31:0] PartialInsn_d;
     reg OddPC_d;
     reg RealignedPC_d;
@@ -937,16 +931,13 @@ module Pipeline #(
             PC_d = PC_q + 2;
             RVCInsn_w = 1;
 
-
             case ({Insn_q[15:13], Insn_q[1:0]})
                 5'b00000: begin // C.ADDI4SPN
-                    if (Insn_q[4:2]!=0) begin
-                        ExcInvalidInsn = 0;
-                        SelSum = 1;
-                        vSelImm = 1;
-                        DecodeWrEn = 1;
-                        DecodeWrNo = {3'b001, Insn_q[4:2]};
-                    end
+                    ExcInvalidInsn = (Insn_q[12:2]==0);
+                    SelSum = 1;
+                    vSelImm = 1;
+                    DecodeWrEn = 1;
+                    DecodeWrNo = {3'b001, Insn_q[4:2]};
                 end
                 5'b01000: begin // C.LW
                     ExcInvalidInsn = 0;
@@ -975,7 +966,7 @@ module Pipeline #(
                     ExcInvalidInsn = 0;
                     SelSum = 1;
                     vSelImm = 1;
-                    DecodeWrEn = 1;
+                    DecodeWrEn = (Insn_q[11:7]!=0);
                     DecodeWrNo = {1'b0, Insn_q[11:7]};
                 end
                 5'b00101: begin // C.JAL
@@ -989,12 +980,12 @@ module Pipeline #(
                 5'b01001: begin // C.LI
                     ExcInvalidInsn = 0;
                     ReturnUI = 1;
-                    DecodeWrEn = 1;
+                    DecodeWrEn = (Insn_q[11:7]!=0);
                     DecodeWrNo = {1'b0, Insn_q[11:7]};
                 end
                 5'b01101: begin
                     ExcInvalidInsn = 0;
-                    DecodeWrEn = 1;
+                    DecodeWrEn = (Insn_q[11:7]!=0);
                     DecodeWrNo = {1'b0, Insn_q[11:7]};
                     if (Insn_q[11:7]==2) begin // C.ADDI16SP
                         SelSum = 1;
@@ -1004,7 +995,7 @@ module Pipeline #(
                     end
                 end
                 5'b10001: begin
-                    ExcInvalidInsn = Insn_q[12] & (Insn_q[11:0]!=2'b10);
+                    ExcInvalidInsn = Insn_q[12] & (Insn_q[11:10]!=2'b10);
                     DecodeWrEn = 1;
                     DecodeWrNo = {3'b001, Insn_q[9:7]};
                     if (Insn_q[11]) begin
@@ -1061,7 +1052,7 @@ module Pipeline #(
                     EnShift = 1;
                         // ShiftRight_q and ShiftArith_q are set independently
                     vSelImm = 1;
-                    DecodeWrEn = 1;
+                    DecodeWrEn = (Insn_q[11:7]!=0);
                     DecodeWrNo = {1'b0, Insn_q[11:7]};
                 end
                 5'b01010: begin // C.LWSP
@@ -1104,7 +1095,7 @@ module Pipeline #(
                             end
                         end else begin // C.ADD
                             SelSum = 1;
-                            DecodeWrEn = 1;
+                            DecodeWrEn = (Insn_q[11:7]!=0);
                             DecodeWrNo = {1'b0, Insn_q[11:7]};
                         end
                     end else begin
@@ -1121,7 +1112,7 @@ module Pipeline #(
                         end else begin // C.MV
                             SelSum = 1;
                                 // implicit rs1=x0
-                            DecodeWrEn = 1;
+                            DecodeWrEn = (Insn_q[11:7]!=0);
                             DecodeWrNo = {1'b0, Insn_q[11:7]};
                         end
                     end
@@ -1155,52 +1146,115 @@ module Pipeline #(
             FetchAddr_d = e_PCImm;
         end
 
-        if ((/*BubbleE_q |*/ BubbleM_q | (MC_q & MCState_q!=mcUnalignedJump)) & ~m_Kill) begin
-            // BubbleE_q | MC_q = MC_q
-            AlignedInsn_d = DelayedInsn_q;
+        // 101 MEM-To-MEM
+        if (BubbleD_d & BubbleM_q & ~m_Kill) begin
             DecodeGrubbyInsn = DelayedInsnGrubby_q;
-        end else begin
-            AlignedInsn_d = mem_rdata;
-            DecodeGrubbyInsn = mem_rgrubby;
-        end
-
-        Insn_d = AlignedInsn_d;
-        if (OddPC_d) begin
-            Insn_d = {AlignedInsn_d[15:0], PartialInsn_q[31:16]};
-        end else if (RealignedPC_d) begin
-            Insn_d = BubbleM_q ? DelayedInsn_q : PartialInsn_q;
-        end
-
-        if (~Insn_d[1]) begin
-            if (Insn_d[0] & Insn_d[14]) begin
-                RdNo2 = 0; // implicit x0 for C.BEQZ/BNEZ
+            if (OddPC_d) begin
+                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
             end else begin
-                RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
+                Insn_d = DelayedInsn_q;
             end
-        end else if (Insn_d[0]) begin
-            RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
-        end else begin
-            RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
-        end
-
-        // delayed insn
-
-        if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d | (BubbleE_q & ~m_Kill)) begin
-            if (~OddPC_d) begin
-                DelayedInsn_d = mem_rdata;
-                DelayedInsnGrubby_d = mem_rgrubby;
-                PartialInsn_d = (RealignedPC_d) ? PartialInsn_q : AlignedInsn_d;
-            end else begin
-                DelayedInsn_d = AlignedInsn_d;
-                PartialInsn_d = PartialInsn_q;
-            end
-        end else begin
-            DelayedInsn_d = DelayedInsn_q;
             DelayedInsnGrubby_d = DelayedInsnGrubby_q;
-            PartialInsn_d = RealignedPC_d
-                ? (BubbleM_q ? DelayedInsn_q : PartialInsn_q)
-                : AlignedInsn_d;
+            if (RealignedPC_d) begin
+                DelayedInsn_d       = PartialInsn_q;
+            end else begin
+                DelayedInsn_d       = DelayedInsn_q;
+            end
+            PartialInsn_d       = DelayedInsn_q;
+
+        // 010 POP and PUSH
+        end else if (BubbleE_q & ~m_Kill) begin
+            DecodeGrubbyInsn = DelayedInsnGrubby_q;
+            if (OddPC_d) begin
+                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
+            end else begin
+                Insn_d = DelayedInsn_q;
+            end
+            DelayedInsnGrubby_d = mem_rgrubby;
+            DelayedInsn_d       = mem_rdata;
+            if (RealignedPC_d) begin
+                PartialInsn_d       = PartialInsn_q;
+            end else begin
+                PartialInsn_d       = DelayedInsn_q;
+            end
+
+        // 000 MC
+        end else if (MC_q & (MCState_q!=mcUnalignedJump) & ~m_Kill) begin
+            DecodeGrubbyInsn = DelayedInsnGrubby_q;
+            if (OddPC_d) begin
+                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
+            end else begin
+                Insn_d = DelayedInsn_q;
+            end
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+            DelayedInsn_d       = DelayedInsn_q;
+            if (RealignedPC_d) begin
+                PartialInsn_d   = PartialInsn_q;
+            end else begin
+                PartialInsn_d   = DelayedInsn_q;
+            end
+
+        // 100 PUSH
+        end else if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d) begin
+            DecodeGrubbyInsn = mem_rgrubby;
+            if (RealignedPC_d) begin
+                Insn_d = PartialInsn_q;
+            end else if (OddPC_d) begin
+                Insn_d = {mem_rdata[15:0], PartialInsn_q[31:16]};
+            end else begin
+                Insn_d = mem_rdata;
+            end
+            DelayedInsnGrubby_d = mem_rgrubby;
+            if (RealignedPC_d) begin
+                DelayedInsn_d       = PartialInsn_q;
+                PartialInsn_d       = mem_rdata;
+            end else if (OddPC_d) begin
+                DelayedInsn_d       = mem_rdata;
+                PartialInsn_d       = PartialInsn_q;
+            end else begin
+                DelayedInsn_d       = mem_rdata;
+                PartialInsn_d       = mem_rdata;
+            end
+
+        // 001 POP
+        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill) begin
+            DecodeGrubbyInsn = DelayedInsnGrubby_q;
+            if (RealignedPC_d) begin
+                Insn_d = PartialInsn_q;
+            end else if (OddPC_d) begin
+                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
+            end else begin
+                Insn_d = DelayedInsn_q;
+            end
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+            DelayedInsn_d       = DelayedInsn_q;
+            if (RealignedPC_d) begin
+                PartialInsn_d       = PartialInsn_q;
+            end else begin
+                PartialInsn_d       = DelayedInsn_q;
+            end
+
+
+        // 000 NOT DELAYED
+        end else begin
+            DecodeGrubbyInsn = mem_rgrubby;
+            if (RealignedPC_d) begin
+                Insn_d = PartialInsn_q;
+            end else if (OddPC_d) begin
+                Insn_d = {mem_rdata[15:0], PartialInsn_q[31:16]};
+            end else begin
+                Insn_d = mem_rdata;
+            end
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+            DelayedInsn_d       = DelayedInsn_q;
+            if (RealignedPC_d) begin
+                PartialInsn_d   = PartialInsn_q;
+            end else begin
+                PartialInsn_d   = mem_rdata;
+            end
         end
+
+
 
 
 
@@ -1212,10 +1266,10 @@ module Pipeline #(
             if (~Insn_d[1]) begin
                 if (~Insn_d[0]) begin // 00
                     if (Insn_d[15:13]==3'b000)  RdNo1 = 2;
-                    else                        RdNo1 = Reg1Cp_w;
+                    else                        RdNo1 = {3'b001, Insn_d[9:7]};  // RVC rs1'
                 end else begin // 01
-                    if (~Insn_d[15])            RdNo1 = Reg1C_w;
-                    else                        RdNo1 = Reg1Cp_w;
+                    if (~Insn_d[15])            RdNo1 = {1'b0, Insn_d[11:7]};   // RVC rs1
+                    else                        RdNo1 = {3'b001, Insn_d[9:7]};  // RVC rs1'
                 end
             end else begin
                 if (~Insn_d[0]) begin // 10
@@ -1223,12 +1277,25 @@ module Pipeline #(
                         // implicit x0 for C.MV
                         if (Insn_d[15] & ~Insn_d[12] & (Insn_d[6:2]!=0))
                                                 RdNo1 = 0;
-                        else                    RdNo1 = Reg1C_w;
+                        else                    RdNo1 = {1'b0, Insn_d[11:7]};   // RVC rs1
                     end else                    RdNo1 = 2;
                 end else begin // 11
-                                                RdNo1 = Reg1I_w;
+                                                RdNo1 = {1'b0, Insn_d[19:15]};  // RVI rs1
                 end
             end
+        end
+
+
+        if (~Insn_d[1]) begin
+            if (Insn_d[0] & Insn_d[14]) begin
+                RdNo2 = 0; // implicit x0 for C.BEQZ/BNEZ
+            end else begin
+                RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
+            end
+        end else if (Insn_d[0]) begin
+            RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
+        end else begin
+            RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
         end
 
 
@@ -1794,7 +1861,7 @@ module Pipeline #(
                     PC_q, Insn_q[31:16], Insn_q[15:0], Insn_d);
             end
         end else begin
-            $display("D pc=\033[1;33m%h\033[0m insn=%h next=%h \033[1;33mMC=%h:%h\033[0m",
+            $display("D pc=\033[1;33m%h\033[1;30m insn=%h\033[0m next=%h \033[1;33mMC=%h:%h\033[0m",
                 PC_q, Insn_q, Insn_d, MCState_q, MCAux_q);
         end
 
@@ -1827,10 +1894,12 @@ module Pipeline #(
 
         $display("D read x%d=%h x%d=%h SelImm=%b %h",
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2, vSelImm, ImmALU_w);
-        $display("D Bubble=%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
-            BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q, PartialInsn_q);
-        $display("D A:P=%h:%h align=%b%b RVC=%b",
-            AlignedInsn_d, PartialInsn_d, RealignedPC_d, OddPC_d, RVCInsn_w);
+        $display("D Bubble=%b%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
+            BubbleD_d, BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q, PartialInsn_q);
+        $display("D P=%h align=%b%b RVC=%b",
+            PartialInsn_d, RealignedPC_d, OddPC_d, RVCInsn_w);
+        $display("D Imm21PCRel=%b",
+            Imm21PCRel_w);
 
 
         $display("E a=%h b=%h -> %h -> x%d wrenDE=%b%b",
@@ -1856,7 +1925,6 @@ module Pipeline #(
             w_ExcMem,
             vWriteMEPC
             );
-
 
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchAddr_d);
 
