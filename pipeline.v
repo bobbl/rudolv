@@ -599,6 +599,7 @@ module Pipeline #(
 
         Overwrite_d     = 0;
         OverwriteVal_d  = 0;
+        OverwriteVal_d = PC_q;
         OverwriteSelD_d = 0;
         TrapEnter_d     = 0;
         InsnMRET_d      = 0;
@@ -931,16 +932,19 @@ module Pipeline #(
             PC_d = PC_q + 2;
             RVCInsn_w = 1;
 
-            case ({Insn_q[15:13], Insn_q[1:0]})
-                5'b00000: begin // C.ADDI4SPN
-                    ExcInvalidInsn = (Insn_q[12:2]==0);
+            DecodeWrEn = (Insn_q[11:7]!=0);
+            DecodeWrNo = {1'b0, Insn_q[11:7]};
+
+            case ({Insn_q[15:14], Insn_q[1:0]})
+                4'b0000: begin // C.ADDI4SPN
+                    ExcInvalidInsn = Insn_q[13] | (Insn_q[12:2]==0);
                     SelSum = 1;
                     vSelImm = 1;
                     DecodeWrEn = 1;
                     DecodeWrNo = {3'b001, Insn_q[4:2]};
                 end
-                5'b01000: begin // C.LW
-                    ExcInvalidInsn = 0;
+                4'b0100: begin // C.LW
+                    ExcInvalidInsn = Insn_q[13];
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemWidth = 2'b10;
@@ -952,8 +956,9 @@ module Pipeline #(
                     MC_d = 1;
                     MCState_d = mcMem;
                 end
-                5'b11000: begin // C.SW
-                    ExcInvalidInsn = 0;
+                5'b1100: begin // C.SW
+                    ExcInvalidInsn = Insn_q[13];
+                    DecodeWrEn = 0;
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemStore = 1;
@@ -962,118 +967,101 @@ module Pipeline #(
                     MC_d = 1;
                     MCState_d = mcMem;
                 end
-                5'b00001: begin // C.ADDI
+                4'b0001: begin
                     ExcInvalidInsn = 0;
-                    SelSum = 1;
-                    vSelImm = 1;
-                    DecodeWrEn = (Insn_q[11:7]!=0);
-                    DecodeWrNo = {1'b0, Insn_q[11:7]};
-                end
-                5'b00101: begin // C.JAL
-                    ExcInvalidInsn = 0;
-                    BranchUncondPCRel = 1;
-                    ReturnPC = 1;
-                    NoIrq_d = 1;
-                    DecodeWrEn = 1;
-                    DecodeWrNo = 1;
-                end
-                5'b01001: begin // C.LI
-                    ExcInvalidInsn = 0;
-                    ReturnUI = 1;
-                    DecodeWrEn = (Insn_q[11:7]!=0);
-                    DecodeWrNo = {1'b0, Insn_q[11:7]};
-                end
-                5'b01101: begin
-                    ExcInvalidInsn = 0;
-                    DecodeWrEn = (Insn_q[11:7]!=0);
-                    DecodeWrNo = {1'b0, Insn_q[11:7]};
-                    if (Insn_q[11:7]==2) begin // C.ADDI16SP
+                    if (~Insn_q[13]) begin // C.ADDI
                         SelSum = 1;
                         vSelImm = 1;
-                    end else begin // C.LUI
-                        ReturnUI       = 1;
+                    end else begin // C.JAL
+                        BranchUncondPCRel = 1;
+                        ReturnPC = 1;
+                        NoIrq_d = 1;
+                        DecodeWrEn = 1;
+                        DecodeWrNo = 1;
                     end
                 end
-                5'b10001: begin
-                    ExcInvalidInsn = Insn_q[12] & (Insn_q[11:10]!=2'b10);
-                    DecodeWrEn = 1;
-                    DecodeWrNo = {3'b001, Insn_q[9:7]};
-                    if (Insn_q[11]) begin
-                        if (Insn_q[10]) begin
-                            case (Insn_q[6:5])
-                                2'b00: begin // C.SUB
-                                    NegB = 1;
-                                    SelSum = 1;
-                                end
-                                2'b01: begin // C.XOR
-                                    SelLogic = 2'b00;
-                                end
-                                2'b10: begin // C.OR
-                                    SelLogic = 2'b10;
-                                end
-                                2'b11: begin // C.AND
-                                    SelLogic = 2'b11;
-                                end
-                            endcase
-                        end else begin // C.ANDI
-                            SelLogic = 2'b11;
+                4'b0101: begin
+                    ExcInvalidInsn = 0;
+                    if (Insn_q[13] & Insn_q[11:7]==2) begin // C.ADDI16SP
+                        SelSum = 1;
+                        vSelImm = 1;
+                    end else begin // C.LI or C.LUI
+                        ReturnUI = 1;
+                    end
+                end
+                4'b1001: begin
+                    if (~Insn_q[13]) begin
+                        ExcInvalidInsn = Insn_q[12] & (Insn_q[11:10]!=2'b10);
+                        DecodeWrEn = 1;
+                        DecodeWrNo = {3'b001, Insn_q[9:7]};
+                        if (Insn_q[11]) begin
+                            if (Insn_q[10]) begin
+                                case (Insn_q[6:5])
+                                    2'b00: begin // C.SUB
+                                        NegB = 1;
+                                        SelSum = 1;
+                                    end
+                                    2'b01: begin // C.XOR
+                                        SelLogic = 2'b00;
+                                    end
+                                    2'b10: begin // C.OR
+                                        SelLogic = 2'b10;
+                                    end
+                                    2'b11: begin // C.AND
+                                        SelLogic = 2'b11;
+                                    end
+                                endcase
+                            end else begin // C.ANDI
+                                SelLogic = 2'b11;
+                                vSelImm = 1;
+                            end
+                        end else begin // C.SRLI and C.SRAI
+                            EnShift = 1;
+                                // ShiftRight_q and ShiftArith_q are set independently
                             vSelImm = 1;
                         end
-                    end else begin // C.SRLI and C.SRAI
-                        EnShift = 1;
-                            // ShiftRight_q and ShiftArith_q are set independently
-                        vSelImm = 1;
+                    end else begin // C.J
+                        ExcInvalidInsn = 0;
+                        DecodeWrEn = 0;
+                        BranchUncondPCRel = 1;
+                        NoIrq_d = 1;
                     end
                 end
-                5'b10101: begin // C.J
+                4'b1101: begin // C.BEQZ ot C.BNEZ
                     ExcInvalidInsn = 0;
-                    BranchUncondPCRel = 1;
-                    NoIrq_d = 1;
-                end
-                5'b11001: begin // C.BEQZ
-                    ExcInvalidInsn = 0;
+                    DecodeWrEn = 0;
                     InsnBEQ        = 1;
                         // InvertBranch_q is set independently
                     NoIrq_d        = 1;
                     NegB           = 1;
                     SelLogic       = 2'b00; // xor
                 end
-                5'b11101: begin // C.BNEZ
-                    ExcInvalidInsn = 0;
-                    InsnBEQ        = 1;
-                        // InvertBranch_q is set independently
-                    NoIrq_d        = 1;
-                    NegB           = 1;
-                    SelLogic       = 2'b00; // xor
-                end
-                5'b00010: begin // C.SLLI
-                    ExcInvalidInsn = Insn_q[12];
+                4'b0010: begin // C.SLLI
+                    ExcInvalidInsn = Insn_q[13] | Insn_q[12];
                     NegB = 1;
                     EnShift = 1;
                         // ShiftRight_q and ShiftArith_q are set independently
                     vSelImm = 1;
-                    DecodeWrEn = (Insn_q[11:7]!=0);
-                    DecodeWrNo = {1'b0, Insn_q[11:7]};
                 end
-                5'b01010: begin // C.LWSP
-                    ExcInvalidInsn = (Insn_q[11:7]==0);
+                4'b0110: begin // C.LWSP
+                    ExcInvalidInsn = Insn_q[13] | (Insn_q[11:7]==0);
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemWidth = 2'b10;
                     RdNo1 = REG_CSR_MTVEC;
                         // read MTVEC in 2nd cycle, so that its value is
                         // available if Exc is raised
-                    DecodeWrEn = 1;
-                    DecodeWrNo = {1'b0, Insn_q[11:7]};
                     MC_d = 1;
                     MCState_d = mcMem;
                 end
-                5'b10010: begin // C.SWSP
-                    if (Insn_q[12]) begin
-                        if (Insn_q[6:2]==0) begin
+                4'b1010: begin
+                    ExcInvalidInsn = Insn_q[13];
+                    if (Insn_q[6:2]==0) begin
+                        if (Insn_q[12]) begin
                             if (Insn_q[11:7]==0) begin // C.EBREAK
                                 Overwrite_d = 1;
                                 OverwriteVal_d = PC_q;
+                                DecodeWrEn = 1;
                                 DecodeWrNo = REG_CSR_MEPC;
                                 RdNo1 = REG_CSR_MTVEC;
                                 MC_d = 1;
@@ -1093,14 +1081,9 @@ module Pipeline #(
                                     AddrFromSum = 1;
                                 end
                             end
-                        end else begin // C.ADD
-                            SelSum = 1;
-                            DecodeWrEn = (Insn_q[11:7]!=0);
-                            DecodeWrNo = {1'b0, Insn_q[11:7]};
-                        end
-                    end else begin
-                        if (Insn_q[6:2]==0) begin // C.JR
+                        end else begin // C.JR
                             ExcInvalidInsn = (Insn_q[11:7]!=0);
+                            DecodeWrEn = 0;
                             NoIrq_d = 1;
 
                             // disable JALR, if it is the memory bubble and there is no memory exception
@@ -1109,16 +1092,15 @@ module Pipeline #(
                                 InsnJALR    = 1;
                                 AddrFromSum = 1;
                             end
-                        end else begin // C.MV
-                            SelSum = 1;
-                                // implicit rs1=x0
-                            DecodeWrEn = (Insn_q[11:7]!=0);
-                            DecodeWrNo = {1'b0, Insn_q[11:7]};
                         end
+                    end else begin // C.MV or C.ADD
+                        SelSum = 1;
+                            // implicit rs1=x0 for C.MV is set in predecode
                     end
                 end
-                5'b11010: begin // C.SWSP
-                    ExcInvalidInsn = (Insn_q[11:7]==0);
+                4'b1110: begin // C.SWSP
+                    ExcInvalidInsn = Insn_q[13] | (Insn_q[11:7]==0);
+                    DecodeWrEn = 0;
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemStore = 1;
