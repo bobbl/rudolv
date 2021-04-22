@@ -69,6 +69,33 @@ module top
     wire        irq_external = IRQBombEnable;
     wire        retired;
 
+`define RISCV_FORMAL_NRET 1
+`define RISCV_FORMAL_ILEN 32
+`define RISCV_FORMAL_XLEN 32
+`ifdef RISCV_FORMAL
+(* keep *) wire [`RISCV_FORMAL_NRET                        - 1 : 0] rvfi_valid;
+(* keep *) wire [`RISCV_FORMAL_NRET *                 64   - 1 : 0] rvfi_order;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_ILEN   - 1 : 0] rvfi_insn;
+(* keep *) wire [`RISCV_FORMAL_NRET                        - 1 : 0] rvfi_trap;
+(* keep *) wire [`RISCV_FORMAL_NRET                        - 1 : 0] rvfi_halt;
+(* keep *) wire [`RISCV_FORMAL_NRET                        - 1 : 0] rvfi_intr;
+(* keep *) wire [`RISCV_FORMAL_NRET *                  2   - 1 : 0] rvfi_mode;
+(* keep *) wire [`RISCV_FORMAL_NRET *                  2   - 1 : 0] rvfi_ixl;
+(* keep *) wire [`RISCV_FORMAL_NRET *                  5   - 1 : 0] rvfi_rs1_addr;
+(* keep *) wire [`RISCV_FORMAL_NRET *                  5   - 1 : 0] rvfi_rs2_addr;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_rs1_rdata;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_rs2_rdata;
+(* keep *) wire [`RISCV_FORMAL_NRET *                  5   - 1 : 0] rvfi_rd_addr;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_rd_wdata;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_pc_rdata;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_pc_wdata;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_mem_addr;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN/8 - 1 : 0] rvfi_mem_rmask;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN/8 - 1 : 0] rvfi_mem_wmask;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_mem_rdata;
+(* keep *) wire [`RISCV_FORMAL_NRET * `RISCV_FORMAL_XLEN   - 1 : 0] rvfi_mem_wdata;
+`endif
+
     wire        csr_read;
     wire  [2:0] csr_modify;
     wire [31:0] csr_wdata;
@@ -166,6 +193,30 @@ module top
         .irq_external   (irq_external),
         .retired        (retired),
 
+`ifdef RISCV_FORMAL
+        .rvfi_valid     (rvfi_valid    ),
+        .rvfi_order     (rvfi_order    ),
+        .rvfi_insn      (rvfi_insn     ),
+        .rvfi_trap      (rvfi_trap     ),
+        .rvfi_halt      (rvfi_halt     ),
+        .rvfi_intr      (rvfi_intr     ),
+        .rvfi_mode      (rvfi_mode     ),
+        .rvfi_ixl       (rvfi_ixl      ),
+        .rvfi_rs1_addr  (rvfi_rs1_addr ),
+        .rvfi_rs2_addr  (rvfi_rs2_addr ),
+        .rvfi_rs1_rdata (rvfi_rs1_rdata),
+        .rvfi_rs2_rdata (rvfi_rs2_rdata),
+        .rvfi_rd_addr   (rvfi_rd_addr  ),
+        .rvfi_rd_wdata  (rvfi_rd_wdata ),
+        .rvfi_pc_rdata  (rvfi_pc_rdata ),
+        .rvfi_pc_wdata  (rvfi_pc_wdata ),
+        .rvfi_mem_addr  (rvfi_mem_addr ),
+        .rvfi_mem_rmask (rvfi_mem_rmask),
+        .rvfi_mem_wmask (rvfi_mem_wmask),
+        .rvfi_mem_rdata (rvfi_mem_rdata),
+        .rvfi_mem_wdata (rvfi_mem_wdata),
+`endif
+
         .csr_read       (csr_read),
         .csr_modify     (csr_modify),
         .csr_wdata      (csr_wdata),
@@ -250,6 +301,28 @@ module top
         end
 `endif
 
+`ifdef RISCV_FORMAL
+        if (rvfi_valid) begin
+            $display("%0d %0d %x %x %x x%0d=%x x%0d=%x x%0d=%x %c%c",
+                rvfi_order,
+                $time/10,
+                rvfi_pc_rdata,
+                rvfi_pc_wdata,
+                rvfi_insn,
+
+                rvfi_rd_addr,
+                rvfi_rd_wdata,
+                rvfi_rs1_addr,
+                rvfi_rs1_rdata,
+                rvfi_rs2_addr,
+                rvfi_rs2_rdata,
+
+                rvfi_trap ? "T" : ".",
+                rvfi_intr ? "I" : "."
+            );
+        end
+`endif
+
         if ($time > (irqbomb_marker + 10000)) begin
             $display("***** IRQBOMB 'TIMEOUT 1000 cycles after marker in cycle %0d", $time/10);
             $finish;
@@ -285,11 +358,13 @@ module top
                 CSR_SIM: begin
                     case (csr_wdata)
                         2: begin // signature from compliance tests
+`ifndef RISCV_FORMAL
                             i = sig_begin;
                             while (i < sig_end) begin
                                 $display("%h", mem.mem[i][31:0]);
                                 i = i + 1;
                             end
+`endif
                         end
                         default: $display("exit after %0d cycles due to write to CSR 0x3ff",
                                           $time/10);

@@ -9,6 +9,30 @@ module Pipeline #(
     input  irq_external,
     output retired,
 
+`ifdef RISCV_FORMAL
+    output reg        rvfi_valid,
+    output reg [63:0] rvfi_order,
+    output reg [31:0] rvfi_insn,
+    output reg        rvfi_trap,
+    output reg        rvfi_halt,
+    output reg        rvfi_intr,
+    output reg [ 1:0] rvfi_mode,
+    output reg [ 1:0] rvfi_ixl,
+    output reg [ 4:0] rvfi_rs1_addr,
+    output reg [ 4:0] rvfi_rs2_addr,
+    output reg [31:0] rvfi_rs1_rdata,
+    output reg [31:0] rvfi_rs2_rdata,
+    output reg [ 4:0] rvfi_rd_addr,
+    output reg [31:0] rvfi_rd_wdata,
+    output reg [31:0] rvfi_pc_rdata,
+    output reg [31:0] rvfi_pc_wdata,
+    output reg [31:0] rvfi_mem_addr,
+    output reg [ 3:0] rvfi_mem_rmask,
+    output reg [ 3:0] rvfi_mem_wmask,
+    output reg [31:0] rvfi_mem_rdata,
+    output reg [31:0] rvfi_mem_wdata,
+`endif
+
     output csr_read,            // can be ignored if there are no side-effects
     output [2:0] csr_modify,    // 01=write 10=set 11=clear
     output [31:0] csr_wdata,
@@ -153,6 +177,9 @@ module Pipeline #(
     reg [5:0] w_WrNo;
     reg [WORD_WIDTH-1:0] w_WrData;
     reg w_WrGrubby;
+
+    reg RetiredE_q;
+    reg RetiredM_q;
 
     // exceptions
     reg [WORD_WIDTH-1:0] e_ExcWrData2;
@@ -437,7 +464,7 @@ module Pipeline #(
         e_CsrAddr   <= Insn_q[31:20];
     end
 
-    assign retired    = ~BubbleE_q & ~m_Kill & ~w_Kill;
+    assign retired    = RetiredM_q;
     assign csr_read   = e_CsrRead;
     assign csr_modify = e_CsrModify;
     assign csr_wdata  = e_CsrWData;
@@ -495,6 +522,7 @@ module Pipeline #(
 
     // Decoding
     reg ExcInvalidInsn;
+    reg RetiredD_d;
     reg DecodeWrEn;
     reg [5:0] DecodeWrNo;
 
@@ -551,6 +579,7 @@ module Pipeline #(
 
 
         ExcInvalidInsn = 1;
+        RetiredD_d = 0;
         DecodeWrEn = 0;
         DecodeWrNo = 0; // don't care
 
@@ -598,8 +627,7 @@ module Pipeline #(
         Imm12PlusReg_d  = Imm12PlusReg_w; // used for memory accesses and JALR
 
         Overwrite_d     = 0;
-        OverwriteVal_d  = 0;
-        OverwriteVal_d = PC_q;
+        OverwriteVal_d  = PC_q;
         OverwriteSelD_d = 0;
         TrapEnter_d     = 0;
         InsnMRET_d      = 0;
@@ -636,6 +664,7 @@ module Pipeline #(
 
         // microcoded cycles of multi-cycle instructions
         end else if (MC_q) begin
+            ExcInvalidInsn = 0;
             case (MCState_q)
                 mcNop: begin
                 end
@@ -918,6 +947,7 @@ module Pipeline #(
                 default: begin
                 end
             endcase
+            RetiredD_d = ~ExcInvalidInsn;
 
         // compressed instruction
         end else begin
@@ -956,7 +986,7 @@ module Pipeline #(
                     MC_d = 1;
                     MCState_d = mcMem;
                 end
-                5'b1100: begin // C.SW
+                4'b1100: begin // C.SW
                     ExcInvalidInsn = Insn_q[13];
                     DecodeWrEn = 0;
                     BubbleD_d = 1;
@@ -1082,7 +1112,7 @@ module Pipeline #(
                                 end
                             end
                         end else begin // C.JR
-                            ExcInvalidInsn = (Insn_q[11:7]!=0);
+                            ExcInvalidInsn = (Insn_q[11:7]==0);
                             DecodeWrEn = 0;
                             NoIrq_d = 1;
 
@@ -1099,7 +1129,7 @@ module Pipeline #(
                     end
                 end
                 4'b1110: begin // C.SWSP
-                    ExcInvalidInsn = Insn_q[13] | (Insn_q[11:7]==0);
+                    ExcInvalidInsn = Insn_q[13];
                     DecodeWrEn = 0;
                     BubbleD_d = 1;
                     AddrFromSum = 1;
@@ -1113,6 +1143,7 @@ module Pipeline #(
                     ExcInvalidInsn = 1;
                 end
             endcase
+            RetiredD_d = ~ExcInvalidInsn;
         end
 
 
@@ -1314,7 +1345,6 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] ForwardBR = vSelImm ?    0 : (FwdBW ? w_WrData : regset_rd2);
     wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBR | ForwardImm);
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}};
-
 
     wire ALUResultGrubby = 0;
     wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : regset_rg1;
@@ -1536,11 +1566,10 @@ module Pipeline #(
                         : e_ExcWrData2;
 
 
-    wire [WORD_WIDTH-1:0] OverwriteValM_d = OverwriteValM_q;
     wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q ? MulDivResult_d : OverwriteValE_q;
 
     wire [WORD_WIDTH-1:0] CsrResult =
-        OverwriteM_q ? OverwriteValM_d
+        OverwriteM_q ? OverwriteValM_q
                      : (vExcOverwrite ? (e_ExcGrubbyJump ? e_ExcWrData2 // MTVAL for jump
                                                          : m_ExcWrData)
                                       : vCsrOrALU);
@@ -1775,6 +1804,9 @@ module Pipeline #(
         w_WrNo <= MemWrNo;
         w_WrData <= MemResult;
         w_WrGrubby <= MemResultGrubby;
+
+        RetiredM_q <= RetiredE_q & ~m_Kill;
+        RetiredE_q <= RetiredD_d;
 
         // exception handling
         e_ExcWrData2        <= ExcWrData2;
@@ -2023,6 +2055,123 @@ module Pipeline #(
             NoIrq_q <= 0;
         end
     end
+
+
+`ifdef RISCV_FORMAL
+    wire [WORD_WIDTH-1:0] RvfiForwardB =
+        (e_WrEn & (d_RdNo2 == e_WrNo)) ? ALUResult :
+        (m_WrEn & (d_RdNo2 == m_WrNo)) ? MemResult :
+        FwdBW ? w_WrData  : regset_rd2;
+        // ForwardBE, FwdBM and FwdBE cannot be used, because they also
+        // depend on vImm
+
+    reg [31:0]           RvfiCycle_q;
+
+    reg                  RvfiResetN1_q = 0;
+    reg                  RvfiResetN2_q = 0;
+    reg [31:0]           RvfiInsnE_q;
+    reg [31:0]           RvfiInsnM_q;
+    reg                  RvfiTrapE_q;
+    reg                  RvfiTrapM_q;
+    reg                  RvfiHalt_q;
+    reg                  RvfiIntr0_q;
+    reg                  RvfiIntr1_q;
+    reg                  RvfiIntrF_q;
+    reg                  RvfiIntrD_q;
+    reg                  RvfiIntrE_q;
+    reg                  RvfiIntrM_q;
+    reg [4:0]            RvfiRdNo1E_q;
+    reg [4:0]            RvfiRdNo1M_q;
+    reg [4:0]            RvfiRdNo2E_q;
+    reg [4:0]            RvfiRdNo2M_q;
+    reg [WORD_WIDTH-1:0] RvfiRdData1M_q;
+    reg [WORD_WIDTH-1:0] RvfiRdData2E_q;
+    reg [WORD_WIDTH-1:0] RvfiRdData2M_q;
+    reg [WORD_WIDTH-1:0] RvfiPcE_q;
+    reg [WORD_WIDTH-1:0] RvfiPcM_q;
+    reg [WORD_WIDTH-1:0] RvfiNextPcM_q;
+    reg                  RvfiExcRetM_q;
+    reg [WORD_WIDTH-1:0] RvfiMemAddrM_q;
+    reg [3:0]            RvfiMemRMaskM_q;
+    reg [3:0]            RvfiMemWMaskM_q;
+    reg [WORD_WIDTH-1:0] RvfiMemWDataM_q;
+
+    always @(posedge clk) begin
+        RvfiCycle_q      <= rstn ? RvfiCycle_q + 1 : 0;
+
+        rvfi_valid      <= rstn & !rvfi_halt & !RvfiHalt_q & (RetiredM_q | RvfiTrapM_q);
+        rvfi_order      <= RvfiResetN2_q ? rvfi_order + rvfi_valid : 0;
+        rvfi_insn       <= (RvfiInsnM_q[1:0]==3) ? RvfiInsnM_q : RvfiInsnM_q[15:0];
+        rvfi_trap       <= RvfiTrapM_q // illegal instruction
+                            | (m_CsrRead & ~csr_valid); // illegal CSR
+
+        rvfi_halt       <= RvfiTrapM_q;
+        rvfi_intr       <= RvfiIntrM_q;
+        rvfi_mode       <= 3;
+        rvfi_ixl        <= 1;
+
+        rvfi_rs1_addr   <= RvfiRdNo1M_q;
+        rvfi_rs2_addr   <= RvfiRdNo2M_q;
+        rvfi_rs1_rdata  <= RvfiRdData1M_q;
+        rvfi_rs2_rdata  <= RvfiRdData2M_q;
+        rvfi_rd_addr    <= (MemWrEn & ~MemWrNo[5]) ? MemWrNo : 0;
+        rvfi_rd_wdata   <= (MemWrEn & ~MemWrNo[5]) ? MemResult : 0;
+
+        rvfi_pc_rdata   <= RvfiPcM_q;
+        rvfi_pc_wdata   <= RvfiExcRetM_q ? FetchAddr_d : RvfiNextPcM_q;
+
+        rvfi_mem_addr   <= RvfiMemAddrM_q;
+        rvfi_mem_rmask  <= RvfiMemRMaskM_q;
+        rvfi_mem_wmask  <= RvfiMemWMaskM_q;
+        rvfi_mem_rdata  <= mem_rdata;
+        rvfi_mem_wdata  <= RvfiMemWDataM_q;
+
+        if (!rstn | !RvfiResetN1_q | !RvfiResetN2_q) begin
+            rvfi_rd_addr    <= 0;
+            rvfi_rd_wdata   <= 0;
+            RvfiHalt_q      <= 0;
+        end
+
+        RvfiResetN2_q   <= RvfiResetN1_q;
+        RvfiResetN1_q   <= rstn; // delay reset to hide first 2 cycles
+        RvfiInsnM_q     <= RvfiInsnE_q;
+        RvfiInsnE_q     <= Insn_q;
+        RvfiTrapM_q     <= (RvfiTrapE_q | MemMisaligned) & ~m_Kill;
+        RvfiTrapE_q     <= ExcInvalidInsn;
+        RvfiHalt_q      <= RvfiHalt_q | rvfi_trap; // halt after first trap
+        RvfiIntrM_q     <= RvfiIntrE_q; // long delay (jump to MTVEC)
+        RvfiIntrE_q     <= RvfiIntrD_q;
+        RvfiIntrD_q     <= RvfiIntrF_q;
+        RvfiIntrF_q     <= RvfiIntr1_q;
+        RvfiIntr1_q     <= RvfiIntr0_q;
+        RvfiIntr0_q     <= MC_q & (MCState_q==mcException);
+
+        RvfiRdNo1M_q    <= RvfiRdNo1E_q;
+        RvfiRdNo1E_q    <= d_RdNo1[5] ? 5'b0 : d_RdNo1; // no CSRs
+        RvfiRdNo2M_q    <= RvfiRdNo2E_q;
+        RvfiRdNo2E_q    <= d_RdNo2[5] ? 5'b0 : d_RdNo2; // no CSRs
+        RvfiRdData1M_q  <= e_A;
+        RvfiRdData2M_q  <= RvfiRdData2E_q;
+        RvfiRdData2E_q  <= RvfiForwardB;
+
+        RvfiPcM_q       <= RvfiPcE_q;
+        RvfiPcE_q       <= PC_q;
+        RvfiNextPcM_q   <= Kill ? FetchAddr_d : PC_q;
+        RvfiExcRetM_q   <= MC_q & ((MCState_q==mcJumpReg) | (MCState_q==mcException));
+
+
+        RvfiMemAddrM_q  <= {mem_addr[31:2], 2'b00}; // MemAddr;
+        RvfiMemRMaskM_q <= ((e_MemWidth!=2'b11) & ~e_MemStore) ? 4'b1111 : 0;
+        RvfiMemWMaskM_q <= mem_write ? mem_wmask : 0;
+        RvfiMemWDataM_q <= mem_wdata & //MemWriteData;
+                            {{8{mem_wmask[3]}}, {8{mem_wmask[2]}},
+                             {8{mem_wmask[1]}}, {8{mem_wmask[0]}}};
+
+    end
+`endif
+
+
+
 endmodule
 
 

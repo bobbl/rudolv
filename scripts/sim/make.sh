@@ -12,6 +12,7 @@ then
     echo "Simulation"
     echo "  run <file.elf>               Simulate without logging"
     echo "  debug <file.elf>             Simulate with extensive logging"
+    echo "  rvfi <file.elf>              Simulate with RVFI logging"
     echo "  irq-debug <file.elf> <cycle> Raise IRQ in <cycle>, log"
     echo "  gy-run <file.elf>            Enable grubby, no log"
     echo "  gy-debug <file.elf>          Enable grubby, log"
@@ -209,6 +210,11 @@ do
             ;;
         debug)
             compile $2 "-DDEBUG"
+            run
+            shift
+            ;;
+        rvfi)
+            compile $2 "-DRISCV_FORMAL"
             run
             shift
             ;;
