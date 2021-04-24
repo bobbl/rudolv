@@ -2065,6 +2065,9 @@ module Pipeline #(
         // ForwardBE, FwdBM and FwdBE cannot be used, because they also
         // depend on vImm
 
+    wire RvfiTrap_w = RvfiTrapM_q // illegal instruction
+                            | (m_CsrRead & ~m_Kill & ~w_Kill & ~csr_valid); // illegal CSR
+
     reg [31:0]           RvfiCycle_q;
 
     reg                  RvfiResetN1_q = 0;
@@ -2095,6 +2098,8 @@ module Pipeline #(
     reg [3:0]            RvfiMemRMaskM_q;
     reg [3:0]            RvfiMemWMaskM_q;
     reg [WORD_WIDTH-1:0] RvfiMemWDataM_q;
+    reg                  RvfiAltResultM_q;
+    reg [WORD_WIDTH-1:0] RvfiResultM_q;
 
     always @(posedge clk) begin
         RvfiCycle_q      <= rstn ? RvfiCycle_q + 1 : 0;
@@ -2102,10 +2107,11 @@ module Pipeline #(
         rvfi_valid      <= rstn & !rvfi_halt & !RvfiHalt_q & (RetiredM_q | RvfiTrapM_q);
         rvfi_order      <= RvfiResetN2_q ? rvfi_order + rvfi_valid : 0;
         rvfi_insn       <= (RvfiInsnM_q[1:0]==3) ? RvfiInsnM_q : RvfiInsnM_q[15:0];
-        rvfi_trap       <= RvfiTrapM_q // illegal instruction
-                            | (m_CsrRead & ~csr_valid); // illegal CSR
+//        rvfi_trap       <= RvfiTrapM_q // illegal instruction
+//                            | (m_CsrRead & ~csr_valid); // illegal CSR
+        rvfi_trap       <= RvfiTrap_w;
 
-        rvfi_halt       <= RvfiTrapM_q;
+        rvfi_halt       <= RvfiTrap_w | RvfiHalt_q;
         rvfi_intr       <= RvfiIntrM_q;
         rvfi_mode       <= 3;
         rvfi_ixl        <= 1;
@@ -2115,7 +2121,8 @@ module Pipeline #(
         rvfi_rs1_rdata  <= RvfiRdData1M_q;
         rvfi_rs2_rdata  <= RvfiRdData2M_q;
         rvfi_rd_addr    <= (MemWrEn & ~MemWrNo[5]) ? MemWrNo : 0;
-        rvfi_rd_wdata   <= (MemWrEn & ~MemWrNo[5]) ? MemResult : 0;
+        rvfi_rd_wdata   <= RvfiAltResultM_q ? RvfiResultM_q :
+                           (MemWrEn & ~MemWrNo[5]) ? MemResult : 0;
 
         rvfi_pc_rdata   <= RvfiPcM_q;
         rvfi_pc_wdata   <= RvfiExcRetM_q ? FetchAddr_d : RvfiNextPcM_q;
@@ -2136,7 +2143,9 @@ module Pipeline #(
         RvfiResetN1_q   <= rstn; // delay reset to hide first 2 cycles
         RvfiInsnM_q     <= RvfiInsnE_q;
         RvfiInsnE_q     <= Insn_q;
-        RvfiTrapM_q     <= (RvfiTrapE_q | MemMisaligned) & ~m_Kill;
+//        RvfiTrapM_q     <= (RvfiTrapE_q | MemMisaligned) & ~m_Kill;
+        RvfiTrapM_q     <= (RvfiTrapE_q | MemMisaligned | (MC_q && MCState_q==mcWFI)) & ~m_Kill;
+            // trap when WFI
         RvfiTrapE_q     <= ExcInvalidInsn;
         RvfiHalt_q      <= RvfiHalt_q | rvfi_trap; // halt after first trap
         RvfiIntrM_q     <= RvfiIntrE_q; // long delay (jump to MTVEC)
@@ -2166,6 +2175,42 @@ module Pipeline #(
         RvfiMemWDataM_q <= mem_wdata & //MemWriteData;
                             {{8{mem_wmask[3]}}, {8{mem_wmask[2]}},
                              {8{mem_wmask[1]}}, {8{mem_wmask[0]}}};
+
+
+`ifdef RISCV_FORMAL_ALTOPS
+        RvfiAltResultM_q <= 0;
+        RvfiResultM_q <= 0;
+        if (StartMulDiv_q) begin
+            RvfiAltResultM_q <= ExecuteWrEn;
+            if (~SelDivOrMul_q) begin
+                if (SelMulLowOrHigh_q) begin // MUL
+                    RvfiResultM_q <= (e_A + e_B) ^ 32'h5876063e;
+                end else if (InsnMULH_q) begin // MULH
+                    RvfiResultM_q <= (e_A + e_B) ^ 32'hf6583fb7;
+                end else if (MulASigned_q) begin // MULHSU
+                    RvfiResultM_q <= (e_A - e_B) ^ 32'hecfbe137;
+                end else begin // MULHU
+                    RvfiResultM_q <= (e_A + e_B) ^ 32'h949ce5e8;
+                end
+            end else begin
+                if (~SelRemOrDiv_q) begin
+                    if (DivSigned_q) begin // DIV
+                        RvfiResultM_q <= (e_A - e_B) ^ 32'h7f8529ec;
+                    end else begin // DIVU
+                        RvfiResultM_q <= (e_A - e_B) ^ 32'h10e8fd70;
+                    end
+                end else begin
+                    if (DivSigned_q) begin // REM
+                        RvfiResultM_q <= (e_A - e_B) ^ 32'h8da68fa5;
+                    end else begin // REMU
+                        RvfiResultM_q <= (e_A - e_B) ^ 32'h3138d0e1;
+                    end
+                end
+            end
+        end
+`endif
+
+
 
     end
 `endif
