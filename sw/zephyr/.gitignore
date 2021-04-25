@@ -1,3 +1,4 @@
 elf/
 build/
 zephyrproject/
+*.run

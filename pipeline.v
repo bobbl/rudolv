@@ -89,6 +89,7 @@ module Pipeline #(
 
     // decode
     reg [31:0] Insn_q;
+    reg [31:0] InsnE_q;
     reg [5:0] d_RdNo1;
     reg [5:0] d_RdNo2;
 
@@ -702,6 +703,9 @@ module Pipeline #(
                     if (MCAux_q==(6'h03 + 1)) begin
                         // EBREAK exception: MTVAL=PC
                         OverwriteVal_d = OverwriteValE_q;
+                    end else if (MCAux_q==(6'h02 + 1)) begin
+                        // Illegal instruction exception: MTVAL=insn
+                        OverwriteVal_d = InsnE_q;
                     end else begin
                         OverwriteVal_d = 0;
                     end
@@ -747,6 +751,7 @@ module Pipeline #(
 
 
         end else if (IrqResponse_q) begin
+            ExcInvalidInsn = 0;
             if (ExternalIrq_q) begin
                 MCAux_d = 6'h1b + 1;
             end else if (SoftwareIrq_q) begin
@@ -882,7 +887,9 @@ module Pipeline #(
                     MCState_d = mcNop;
                     if (Insn_q[13] | Insn_q[12]) begin
                         // RVZicsr
-                        ExcInvalidInsn = 0;
+                        ExcInvalidInsn =
+                            Insn_q[31] & Insn_q[30] & (~Insn_q[13] | (Insn_q[19:15]!=0));
+                                // readonly CSR && (CSRRW || rs1!=0)
                         CsrRead    = DecodeWrEn & ~CsrFromReg;
                         DecodeWrEn = DecodeWrEn & CsrFromReg;
                         InsnCSR    = 1;
@@ -1146,6 +1153,18 @@ module Pipeline #(
             RetiredD_d = ~ExcInvalidInsn;
         end
 
+        // OPTIMISE
+        if (ExcInvalidInsn) begin
+//        (m_CsrRead & ~m_Kill & ~w_Kill & ~csr_valid)) begin
+            Overwrite_d = 1;
+            OverwriteVal_d = PC_q;
+            DecodeWrNo = REG_CSR_MEPC;
+            RdNo1 = REG_CSR_MTVEC;
+            MC_d = 1;
+            MCState_d = mcException;
+            MCAux_d = 6'h02 + 1;
+            TrapEnter_d = 1;
+        end
 
 
         ////////////
@@ -1711,6 +1730,7 @@ module Pipeline #(
 
         // fetch
         Insn_q <= Insn_d;
+        InsnE_q <= Insn_q; // only for illegal exception
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
         d_CsrTranslate <= vCsrTranslate;

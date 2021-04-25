@@ -4,6 +4,9 @@
 #
 # Test if instructions in branch delay slots are correctly killed
 #   Test 1: load after branch
+#
+# Copyright Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: ISC
 
 
 #include "riscv_test.h"

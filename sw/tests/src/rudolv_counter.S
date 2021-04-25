@@ -1,11 +1,12 @@
-# See LICENSE for license details.
-
 #*****************************************************************************
-# jal.S
+# rudolv_counter.S
 #-----------------------------------------------------------------------------
 #
-# Test jal instruction.
+# Test instructions to read CSR counters
 #
+# Copyright Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: ISC
+
 
 #include "riscv_test.h"
 #include "test_macros.h"

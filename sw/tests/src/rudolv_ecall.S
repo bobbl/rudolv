@@ -4,6 +4,9 @@
 #
 # Test user exceptions with ecall and ebreak
 #   Test 1-3: test if instructions in delay slot are ignored
+#
+# Copyright Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: ISC
 
 
 #include "riscv_test.h"

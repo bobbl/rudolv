@@ -6,6 +6,9 @@
 #   Test 1: load address misaligned exception 4
 #   Test 2: store/AMO address misaligned exception 6
 #   Test 3: instruction address misaligned exception 0
+#
+# Copyright Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: ISC
 
 
 #include "riscv_test.h"

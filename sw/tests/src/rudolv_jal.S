@@ -1,11 +1,12 @@
-# See LICENSE for license details.
-
 #*****************************************************************************
-# jal.S
+# rudolv_jal.S
 #-----------------------------------------------------------------------------
 #
-# Test jal instruction.
+# Additional tests for the jal instruction.
 #
+# Copyright Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: ISC
+
 
 #include "riscv_test.h"
 #include "test_macros.h"
@@ -181,7 +182,7 @@ test_16:
         lw      x4, 0(x5)       # never reached, but in the delay slot
         bnez    x4, 1f          # never reached
 1:      jalr    ra
-        li      x4, 3           # should bot be reached
+        li      x4, 3           # should not be reached
 2:      add     x4, x4, 1
         li      x5, 1
         bne     x4, x5, fail

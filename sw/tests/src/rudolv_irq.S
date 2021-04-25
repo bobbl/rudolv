@@ -1,5 +1,3 @@
-# See LICENSE for license details.
-
 #*****************************************************************************
 # rudolv_irq.S
 #-----------------------------------------------------------------------------
@@ -16,6 +14,8 @@
 #   CSR BC1h: set software interrupt pin (CsrPinsOut)
 #   CSR BC2h: timer interrupt controler (CsrTimerAdd)
 #
+# Copyright Jörg Mische <bobbl@gmx.de>
+# SPDX-License-Identifier: ISC
 
 
 #include "riscv_test.h"
