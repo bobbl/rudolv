@@ -1261,7 +1261,6 @@ module Pipeline #(
             end
         end
 
-
         if (~Insn_d[1]) begin
             if (Insn_d[0] & Insn_d[14]) begin
                 RdNo2 = 0; // implicit x0 for C.BEQZ/BNEZ
@@ -1273,8 +1272,6 @@ module Pipeline #(
         end else begin
             RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
         end
-
-
     end
 
 
@@ -1717,7 +1714,8 @@ module Pipeline #(
 
         // fetch
         Insn_q <= Insn_d;
-        InsnE_q <= Insn_q; // only for illegal exception
+        InsnE_q <= (Insn_q[1:0]==2'b11) ? Insn_q : {16'b0, Insn_q[15:0]};
+            // only for illegal exception
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
         CsrTranslateE_q <= CsrTranslateD_d;
@@ -1740,18 +1738,14 @@ module Pipeline #(
 
 
         StartMulDiv_q <= StartMulDiv_d;
-
         DivSigned_q <= DivSigned_d;
         MulASigned_q <= MulASigned_d;
         InsnMULH_q <= InsnMULH_d;
-
         SelRemOrDiv_q <= SelRemOrDiv_d;
         SelDivOrMul_q <= SelDivOrMul_d;
-
         MulDivResNeg_q <= MulDivResNeg_d;
         MulDivResAdd_q <= MulDivResAdd_d;
         SelMulLowOrHigh_q <= SelMulLowOrHigh_d;
-
         DivQuot_q <= DivQuot_d;
         DivRem_q <= DivRem_d;
         Long_q <= Long_d;
@@ -2061,23 +2055,6 @@ module Pipeline #(
 
 
 `ifdef RISCV_FORMAL
-    wire [WORD_WIDTH-1:0] RvfiForwardB =
-        (e_WrEn & (d_RdNo2 == e_WrNo)) ? ALUResult :
-        (m_WrEn & (d_RdNo2 == m_WrNo)) ? MemResult :
-        FwdBW ? w_WrData  : regset_rd2;
-        // ForwardBE, FwdBM and FwdBE cannot be used, because they also
-        // depend on vImm
-
-    wire RvfiTrap_w = RvfiTrapM_q // illegal instruction
-//                            | (CsrFromExtM_q & ~m_Kill & ~w_Kill & ~csr_valid); // illegal CSR
-//                            | (CsrFromExtM_q & ~m_Kill & ~w_Kill & ~CsrValidM_q); // illegal CSR
-                            | (CsrFromExtM_q & ~m_Kill & ~w_Kill); // illegal CSR
-
-    reg [31:0]           RvfiCycle_q;
-
-    reg                  RvfiResetN1_q = 0;
-    reg                  RvfiResetN2_q = 0;
-    reg [31:0]           RvfiInsnE_q;
     reg [31:0]           RvfiInsnM_q;
     reg                  RvfiTrapE_q;
     reg                  RvfiTrapM_q;
@@ -2093,7 +2070,6 @@ module Pipeline #(
     reg [4:0]            RvfiRdNo2E_q;
     reg [4:0]            RvfiRdNo2M_q;
     reg [WORD_WIDTH-1:0] RvfiRdData1M_q;
-    reg [WORD_WIDTH-1:0] RvfiRdData2E_q;
     reg [WORD_WIDTH-1:0] RvfiRdData2M_q;
     reg [WORD_WIDTH-1:0] RvfiPcE_q;
     reg [WORD_WIDTH-1:0] RvfiPcM_q;
@@ -2107,16 +2083,12 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] RvfiResultM_q;
 
     always @(posedge clk) begin
-        RvfiCycle_q      <= rstn ? RvfiCycle_q + 1 : 0;
+        rvfi_valid      <= rstn & !rvfi_halt & (RetiredM_q | RvfiTrapM_q);
+        rvfi_order      <= rstn ? rvfi_order + rvfi_valid : 0;
+        rvfi_insn       <= RvfiInsnM_q;
+        rvfi_trap       <= RvfiTrapM_q;
 
-        rvfi_valid      <= rstn & !rvfi_halt & !RvfiHalt_q & (RetiredM_q | RvfiTrapM_q);
-        rvfi_order      <= RvfiResetN2_q ? rvfi_order + rvfi_valid : 0;
-        rvfi_insn       <= (RvfiInsnM_q[1:0]==3) ? RvfiInsnM_q : RvfiInsnM_q[15:0];
-//        rvfi_trap       <= RvfiTrapM_q // illegal instruction
-//                            | (CsrFromExtM_q & ~csr_valid); // illegal CSR
-        rvfi_trap       <= RvfiTrap_w;
-
-        rvfi_halt       <= RvfiTrap_w | RvfiHalt_q;
+        rvfi_halt       <= RvfiTrapM_q | rvfi_halt;
         rvfi_intr       <= RvfiIntrM_q;
         rvfi_mode       <= 3;
         rvfi_ixl        <= 1;
@@ -2138,21 +2110,11 @@ module Pipeline #(
         rvfi_mem_rdata  <= mem_rdata;
         rvfi_mem_wdata  <= RvfiMemWDataM_q;
 
-        if (!rstn | !RvfiResetN1_q | !RvfiResetN2_q) begin
-            rvfi_rd_addr    <= 0;
-            rvfi_rd_wdata   <= 0;
-            RvfiHalt_q      <= 0;
-        end
-
-        RvfiResetN2_q   <= RvfiResetN1_q;
-        RvfiResetN1_q   <= rstn; // delay reset to hide first 2 cycles
-        RvfiInsnM_q     <= RvfiInsnE_q;
-        RvfiInsnE_q     <= Insn_q;
-//        RvfiTrapM_q     <= (RvfiTrapE_q | MemMisaligned) & ~m_Kill;
-        RvfiTrapM_q     <= (RvfiTrapE_q | MemMisaligned | (MC_q && MCState_q==mcWFI)) & ~m_Kill;
-            // trap when WFI
+        RvfiInsnM_q     <= InsnE_q;
+        RvfiTrapM_q     <= (RvfiTrapE_q         // illegal instruction
+                            | MemMisaligned     // unaligned memory access
+                            | (MC_q && MCState_q==mcWFI)) & ~m_Kill;    // WFI insn
         RvfiTrapE_q     <= ExcInvalidInsn;
-        RvfiHalt_q      <= RvfiHalt_q | rvfi_trap; // halt after first trap
         RvfiIntrM_q     <= RvfiIntrE_q; // long delay (jump to MTVEC)
         RvfiIntrE_q     <= RvfiIntrD_q;
         RvfiIntrD_q     <= RvfiIntrF_q;
@@ -2163,21 +2125,19 @@ module Pipeline #(
         RvfiRdNo1M_q    <= RvfiRdNo1E_q;
         RvfiRdNo1E_q    <= d_RdNo1[5] ? 5'b0 : d_RdNo1; // no CSRs
         RvfiRdNo2M_q    <= RvfiRdNo2E_q;
-        RvfiRdNo2E_q    <= d_RdNo2[5] ? 5'b0 : d_RdNo2; // no CSRs
+        RvfiRdNo2E_q    <= (vSelImm | d_RdNo2[5]) ? 5'b0 : d_RdNo2; // no CSRs
         RvfiRdData1M_q  <= e_A;
-        RvfiRdData2M_q  <= RvfiRdData2E_q;
-        RvfiRdData2E_q  <= RvfiForwardB;
+        RvfiRdData2M_q  <= (RvfiRdNo2E_q==0) ? 5'b0 : (e_B ^ {WORD_WIDTH{e_NegB}});
 
         RvfiPcM_q       <= RvfiPcE_q;
         RvfiPcE_q       <= PC_q;
         RvfiNextPcM_q   <= Kill ? FetchAddr_d : PC_q;
         RvfiExcRetM_q   <= MC_q & ((MCState_q==mcJumpReg) | (MCState_q==mcException));
 
-
-        RvfiMemAddrM_q  <= {mem_addr[31:2], 2'b00}; // MemAddr;
+        RvfiMemAddrM_q  <= {mem_addr[31:2], 2'b00};
         RvfiMemRMaskM_q <= ((e_MemWidth!=2'b11) & ~e_MemStore) ? 4'b1111 : 0;
         RvfiMemWMaskM_q <= mem_write ? mem_wmask : 0;
-        RvfiMemWDataM_q <= mem_wdata & //MemWriteData;
+        RvfiMemWDataM_q <= mem_wdata &
                             {{8{mem_wmask[3]}}, {8{mem_wmask[2]}},
                              {8{mem_wmask[1]}}, {8{mem_wmask[0]}}};
 
@@ -2216,7 +2176,11 @@ module Pipeline #(
 `endif
 
 
-
+        if (!rstn) begin
+            rvfi_rd_addr    <= 0;
+            rvfi_rd_wdata   <= 0;
+            RvfiHalt_q      <= 0;
+        end
     end
 `endif
 
