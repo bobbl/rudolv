@@ -1,7 +1,8 @@
 /* CSR interface
  *
- * D stage: Set (registered) internal enable signals by decoding `addr`
- * E stage: Set `valid` and `rdata` according to enable signals.
+ * D stage: Set (async) `valid` if `addr` is one of the provided CSRs.
+ *          Set (registered) internal enable signals by decoding `addr`.
+ * E stage: Set `rdata` according to enable signals.
  *          Since `rdata` will be discarded by the pipeline if not reading,
  *              `read` can be ignored as long as there are no side effects.
  *          Write `wdata` to enabled CSR according to `modify`
@@ -41,35 +42,42 @@ module CsrIDs #(
 );
     assign AVOID_WARNING = rstn | read | |modify | |wdata;
 
-    reg q_Valid;
-    reg [31:0] q_RData;
-    assign valid = q_Valid;
-    assign rdata = q_RData;
+    reg [31:0] RData_q;
+    assign rdata = RData_q;
 
-    reg q_enISA;
-    reg q_enVendor;
-    reg q_enArch;
-    reg q_enImp;
-    reg q_enHart;
-    reg q_enKHz;
+    // asynchronous in D stage: decode CSR address
+    wire SelISA_w    = (addr == 12'h301);
+    wire SelVendor_w = (addr == 12'hF11);
+    wire SelArch_w   = (addr == 12'hF12);
+    wire SelImp_w    = (addr == 12'hF13);
+    wire SelHart_w   = (addr == 12'hF14);
+    wire SelKHz_w    = (addr == BASE_ADDR);
+    assign valid = SelISA_w | SelVendor_w | SelArch_w | SelImp_w | SelHart_w 
+                            | SelKHz_w;
+
+    reg SelISA_q;
+    reg SelVendor_q;
+    reg SelArch_q;
+    reg SelImp_q;
+    reg SelHart_q;
+    reg SelKHz_q;
 
     always @(posedge clk) begin
         // E stage: read CSR
-        q_Valid <= q_enISA | q_enVendor | q_enArch | q_enImp | q_enHart | q_enKHz;
-        q_RData <= (q_enISA    ? ISA      : 32'b0)
-                 | (q_enVendor ? VENDORID : 32'b0)
-                 | (q_enArch   ? ARCHID   : 32'b0)
-                 | (q_enImp    ? IMPID    : 32'b0)
-                 | (q_enHart   ? HARTID   : 32'b0)
-                 | (q_enKHz    ? KHZ      : 32'b0);
+        RData_q <= (SelISA_q    ? ISA      : 32'b0)
+                 | (SelVendor_q ? VENDORID : 32'b0)
+                 | (SelArch_q   ? ARCHID   : 32'b0)
+                 | (SelImp_q    ? IMPID    : 32'b0)
+                 | (SelHart_q   ? HARTID   : 32'b0)
+                 | (SelKHz_q    ? KHZ      : 32'b0);
 
-        // D stage: decode CSR address
-        q_enISA    <= (addr == 12'h301);
-        q_enVendor <= (addr == 12'hF11);
-        q_enArch   <= (addr == 12'hF12);
-        q_enImp    <= (addr == 12'hF13);
-        q_enHart   <= (addr == 12'hF14);
-        q_enKHz    <= (addr == BASE_ADDR);
+        // D stage: select CSR for next cycle
+        SelISA_q    <= SelISA_w;
+        SelVendor_q <= SelVendor_w;
+        SelArch_q   <= SelArch_w;
+        SelImp_q    <= SelImp_w;
+        SelHart_q   <= SelHart_w;
+        SelKHz_q    <= SelKHz_w;
     end
 endmodule
 
@@ -95,52 +103,56 @@ module CsrCounter (
 );
     assign AVOID_WARNING = read | |modify | |wdata;
 
-    reg q_Valid;
     reg [31:0] q_RData;
-    assign valid = q_Valid;
     assign rdata = q_RData;
 
-    reg q_enCycleL;
-    reg q_enCycleH;
-    reg q_enInstRetL;
-    reg q_enInstRetH;
+    // asynchronos in D stage: decode CSR address
+    wire SelCycleL_w   = (addr == 12'hB00) |     // MCYCLE
+                         (addr == 12'hC00) |     // CYCLE
+                         (addr == 12'hC01);      // TIME
+    wire SelCycleH_w   = (addr == 12'hB80) |     // MCYCLEH
+                         (addr == 12'hC80) |     // CYCLEH
+                         (addr == 12'hC81);      // TIMEH
+    wire SelInstRetL_w = (addr == 12'hB02) |     // MINSTRET
+                         (addr == 12'hC02);      // INSTRET
+    wire SelInstRetH_w = (addr == 12'hB82) |     // MINSTRETH
+                    (addr == 12'hC82);      // INSRETH
+    assign valid = SelCycleL_w | SelCycleH_w | SelInstRetL_w | SelInstRetH_w;
 
-    reg [32:0] q_CounterCYCLE;
-    reg [31:0] q_CounterCYCLEH;
-    reg [32:0] q_CounterINSTRET;
-    reg [31:0] q_CounterINSTRETH;
+    reg SelCycleL_q;
+    reg SelCycleH_q;
+    reg SelInstRetL_q;
+    reg SelInstRetH_q;
+
+    reg [32:0] CounterCYCLE_q;
+    reg [31:0] CounterCYCLEH_q;
+    reg [32:0] CounterINSTRET_q;
+    reg [31:0] CounterINSTRETH_q;
 
     always @(posedge clk) begin
         // E stage: read CSR
-        q_Valid <= q_enCycleL | q_enCycleH | q_enInstRetL | q_enInstRetH;
-        q_RData <= (q_enCycleL   ? q_CounterCYCLE[31:0]   : 32'b0)
-                 | (q_enCycleH   ? q_CounterCYCLEH        : 32'b0)
-                 | (q_enInstRetL ? q_CounterINSTRET[31:0] : 32'b0)
-                 | (q_enInstRetH ? q_CounterINSTRETH      : 32'b0);
+        q_RData <= (SelCycleL_q   ? CounterCYCLE_q[31:0]   : 32'b0)
+                 | (SelCycleH_q   ? CounterCYCLEH_q        : 32'b0)
+                 | (SelInstRetL_q ? CounterINSTRET_q[31:0] : 32'b0)
+                 | (SelInstRetH_q ? CounterINSTRETH_q      : 32'b0);
 
-        // D stage: decode CSR address
-        q_enCycleL   <= (addr == 12'hB00) |     // MCYCLE
-                        (addr == 12'hC00) |     // CYCLE
-                        (addr == 12'hC01);      // TIME
-        q_enCycleH   <= (addr == 12'hB80) |     // MCYCLEH
-                        (addr == 12'hC80) |     // CYCLEH
-                        (addr == 12'hC81);      // TIMEH
-        q_enInstRetL <= (addr == 12'hB02) |     // MINSTRET
-                        (addr == 12'hC02);      // INSTRET
-        q_enInstRetH <= (addr == 12'hB82) |     // MINSTRETH
-                        (addr == 12'hC82);      // INSRETH
+        // D stage: select CSR for next cycle
+        SelCycleL_q   <= SelCycleL_w;
+        SelCycleH_q   <= SelCycleH_w;
+        SelInstRetL_q <= SelInstRetL_w;
+        SelInstRetH_q <= SelInstRetH_w;
 
         // increment counters (spread over two cycles)
-        q_CounterCYCLE    <= {1'b0, q_CounterCYCLE[31:0]} + 1;
-        q_CounterCYCLEH   <= q_CounterCYCLEH + {31'b0, q_CounterCYCLE[32]};
-        q_CounterINSTRET  <= {1'b0, q_CounterINSTRET[31:0]} + {32'b0, retired};
-        q_CounterINSTRETH <= q_CounterINSTRETH + {31'b0, q_CounterINSTRET[32]};
+        CounterCYCLE_q    <= {1'b0, CounterCYCLE_q[31:0]} + 1;
+        CounterCYCLEH_q   <= CounterCYCLEH_q + {31'b0, CounterCYCLE_q[32]};
+        CounterINSTRET_q  <= {1'b0, CounterINSTRET_q[31:0]} + {32'b0, retired};
+        CounterINSTRETH_q <= CounterINSTRETH_q + {31'b0, CounterINSTRET_q[32]};
 
         if (~rstn) begin
-            q_CounterCYCLE    <= 0;
-            q_CounterCYCLEH   <= 0;
-            q_CounterINSTRET  <= 0;
-            q_CounterINSTRETH <= 0;
+            CounterCYCLE_q    <= 0;
+            CounterCYCLEH_q   <= 0;
+            CounterINSTRET_q  <= 0;
+            CounterINSTRETH_q <= 0;
         end
     end
 endmodule
@@ -170,16 +182,15 @@ module CsrPinsIn #(
 );
     assign AVOID_WARNING = rstn | read | |modify | |wdata;
 
-    reg q_Valid;
-    reg [31:0] q_RData;
-    assign valid = q_Valid;
-    assign rdata = q_RData;
-    reg q_enPins;
+    wire SelPins_w = (addr == BASE_ADDR);
+    reg [31:0] RData_q;
+    reg SelPins_q;
+    assign rdata = RData_q;
+    assign valid = SelPins_w;
 
     always @(posedge clk) begin
-        q_enPins <= (addr == BASE_ADDR);
-        q_Valid <= q_enPins;
-        q_RData <= (q_enPins ? pins : 32'b0);
+        RData_q <= (SelPins_q ? pins : 32'b0);
+        SelPins_q <= SelPins_w;
     end
 endmodule
 
@@ -209,35 +220,33 @@ module CsrPinsOut #(
 );
     assign AVOID_WARNING = rstn | read | |wdata;
 
-    reg q_Valid;
-    reg [31:0] q_RData;
-    assign valid = q_Valid;
-    assign rdata = q_RData;
+    wire SelPins_w = (addr == BASE_ADDR);
+    reg [31:0] RData_q;
+    reg SelPins_q;
+    reg [COUNT-1:0] Pins_q;
 
-    reg [COUNT-1:0] q_Pins;
-    assign pins = q_Pins;
-
-    reg q_enPins;
+    assign rdata = RData_q;
+    assign valid = SelPins_w;
+    assign pins = Pins_q;
 
     always @(posedge clk) begin
         // E stage: read CSR
-        q_Valid <= q_enPins;
-        q_RData <= (q_enPins ? {{(32-COUNT){1'b0}}, q_Pins} : 32'b0);
+        RData_q <= (SelPins_q ? {{(32-COUNT){1'b0}}, Pins_q} : 32'b0);
 
         // E stage: write CSR
-        if (q_enPins) begin
+        if (SelPins_q) begin
             case (modify)
-                3'b001: q_Pins <= wdata[COUNT-1:0]; // write
-                3'b010: q_Pins <= q_Pins | wdata[COUNT-1:0]; // set
-                3'b011: q_Pins <= q_Pins &~ wdata[COUNT-1:0]; // clear
+                3'b001: Pins_q <= wdata[COUNT-1:0]; // write
+                3'b010: Pins_q <= Pins_q | wdata[COUNT-1:0]; // set
+                3'b011: Pins_q <= Pins_q &~ wdata[COUNT-1:0]; // clear
                 default: ;
             endcase
         end
 
-        // D stage: decode CSR address
-        q_enPins <= (addr == BASE_ADDR);
+        // D stage: select CSR for next cycle
+        SelPins_q <= SelPins_w;
 
-        if (~rstn) q_Pins <= RESET_VALUE;
+        if (~rstn) Pins_q <= RESET_VALUE;
     end
 endmodule
 
@@ -268,37 +277,35 @@ module CsrUartBitbang #(
 );
     assign AVOID_WARNING = read | |wdata;
 
-    reg q_Valid;
-    reg [31:0] q_RData;
-    assign valid = q_Valid;
-    assign rdata = q_RData;
-
-    reg q_enUart;
-
-    reg q_TX;
-    assign tx = q_TX;
-
     wire [30:0] PERIOD = CLOCK_RATE / BAUD_RATE;
+    wire SelUart_w = (addr==BASE_ADDR);
+
+    reg [31:0] RData_q;
+    reg SelUart_q;
+    reg TX_q;
+
+    assign rdata = RData_q;
+    assign valid = SelUart_w;
+    assign tx = TX_q;
 
     always @(posedge clk) begin
         // E stage: read CSR
-        q_Valid <= q_enUart;
-        q_RData <= (q_enUart ? {PERIOD, rx} : 32'b0);
+        RData_q <= SelUart_q ? {PERIOD, rx} : 32'b0;
 
         // E stage: write CSR
-        if (q_enUart) begin
+        if (SelUart_q) begin
             case ({modify, wdata[0]})
-                4'b0010: q_TX <= 0; // write 0
-                4'b0011: q_TX <= 1; // write 1
-                4'b0101: q_TX <= 1; // set
-                4'b0111: q_TX <= 0; // clear
+                4'b0010: TX_q <= 0; // write 0
+                4'b0011: TX_q <= 1; // write 1
+                4'b0101: TX_q <= 1; // set
+                4'b0111: TX_q <= 0; // clear
             endcase
         end
 
-        // D stage: decode CSR address
-        q_enUart <= (addr==BASE_ADDR);
+        // D stage: select CSR for next cycle
+        SelUart_q <= SelUart_w;
 
-        if (~rstn) q_TX <= 1;
+        if (~rstn) TX_q <= 1;
     end
 endmodule
 
@@ -329,10 +336,11 @@ module CsrUartChar #(
 );
     assign AVOID_WARNING = read | |wdata;
 
-    reg q_Valid;
-    reg [31:0] q_RData;
-    assign valid = q_Valid;
-    assign rdata = q_RData;
+    wire SelUart_w = (addr==BASE_ADDR);
+
+    reg [31:0] RData_q;
+    assign valid = SelUart_w;
+    assign rdata = RData_q;
 
     localparam integer CLOCK_DIV32 = CLOCK_RATE / BAUD_RATE;
     localparam [15:0] CLOCK_DIV = CLOCK_DIV32[15:0];
@@ -351,17 +359,16 @@ module CsrUartChar #(
     reg        q_TX;
     assign tx = q_TX;
 
-    reg q_enUart;
+    reg SelUart_q;
 
     wire UartSendFull = (q_UartSendBitCounter!=0);
 
     always @(posedge clk) begin
         // E stage: read CSR
-        q_Valid <= q_enUart;
-        q_RData <= (q_enUart ? {22'b0, UartSendFull, q_UartRecvEmpty, q_UartRecvChar} : 32'b0);
+        RData_q <= (SelUart_q ? {22'b0, UartSendFull, q_UartRecvEmpty, q_UartRecvChar} : 32'b0);
 
         // E stage: write CSR
-        if (q_enUart) begin
+        if (SelUart_q) begin
             case (modify)
                 3'b001: begin // write
                     if (!UartSendFull) begin
@@ -379,7 +386,7 @@ module CsrUartChar #(
         end
 
         // D stage: decode CSR address
-        q_enUart <= (addr==BASE_ADDR);
+        SelUart_q <= SelUart_w;
 
         // receive
         if (q_UartRecvBitCounter) begin
@@ -444,44 +451,45 @@ module CsrTimerAdd #(
 );
     assign AVOID_WARNING = read | |wdata;
 
-    reg [WIDTH-1:0] q_Counter;
-    reg q_TimerOn;
-    reg q_Request;
-    assign irq = q_Request;
-    assign valid = 0;
+    reg [WIDTH-1:0] Counter_q;
+    reg TimerOn_q;
+    reg Request_q;
+    assign irq = Request_q;
+    assign valid = SelTimer_w;
     assign rdata = 0;
 
-    reg q_enTimer;
+    wire SelTimer_w = (addr==BASE_ADDR);
+    reg SelTimer_q;
 
     always @(posedge clk) begin
         // E stage: write CSR
-        if (q_enTimer) begin
+        if (SelTimer_q) begin
             case (modify)
                 3'b001: begin // write: set relative timer
-                    q_TimerOn <= 1;
-                    q_Counter <= wdata[WIDTH-1:0];
+                    TimerOn_q <= 1;
+                    Counter_q <= wdata[WIDTH-1:0];
                 end
                 3'b011: begin // clear with any value disables the timer
-                    q_TimerOn <= 0;
+                    TimerOn_q <= 0;
                 end
                 default: ;
             endcase
         end
 
         // D stage: decode CSR address
-        q_enTimer <= (addr==BASE_ADDR);
+        SelTimer_q <= SelTimer_w;
 
         // increment timer
-        if (q_Counter==0) begin
-            q_Request <= q_TimerOn;
+        if (Counter_q==0) begin
+            Request_q <= TimerOn_q;
         end else begin
-            q_Request <= 0;
-            q_Counter <= q_Counter - 'b1;
+            Request_q <= 0;
+            Counter_q <= Counter_q - 'b1;
         end
 
         if (!rstn) begin
-            q_TimerOn <= 0;
-            q_Counter <= 0;
+            TimerOn_q <= 0;
+            Counter_q <= 0;
         end
     end
 endmodule

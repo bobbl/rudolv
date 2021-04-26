@@ -101,7 +101,14 @@ module top
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata = IDsRData | CounterRData | PinsRData | TimerRData;
-    wire        csr_valid = IDsValid | CounterValid | PinsValid | TimerValid;
+    wire        csr_valid = IDsValid | CounterValid | PinsValid | TimerValid
+        | (csr_addr==CSR_IRQBOMB)
+        | (csr_addr==CSR_IRQBOMB+1)
+        | (csr_addr==CSR_SIM-2)
+        | (csr_addr==CSR_SIM-1)
+        | (csr_addr==CSR_SIM)
+        | (csr_addr==CSR_UART);
+
 
     CsrIDs #(
         .ISA(32'h40001100), // RV32IM
@@ -382,7 +389,7 @@ module top
             endcase
         end
 
-        if (dut.Insn_d == 'h006F && dut.d_PC==dut.f_PC+8) begin
+        if (dut.Insn_d == 'h006F && dut.PC_q==dut.FetchAddr_q+8) begin
             $display("exit due to infinite loop");
             $finish;
         end

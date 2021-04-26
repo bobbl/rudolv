@@ -97,7 +97,7 @@ module Pipeline #(
     reg [7:0] MCState_q;
     reg [5:0] MCAux_q;
     reg [4:0] MCRegNo_q;
-    reg [4:0] d_CsrTranslate;
+    reg [4:0] CsrTranslateE_q;
 
     reg [WORD_WIDTH-1:0] PC_q;
     reg [31:0] DelayedInsn_q;
@@ -209,20 +209,13 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_CsrUpdate;
     reg [1:0] e_CsrOp;
     reg [1:0] m_CsrOp;
-
-    reg e_CsrFromReg;
-    reg m_CsrFromReg;
-
-    reg w_CsrFromReg;
     reg [WORD_WIDTH-1:0] m_CsrModified;
-
-
-
-    reg        e_CsrFromExt;
-    reg        e_CsrRead;
-    reg        m_CsrRead;
-    reg        m_CsrValid;
-    reg [WORD_WIDTH-1:0] m_CsrRdData;
+    reg CsrFromRegE_q;
+    reg CsrFromRegM_q;
+    reg CsrFromRegW_q;
+    reg CsrFromExtE_q;
+    reg CsrFromExtM_q;
+    reg [WORD_WIDTH-1:0] CsrRDataInternal_q;
 
 
 
@@ -236,10 +229,6 @@ module Pipeline #(
 
     reg d_GrubbyInsn;
 
-
-// deprecated
-    wire [WORD_WIDTH-1:0] f_PC = FetchAddr_q;
-    wire [WORD_WIDTH-1:0] d_PC = PC_q;
 
 
 // ---------------------------------------------------------------------
@@ -445,49 +434,6 @@ module Pipeline #(
 
 
 
-
-    // external CSR interface
-    //
-    // D stage: decode tree for CSR number (csr_addr)
-    // E stage: read (csr_read) and write (csr_modify, csr_wdata) CSR
-    // M stage: mux tree for csr_rdata
-
-    reg  [2:0] e_CsrModify;
-    reg [31:0] e_CsrWData;
-    reg [11:0] e_CsrAddr;
-
-    always @(posedge clk) begin
-        e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~Insn_q[13] | (Insn_q[19:15]!=0))) 
-            ? Insn_q[13:12] : 2'b00};
-        e_CsrWData  <= Insn_q[14] ? {{(WORD_WIDTH-5){1'b0}}, Insn_q[19:15]} : ForwardAE;
-
-        // for internal CSRs
-        e_CsrAddr   <= Insn_q[31:20];
-    end
-
-    assign retired    = RetiredM_q;
-    assign csr_read   = e_CsrRead;
-    assign csr_modify = e_CsrModify;
-    assign csr_wdata  = e_CsrWData;
-    assign csr_addr   = Insn_q[31:20];
-
-
-    // internal CSRs
-
-    reg CsrValidInternal;
-    reg [31:0] CsrRDataInternal;
-    always @* case (e_CsrAddr)
-        12'h300: begin // mstatus
-            CsrValidInternal = 1;
-            CsrRDataInternal = {28'b0, f_MModeIntEnable, 3'b0};
-        end
-        default: begin
-            CsrValidInternal = 0;
-            CsrRDataInternal = 0;
-        end
-    endcase
-
-
     wire IrqResponse_d = f_MModeIntEnable &
         (SoftwareIrq_q | TimerIrq_q | ExternalIrq_q) &
         ~NoIrq_d;    // no interrup the 2nd cycle after a jump or branch
@@ -528,8 +474,7 @@ module Pipeline #(
     reg [5:0] DecodeWrNo;
 
     reg InsnCSR;
-    reg CsrRead;
-    reg CsrFromExt; // only to avoid write enable in second cycle of CSR Insn
+    reg CsrFromExtD_d;
     reg [1:0] CsrOp;
     reg BubbleD_d;
 
@@ -592,8 +537,7 @@ module Pipeline #(
         RVCInsn_w = 0;
 
         InsnCSR = 0;
-        CsrRead = 0;
-        CsrFromExt = 0;
+        CsrFromExtD_d = 0;
         CsrOp = 0;
         BubbleD_d = 0;
 
@@ -670,8 +614,8 @@ module Pipeline #(
                 mcNop: begin
                 end
                 mcCsr: begin // 2nd cycle of CSR access
-                    DecodeWrEn     = e_CsrFromReg;
-                    DecodeWrNo     = {1'b1, d_CsrTranslate};
+                    DecodeWrEn     = CsrFromRegE_q;
+                    DecodeWrNo     = {1'b1, CsrTranslateE_q};
                 end
                 mcMem: begin // 2nd cycle of memory access
                     if (MemMisaligned) begin
@@ -775,7 +719,7 @@ module Pipeline #(
             PC_d = PC_q + 4;
 
             DecodeWrEn = (Insn_q[11:7]!=0); // do not write to x0
-            DecodeWrNo = {e_CsrFromReg, Insn_q[11:7]};
+            DecodeWrNo = {CsrFromRegE_q, Insn_q[11:7]};
 
             case (Insn_q[6:2])
                 5'b01101: begin // LUI
@@ -885,19 +829,20 @@ module Pipeline #(
                     BubbleD_d = 1;
                     MC_d = 1;
                     MCState_d = mcNop;
-                    if (Insn_q[13] | Insn_q[12]) begin
-                        // RVZicsr
-                        ExcInvalidInsn =
-                            Insn_q[31] & Insn_q[30] & (~Insn_q[13] | (Insn_q[19:15]!=0));
-                                // readonly CSR && (CSRRW || rs1!=0)
-                        CsrRead    = DecodeWrEn & ~CsrFromReg;
-                        DecodeWrEn = DecodeWrEn & CsrFromReg;
-                        InsnCSR    = 1;
-                        CsrFromExt = ~CsrFromReg;
-                        CsrOp      = Insn_q[13:12];
-                        RdNo1   = {1'b1, vCsrTranslate};
-                        MC_d       = 1;
-                        MCState_d  = mcCsr;
+                    if (Insn_q[13] | Insn_q[12]) begin // RVZicsr
+                        ExcInvalidInsn = 1;
+                        if (~Insn_q[31] | ~Insn_q[30] // rw-CSR or
+                            | (Insn_q[13] & (Insn_q[19:15]==0))) // ro-CSR and CSRRS/C and rs1=0
+                        begin
+                            ExcInvalidInsn = ~CsrFromRegD_d & ~CsrValid_w;
+                            CsrFromExtD_d  = DecodeWrEn & CsrValid_w;
+                            DecodeWrEn     = DecodeWrEn & CsrFromRegD_d;
+                            InsnCSR        = 1;
+                            CsrOp          = Insn_q[13:12];
+                            RdNo1          = {1'b1, CsrTranslateD_d};
+                            MC_d           = 1;
+                            MCState_d      = mcCsr;
+                        end
                     end else begin
                         if (Insn_q[19:7]==0) begin
                             ExcInvalidInsn = 0;
@@ -1155,7 +1100,6 @@ module Pipeline #(
 
         // OPTIMISE
         if (ExcInvalidInsn) begin
-//        (m_CsrRead & ~m_Kill & ~w_Kill & ~csr_valid)) begin
             Overwrite_d = 1;
             OverwriteVal_d = PC_q;
             DecodeWrNo = REG_CSR_MEPC;
@@ -1339,7 +1283,7 @@ module Pipeline #(
 
 
 
-    wire ExecuteWrEn   = ~m_Kill & (e_CsrRead | e_WrEn);
+    wire ExecuteWrEn   = ~m_Kill & (CsrFromExtE_q | e_WrEn);
     wire [5:0] ExecuteWrNo = e_WrNo;
 
 
@@ -1587,34 +1531,78 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q ? MulDivResult_d : OverwriteValE_q;
 
-    wire [WORD_WIDTH-1:0] CsrResult =
+    wire [WORD_WIDTH-1:0] OverwrittenResult_w =
         OverwriteM_q ? OverwriteValM_q
                      : (vExcOverwrite ? (e_ExcGrubbyJump ? e_ExcWrData2 // MTVAL for jump
                                                          : m_ExcWrData)
-                                      : vCsrOrALU);
+                                      : CsrResult_w);
 
-    // CSRs
+
+
+
+    // external CSR interface
+    //
+    // D stage: decode tree for CSR number (csr_addr)
+    // E stage: read (csr_read) and write (csr_modify, csr_wdata) CSR
+    // M stage: mux tree for csr_rdata
+
+    reg  [2:0] e_CsrModify;
+    reg [31:0] e_CsrWData;
+    reg [11:0] e_CsrAddr;
+
+    always @(posedge clk) begin
+        e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~Insn_q[13] | (Insn_q[19:15]!=0))) 
+            ? Insn_q[13:12] : 2'b00};
+        e_CsrWData  <= Insn_q[14] ? {{(WORD_WIDTH-5){1'b0}}, Insn_q[19:15]} : ForwardAE;
+
+        // for internal CSRs
+        e_CsrAddr   <= Insn_q[31:20];
+    end
+
+    assign retired    = RetiredM_q;
+    assign csr_read   = CsrFromExtE_q;
+    assign csr_modify = e_CsrModify;
+    assign csr_wdata  = e_CsrWData;
+    assign csr_addr   = Insn_q[31:20];
+
+
+    // internal CSRs
+
+    wire CsrValid_w = csr_valid | (Insn_q[31:20]==12'h300);
+
+    reg [31:0] CsrRDataInternal_d;
+    always @* case (e_CsrAddr)
+        12'h300: begin // mstatus
+            CsrRDataInternal_d = {28'b0, f_MModeIntEnable, 3'b0};
+        end
+        default: begin
+            CsrRDataInternal_d = 0;
+        end
+    endcase
+
+
+    // regsiter-mapped CSRs
 /*
-    reg [5:0] vCsrTranslate;
-    reg CsrFromReg;
+    reg [5:0] CsrTranslateD_d;
+    reg CsrFromRegD_d;
     always @* begin
-        CsrFromReg <= InsnCSR;
+        CsrFromRegD_d <= InsnCSR;
         case (Insn_q[31:20])
-            12'h305: vCsrTranslate <= REG_CSR_MTVEC;
-            12'h340: vCsrTranslate <= REG_CSR_MSCRATCH;
-            12'h341: vCsrTranslate <= REG_CSR_MEPC;
-            12'h342: vCsrTranslate <= REG_CSR_MCAUSE;
-            12'h343: vCsrTranslate <= REG_CSR_MTVAL;
+            12'h305: CsrTranslateD_d <= REG_CSR_MTVEC;
+            12'h340: CsrTranslateD_d <= REG_CSR_MSCRATCH;
+            12'h341: CsrTranslateD_d <= REG_CSR_MEPC;
+            12'h342: CsrTranslateD_d <= REG_CSR_MCAUSE;
+            12'h343: CsrTranslateD_d <= REG_CSR_MTVAL;
             default: begin
-                vCsrTranslate <= 0; // cannot be written, always 0
-                CsrFromReg <= 0;
+                CsrTranslateD_d <= 0; // cannot be written, always 0
+                CsrFromRegD_d <= 0;
             end
         endcase
-        vCsrTranslate <= {1'b1, Insn_q[26], Insn_q[23:20]};
+        CsrTranslateD_d <= {1'b1, Insn_q[26], Insn_q[23:20]};
     end
 */
-    wire [4:0] vCsrTranslate = {Insn_q[26], Insn_q[23:20]};
-    wire CsrFromReg = (InsnCSR & ~m_Kill) && (Insn_q[31:27]==5'b00110) && 
+    wire [4:0] CsrTranslateD_d = {Insn_q[26], Insn_q[23:20]};
+    wire CsrFromRegD_d = (InsnCSR & ~m_Kill) && (Insn_q[31:27]==5'b00110) && 
         (Insn_q[25:23]==3'b0) &&
         (
          (Insn_q[22:20]==3'b100) || // mie, mip
@@ -1629,12 +1617,11 @@ module Pipeline #(
             // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
             // e_A is a bypass from the execute stage of the next cycle
 
-    wire [WORD_WIDTH-1:0] vCsrOrALU =
-        (m_CsrFromReg             ? e_A           : 0) |
-        (w_CsrFromReg             ? m_CsrModified : 0) |
-        ((m_CsrRead & m_CsrValid) ? m_CsrRdData   : 0) |
-        ((m_CsrRead & csr_valid)  ? csr_rdata     : 0) |
-        ((m_CsrFromReg | w_CsrFromReg | m_CsrRead)
+    wire [WORD_WIDTH-1:0] CsrResult_w =
+        (CsrFromRegM_q ? e_A           : 0) |
+        (CsrFromRegW_q ? m_CsrModified : 0) |
+        (CsrFromExtM_q ? (CsrRDataInternal_q | csr_rdata) : 0) |
+        ((CsrFromRegM_q | CsrFromRegW_q | CsrFromExtM_q)
             ? 0 : m_WrData);
 
 
@@ -1682,9 +1669,9 @@ module Pipeline #(
     wire vHiHalfSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[2] & HiRData[7]);
     wire vHiByteSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[1] & HiRData[7]);
 
-    wire [15:0] HiHalf = (m_MemByte[4] ? mem_rdata[31:16] : (vHiHalfSigned ? 16'hFFFF : 16'b0)) | CsrResult[31:16];
-    wire  [7:0] HiByte = (m_MemByte[3] ? HiRData          : (vHiByteSigned ?  8'hFF   :  8'b0)) | CsrResult[15:8];
-    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)      | CsrResult[7:0];
+    wire [15:0] HiHalf = (m_MemByte[4] ? mem_rdata[31:16] : (vHiHalfSigned ? 16'hFFFF : 16'b0)) | OverwrittenResult_w[31:16];
+    wire  [7:0] HiByte = (m_MemByte[3] ? HiRData          : (vHiByteSigned ?  8'hFF   :  8'b0)) | OverwrittenResult_w[15:8];
+    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)      | OverwrittenResult_w[7:0];
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
     wire MemResultGrubby = m_MemByte[4] & mem_rgrubby;
@@ -1733,7 +1720,7 @@ module Pipeline #(
         InsnE_q <= Insn_q; // only for illegal exception
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
-        d_CsrTranslate <= vCsrTranslate;
+        CsrTranslateE_q <= CsrTranslateD_d;
         MC_q <= MC_d;
         MCState_q <= MCState_d;
         MCAux_q <= MCAux_d;
@@ -1855,11 +1842,13 @@ module Pipeline #(
         m_CsrUpdate         <= CsrUpdate;
         e_CsrOp             <= CsrOp;
         m_CsrOp             <= e_CsrOp;
-        e_CsrFromReg        <= CsrFromReg;
-        m_CsrFromReg        <= e_CsrFromReg;
-
-        w_CsrFromReg        <= m_CsrFromReg;
         m_CsrModified       <= CsrModified;
+        CsrFromRegE_q       <= CsrFromRegD_d;
+        CsrFromRegM_q       <= CsrFromRegE_q;
+        CsrFromRegW_q       <= CsrFromRegM_q;
+        CsrFromExtE_q       <= CsrFromExtD_d;
+        CsrFromExtM_q       <= CsrFromExtE_q;
+        CsrRDataInternal_q  <= CsrRDataInternal_d;
 
         // interrupt handling
         f_MModeIntEnable    <= MModeIntEnable;
@@ -1870,12 +1859,6 @@ module Pipeline #(
         TimerIrq_q          <= irq_timer;
         ExternalIrq_q       <= irq_external;
 
-        // csr
-        e_CsrFromExt        <= CsrFromExt;
-        e_CsrRead           <= CsrRead;
-        m_CsrRead           <= e_CsrRead;
-        m_CsrValid          <= CsrValidInternal;
-        m_CsrRdData         <= CsrRDataInternal;
 
         d_GrubbyInsn <= DecodeGrubbyInsn;
 
@@ -2001,19 +1984,19 @@ module Pipeline #(
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
 
-/*
-        $display("C vCsrTranslate=%h CsrOp=%b e_%b m_%b",
-            vCsrTranslate, CsrOp, e_CsrOp, m_CsrOp);
-        $display("C vCsrOrALU=%h CsrResult=%h",
-            vCsrOrALU, CsrResult);
-        $display("C CsrFromReg %b e_%b m_%b w_%b m_CsrModified=%h m_WrData=%h", 
-            CsrFromReg, e_CsrFromReg, m_CsrFromReg, w_CsrFromReg,
+        $display("C CsrTranslateD_d=%h CsrOp=%b e_%b m_%b",
+            CsrTranslateD_d, CsrOp, e_CsrOp, m_CsrOp);
+        $display("C CsrResult_w=%h OverwrittenResult_w=%h",
+            CsrResult_w, OverwrittenResult_w);
+        $display("C CsrFromRegD_d %b e_%b m_%b w_%b m_CsrModified=%h m_WrData=%h", 
+            CsrFromRegD_d, CsrFromRegE_q, CsrFromRegM_q, CsrFromRegW_q,
             m_CsrModified, m_WrData);
-        $display("C m_CsrRead=%b m_CsrValid=%b m_CsrRdData=%h",
-            m_CsrRead, m_CsrValid, m_CsrRdData);
+        $display("C CsrFromExtM_q=%b CsrRDataInternal_q=%h",
+            CsrFromExtM_q, CsrRDataInternal_q);
         $display("C CSR addr=%h rdata=%h valid=%b",
             csr_addr, csr_rdata, csr_valid);
-*/
+
+
 
 //        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
 //            MemResult, m_MemSign, m_MemByte);
@@ -2029,8 +2012,8 @@ module Pipeline #(
 //            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
         $display("X vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b m_Cause=%h",
             vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
-        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h CsrResult=%h",
-            ExcWrData, e_ExcWrData2, m_ExcWrData, CsrResult);
+        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h OverwrittenResult_w=%h",
+            ExcWrData, e_ExcWrData2, m_ExcWrData, OverwrittenResult_w);
 //        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
 //            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
 
@@ -2086,7 +2069,9 @@ module Pipeline #(
         // depend on vImm
 
     wire RvfiTrap_w = RvfiTrapM_q // illegal instruction
-                            | (m_CsrRead & ~m_Kill & ~w_Kill & ~csr_valid); // illegal CSR
+//                            | (CsrFromExtM_q & ~m_Kill & ~w_Kill & ~csr_valid); // illegal CSR
+//                            | (CsrFromExtM_q & ~m_Kill & ~w_Kill & ~CsrValidM_q); // illegal CSR
+                            | (CsrFromExtM_q & ~m_Kill & ~w_Kill); // illegal CSR
 
     reg [31:0]           RvfiCycle_q;
 
@@ -2128,7 +2113,7 @@ module Pipeline #(
         rvfi_order      <= RvfiResetN2_q ? rvfi_order + rvfi_valid : 0;
         rvfi_insn       <= (RvfiInsnM_q[1:0]==3) ? RvfiInsnM_q : RvfiInsnM_q[15:0];
 //        rvfi_trap       <= RvfiTrapM_q // illegal instruction
-//                            | (m_CsrRead & ~csr_valid); // illegal CSR
+//                            | (CsrFromExtM_q & ~csr_valid); // illegal CSR
         rvfi_trap       <= RvfiTrap_w;
 
         rvfi_halt       <= RvfiTrap_w | RvfiHalt_q;

@@ -240,12 +240,17 @@ Extra CSRs can be added with the follwing interface:
     output        valid
 
 `addr` is valid one cycle earlier that the other signals. Thus, address decoding
-is separated from the actual read or write action.
+is separated from the actual read or write action. If `addr` holds an CSR
+address that is supported by the extension, the `valid` must be set
+asynchronously. The signal must be combinational to enable fast illegal CSR
+detection.
 
-In the following cycle, `read` is set if the CSR value should be read. If a valid
-register was selected by `addr` in the previous cycle, `valid` should be set to
-high and `rdata` to the value of the register. Both signals are only asserted for
-one cycle, otherwise both are cleared to 0.
+In the following cycle, `read` is set if the CSR value should be read. If a
+valid register was selected by `addr` in the previous cycle, `rdata` should be
+set to the value of the register. It is only asserted for one cycle, otherwise
+it is cleared to 0. Caution: `addr` is no longer valid in this cycle, therefore
+the extension is responsible for registered select signals from the previous
+cycle.
 
 `modify` defines, how the current CSR value should be combined with `wdata` to
 form the new value.
@@ -264,7 +269,7 @@ Examples of CSR extensions can be found in [src/csr.v](src/csr.v):
 
 | verilog module | no   | CSRs / description                                  |
 | -------------- | ---- | --------------------------------------------------- |
-| CsrIDs         | 0F1x | `vendorid`, `archid`, `impid`, `hartid`, clock rate |
+| CsrIDs         | 0F1x | `mvendorid`, `marchid`, `mimpid`, `mhartid`, `misa` |
 | CsrCounter     | 0C0x | `cycle`, `time`, `instret`                          |
 | CsrUartBitbang | 07C0 | Minimal UART interface for software bitbanging      |
 | CsrUartChar    | 0BC0 | Read and write bytes via UART                       |
