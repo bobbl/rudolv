@@ -52,7 +52,11 @@ set_device \
   -adv_options {VOLTR:COM} 
 
 # create module for Chip Oscillator
-create_and_configure_core -core_vlnv {Actel:SgCore:OSC:2.0.101} -component_name {OSC_C0} -params {\
+download_core -vlnv {Actel:SgCore:OSC:2.0.101} \
+              -location {www.microchip-ip.com/repositories/SgCore}
+create_and_configure_core -core_vlnv {Actel:SgCore:OSC:2.0.101} \
+                          -component_name {OSC_C0} \
+                          -params {\
 "RCOSC_1MHZ_DRIVES_CCC:false"  \
 "RCOSC_1MHZ_DRIVES_FAB:false"  \
 "RCOSC_1MHZ_IS_USED:false"  \
@@ -186,13 +190,16 @@ set params [concat {\
 "Y1_IS_USED:false"  \
 "Y2_IS_USED:false"  \
 "Y3_IS_USED:false"   }]
+download_core -vlnv {Actel:SgCore:FCCC:2.0.201} \
+              -location {www.microchip-ip.com/repositories/SgCore}
 create_and_configure_core -core_vlnv {Actel:SgCore:FCCC:2.0.201} \
-  -component_name {FCCC_C0} -params $params
+                          -component_name {FCCC_C0} \
+                          -params $params
 
 
 import_files -hdl_source ../../pipeline.v
 import_files -hdl_source ../../src/csr.v
-import_files -hdl_source ../../src/memory.v
+#import_files -hdl_source ../../src/memory.v
 import_files -hdl_source ../../src/regset.v
 import_files -hdl_source ${projname}.v
 build_design_hierarchy 

@@ -166,7 +166,6 @@ module Pipeline #(
 
     // mem stage
     reg m_Kill; // to decode and execute stage
-    reg w_Kill;
     reg m_WrEn;
     reg [5:0] m_WrNo;
     reg [WORD_WIDTH-1:0] m_WrData;
@@ -264,8 +263,11 @@ module Pipeline #(
                     MModePriorIntEnable = f_MModePriorIntEnable | e_CsrWData[7];
                 end
                 3'b011: begin // clear
-                    MModeIntEnable      = f_MModeIntEnable      & ~e_CsrWData[3];
-                    MModePriorIntEnable = f_MModePriorIntEnable & ~e_CsrWData[7];
+//                    MModeIntEnable      = f_MModeIntEnable      & ~e_CsrWData[3];
+//                    MModePriorIntEnable = f_MModePriorIntEnable & ~e_CsrWData[7];
+// avoid Microsemi Libero bug
+                    MModeIntEnable      = e_CsrWData[3] ? 1'b0 : f_MModeIntEnable;
+                    MModePriorIntEnable = e_CsrWData[7] ? 1'b0 : f_MModePriorIntEnable;
                 end
                 default: begin  // do not alter
                 end
@@ -1788,7 +1790,6 @@ module Pipeline #(
 
         e_WrNo <= DecodeWrNo;
         InvertBranch_q <= InvertBranch_d;
-        w_Kill <= m_Kill; 
 
         e_InsnBit14 <= Insn_q[14];
 
@@ -1940,8 +1941,8 @@ module Pipeline #(
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchAddr_d);
 
 /*
-        $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b%b",
-            vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill, w_Kill);
+        $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b",
+            vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill);
         $display("  e_InsnBLTorBLTU=%b vLess=%b e_BranchUncondPCRel=%b ReturnPC=%b",
             e_InsnBLTorBLTU, vLess, e_BranchUncondPCRel, ReturnPC);
         $display("  e_InsnBEQ=%b InvertBranch_q=%b vEqual=%b",
@@ -2042,7 +2043,6 @@ module Pipeline #(
 
             // fake a jump to address 0 on reset
             m_Kill <= 0;
-            w_Kill <= 0;
             e_PCImm <= START_PC;
             e_BranchUncondPCRel  <= 1;
 

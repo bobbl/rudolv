@@ -33,13 +33,14 @@ shift
 
 # check requirements
 check() {
-    if [ "$BASH_VERSION" = '' ]
-    then
-        echo "/bin/sh is not bash, which is a problem for some Libero scripts. Use"
-        echo "    sudo dpkg-reconfigure dash"
-        echo "to switch to bash."
-        exit 4
-    fi
+# /bin/sh==bash is no more required with Libero 2021.1
+#    if [ "$BASH_VERSION" = '' ]
+#    then
+#        echo "/bin/sh is not bash, which is a problem for some Libero scripts. Use"
+#        echo "    sudo dpkg-reconfigure dash"
+#        echo "to switch to bash."
+#        exit 4
+#    fi
 
     if ps -e | grep -q lmgrd 
     then
@@ -107,14 +108,13 @@ do
         synth)
             check
             rm -rf ${device}
-            launch_libero SCRIPT:${device}.tcl SCRIPT_ARGS:"MHZ=100"
-            # only 96 MHz will be achieved, but thats enough under normal conditions
+            launch_libero SCRIPT:${device}.tcl SCRIPT_ARGS:"MHZ=60"
             report
             ;;
         gy-synth)
             check
             rm -rf ${device}
-            launch_libero SCRIPT:${device}.tcl SCRIPT_ARGS:"MHZ=80 ENABLE_GRUBBY"
+            launch_libero SCRIPT:${device}.tcl SCRIPT_ARGS:"MHZ=60 ENABLE_GRUBBY"
             report
             ;;
         timing)
