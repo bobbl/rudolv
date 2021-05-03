@@ -171,6 +171,10 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] m_WrData;
     reg [4:0] m_MemByte;
     reg [2:0] m_MemSign;
+    reg MemUnsignedLoadM_q;
+    reg [1:0] MemWidthM_q;
+    reg [1:0] AddrOfsM_q;
+    reg [WORD_WIDTH-1:0] MemRData_q;
 
     // write back
     reg w_WrEn;
@@ -1661,6 +1665,7 @@ module Pipeline #(
 
     // memory stage
 
+/*
     wire [7:0] LoRData = (m_MemByte[0] ? mem_rdata[23:16] : mem_rdata[ 7:0]);
     wire [7:0] HiRData = (m_MemByte[0] ? mem_rdata[31:24] : mem_rdata[15:8]);
 
@@ -1671,6 +1676,64 @@ module Pipeline #(
     wire [15:0] HiHalf = (m_MemByte[4] ? mem_rdata[31:16] : (vHiHalfSigned ? 16'hFFFF : 16'b0)) | OverwrittenResult_w[31:16];
     wire  [7:0] HiByte = (m_MemByte[3] ? HiRData          : (vHiByteSigned ?  8'hFF   :  8'b0)) | OverwrittenResult_w[15:8];
     wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)      | OverwrittenResult_w[7:0];
+*/
+
+    reg [23:0] MemSel_w;
+    always @* case ({MemWidthM_q, AddrOfsM_q})
+        4'b0000: MemSel_w = 24'b0001_110000_000000_00000001;
+        4'b0001: MemSel_w = 24'b0010_110000_000000_00000010;
+        4'b0010: MemSel_w = 24'b0100_110000_000000_00000100;
+        4'b0011: MemSel_w = 24'b1000_110000_000000_00001000;
+        4'b0100: MemSel_w = 24'b0010_100000_000010_00000001;
+//        4'b0101: MemSel_w = 24'b0100_100000_000100_00000010;
+        4'b0110: MemSel_w = 24'b1000_100000_001000_00000100;
+//        4'b0111: MemSel_w = 24'b0001_100000_000001_10000000;
+        4'b1000: MemSel_w = 24'b0000_000001_000010_00000001;
+//        4'b1001: MemSel_w = 24'b0000_000010_010000_00100000;
+//        4'b1010: MemSel_w = 24'b0000_000100_100000_01000000;
+//        4'b1011: MemSel_w = 24'b0000_001000_000001_10000000;
+        default: MemSel_w = 0;
+    endcase
+
+    wire MemSigned_w  = ((MemSel_w[20] & mem_rdata[7])
+                      | (MemSel_w[21] & mem_rdata[15])
+                      | (MemSel_w[22] & mem_rdata[23])
+                      | (MemSel_w[23] & mem_rdata[31])) 
+                      & ~MemUnsignedLoadM_q & ~m_Kill;
+    wire MemSigned0_w = MemSel_w[18] & MemSigned_w;
+    wire MemSigned1_w = MemSel_w[19] & MemSigned_w;
+
+    wire  [7:0] LoByte0_w = (MemSel_w[0] ? mem_rdata[7:0] : 8'b0)
+                          | (MemSel_w[1] ? mem_rdata[15:8] : 8'b0);
+    wire  [7:0] LoByte1_w = (MemSel_w[2] ? mem_rdata[23:16] : 8'b0)
+                          | (MemSel_w[3] ? mem_rdata[31:24] : 8'b0);
+    wire  [7:0] LoByte2_w = /*(MemSel_w[4] ?*/ OverwrittenResult_w[7:0]
+                          | (MemSel_w[5] ? MemRData_q[15:8] : 8'b0);
+    wire  [7:0] LoByte3_w = (MemSel_w[6] ? MemRData_q[23:16] : 8'b0)
+                          | (MemSel_w[7] ? MemRData_q[31:24] : 8'b0);
+    wire  [7:0] LoByte    = LoByte0_w | LoByte1_w | LoByte2_w | LoByte3_w;
+
+    wire  [7:0] HiByte0_w = (MemSel_w[8] ? mem_rdata[7:0] : 8'b0)
+                          | (MemSel_w[9] ? mem_rdata[15:8] : 8'b0);
+    wire  [7:0] HiByte1_w = (MemSel_w[10] ? mem_rdata[23:16] : 8'b0)
+                          | (MemSel_w[11] ? mem_rdata[31:24] : 8'b0);
+    wire  [7:0] HiByte2_w = (MemSel_w[12] ? MemRData_q[23:16] : 8'b0)
+                          | (MemSel_w[13] ? MemRData_q[31:24] : 8'b0);
+    wire  [7:0] HiByte3_w = MemSigned0_w ? 8'hFF : OverwrittenResult_w[15:8];
+    wire  [7:0] HiByte    = HiByte0_w | HiByte1_w | HiByte2_w | HiByte3_w;
+
+    wire  [15:0] HiHalf0_w = (MemSel_w[14] ? mem_rdata[31:16] : 16'b0)
+                           | (MemSel_w[15] ? {mem_rdata[7:0], MemRData_q[31:24]} : 16'b0);
+    wire  [15:0] HiHalf1_w = (MemSel_w[16] ? mem_rdata[15:0] : 16'b0)
+                           | (MemSel_w[17] ? mem_rdata[23:8] : 16'b0);
+    wire  [15:0] HiHalf3_w = MemSigned1_w ? 16'hFFFF : OverwrittenResult_w[31:16];
+    wire  [15:0] HiHalf    = HiHalf0_w | HiHalf1_w | HiHalf3_w;
+
+
+
+
+
+
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
     wire MemResultGrubby = m_MemByte[4] & mem_rgrubby;
@@ -1800,6 +1863,11 @@ module Pipeline #(
         m_Kill <= Kill;
         m_MemSign <= MemSign;
         m_MemByte <= MemByte;
+
+        MemUnsignedLoadM_q <= e_MemUnsignedLoad;
+        MemWidthM_q <= m_Kill ? 2'b11 : e_MemWidth;
+        AddrOfsM_q <= AddrSum_w[1:0];
+        MemRData_q <= mem_rdata;
 
         // mem stage
         w_WrEn <= MemWrEn;
@@ -1993,8 +2061,12 @@ module Pipeline #(
 
 
 
-//        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
-//            MemResult, m_MemSign, m_MemByte);
+        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
+            MemResult, m_MemSign, m_MemByte);
+        $display("M e_MemWidth=%b AddrOfs=%b",
+            e_MemWidth, AddrOfs);
+        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemSel_w=%b",
+            MemWidthM_q, AddrOfsM_q, MemSel_w);
         $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelE=%b",
             Overwrite_d, OverwriteE_q, OverwriteM_q,
             OverwriteVal_d, OverwriteValE_q, OverwriteValM_q,
