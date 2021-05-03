@@ -21,7 +21,7 @@
 module CsrIDs #(
     parameter [31:0] ISA = 0,
     parameter [31:0] VENDORID = 0,
-    parameter [31:0] ARCHID = 0,
+    parameter [31:0] ARCHID = 23, // official RudolV marchid
     parameter [31:0] IMPID = 0,
     parameter [31:0] HARTID = 0,
 
@@ -500,7 +500,7 @@ endmodule
 module CsrDefault #(
     parameter [31:0] ISA = 0,
     parameter [31:0] VENDORID = 0,
-    parameter [31:0] ARCHID = 0,
+    parameter [31:0] ARCHID = 23,
     parameter [31:0] IMPID = 0,
     parameter [31:0] HARTID = 0,
 
