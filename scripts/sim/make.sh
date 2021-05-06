@@ -34,6 +34,9 @@ path_tests="../../sw/tests"
 path_compliance="../../sw/compliance"
 path_irqbomb="../../sw/irqbomb"
 
+esc_green="\033[32m"
+esc_red="\033[31m"
+esc="\033[0m"
 
 
 
@@ -94,17 +97,18 @@ run() {
 #   $1 filename of ELF image
 #   $2 filename of expected signature
 check_sig() {
+    name=$(basename $1 .elf)
     compile $1 "" > /dev/null
     run | sed -e '/^-/d' > tmp.sig
 
     diff --strip-trailing-cr $2 tmp.sig > tmp.diff
     if [ $? -ne 0 ]
     then
-        printf "not "
+        printf "not ok - ${esc_red}FAIL${esc} $name\n"
         failed=$(($failed + 1))
+    else
+        printf "ok -     ${esc_green}PASS${esc} $name\n"
     fi
-    name=$(basename $1 .elf)
-    echo "ok - $name"
 }
 
 
@@ -137,9 +141,9 @@ target_tests() {
 
     if [ "${failed}" -eq 0 ]
     then
-        echo "# All ${total} tests passed."
+        printf "# ${esc_green}All ${total} tests passed.${esc}\n"
     else
-        echo "# Failed ${failed} of ${total} tests"
+        printf "# ${esc_red}Failed ${failed} of ${total} tests${esc}\n"
     fi
 }
 

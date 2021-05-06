@@ -111,7 +111,7 @@ module top
 
 
     CsrIDs #(
-        .ISA(32'h40001100), // RV32IM
+        .ISA(32'h40001104), // RV32IMC
         .BASE_ADDR(CSR_KHZ),
         .KHZ(1000) // assume 1 MHz
     ) csr_ids (

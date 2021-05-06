@@ -107,7 +107,8 @@ module Pipeline #(
 
     reg [31:0] PartialInsn_q;
     reg OddPC_q;
-    reg RealignedPC_q;
+    reg FetchAgainE_q;
+    reg FetchAgainM_q;
 
     // mul/div
     reg StartMulDiv_q;
@@ -161,7 +162,6 @@ module Pipeline #(
     reg [5:0] e_WrNo;
 
     reg  e_InsnBit14;
-    wire e_MemUnsignedLoad = e_InsnBit14;
     wire e_CsrSelImm       = e_InsnBit14;
 
     // mem stage
@@ -170,11 +170,13 @@ module Pipeline #(
     reg [5:0] m_WrNo;
     reg [WORD_WIDTH-1:0] m_WrData;
     reg [4:0] m_MemByte;
-    reg [2:0] m_MemSign;
-    reg MemUnsignedLoadM_q;
+    reg MemSignedLoadM_q;
     reg [1:0] MemWidthM_q;
     reg [1:0] AddrOfsM_q;
     reg [WORD_WIDTH-1:0] MemRData_q;
+    reg [WORD_WIDTH-1:0] MemWData_q;
+    reg MemMisaligned_q;
+    reg [WORD_WIDTH-1:0] AddrSum_q;
 
     // write back
     reg w_WrEn;
@@ -456,6 +458,9 @@ module Pipeline #(
     localparam [7:0] mcMulDivWriteback = 7;
     localparam [7:0] mcMulDivLast = 8;
     localparam [7:0] mcUnalignedJump = 9;
+    localparam [7:0] mcMem2 = 11;
+    localparam [7:0] mcLoad = 12;
+    localparam [7:0] mcStore = 13;
 
 
     // Fetching
@@ -472,6 +477,7 @@ module Pipeline #(
     reg OddPC_d;
     reg RealignedPC_d;
     reg RVCInsn_w;
+    reg FetchAgainD_d;
 
     // Decoding
     reg ExcInvalidInsn;
@@ -541,6 +547,7 @@ module Pipeline #(
         RealignedPC_d = 0;
         RdNo1 = 0;
         RVCInsn_w = 0;
+        FetchAgainD_d = 0;
 
         InsnCSR = 0;
         CsrFromExtD_d = 0;
@@ -624,11 +631,11 @@ module Pipeline #(
                     DecodeWrNo     = {1'b1, CsrTranslateE_q};
                 end
                 mcMem: begin // 2nd cycle of memory access
-                    if (MemMisaligned) begin
-                        InsnJALR = 1;
-                        AddrFromSum = 1;
-                        Imm12PlusReg_d = 0;
-                    end
+                    FetchAgainD_d = 1;
+                    BubbleD_d = 1;
+                    MC_d = 1;
+                    MCState_d = mcMem2;
+
                 end
                 mcWFI: begin // WFI
                     if (~IrqResponse_q) begin
@@ -695,6 +702,31 @@ module Pipeline #(
                     // wait one cycle because of unaligned jump target
                     FetchAddr_d = FetchAddr_q + 4;
                 end
+
+                mcLoad: begin
+                    if (MemMisaligned) begin
+                        BubbleD_d = 1;
+                        AddrFromSum = 1;
+                        MemWidth = e_MemWidth;
+                        DecodeWrEn = e_WrEn;
+                        DecodeWrNo = e_WrNo;
+                        MC_d = 1;
+                        MCState_d = mcMem;
+                    end
+                end
+                mcStore: begin
+                    if (MemMisaligned) begin
+                        BubbleD_d = 1;
+                        AddrFromSum = 1;
+                        MemStore = 1;
+                        MemWidth = e_MemWidth;
+                        DecodeWrEn = 0;
+                        MC_d = 1;
+                        MCState_d = mcMem;
+                    end
+                end
+
+
                 default: begin
                 end
             endcase
@@ -746,13 +778,8 @@ module Pipeline #(
                     ExcInvalidInsn = (Insn_q[14:12]!=3'b000);
                     ReturnPC       = 1;
                     NoIrq_d          = 1;
-
-                    // disable JALR, if it is the memory bubble and there is no memory exception
-                    // TODO: get rid of it
-                    if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
-                        InsnJALR    = 1;
-                        AddrFromSum = 1;
-                    end
+                    InsnJALR    = 1;
+                    AddrFromSum = 1;
                 end
                 5'b11000: begin // branch
                     ExcInvalidInsn = (Insn_q[14:13]==2'b01);
@@ -768,11 +795,8 @@ module Pipeline #(
                     BubbleD_d         = 1;
                     AddrFromSum    = 1;
                     MemWidth       = Insn_q[13:12];
-                    RdNo1       = REG_CSR_MTVEC;
-                        // read MTVEC in 2nd cycle, so that its value is
-                        // available if Exc is raised
                     MC_d           = 1;
-                    MCState_d      = mcMem;
+                    MCState_d      = mcLoad;
                 end
                 5'b01000: begin // store
                     ExcInvalidInsn = (Insn_q[14] | (Insn_q[13] & Insn_q[12]));
@@ -781,9 +805,8 @@ module Pipeline #(
                     AddrFromSum    = 1;
                     MemStore       = 1;
                     MemWidth       = Insn_q[13:12];
-                    RdNo1       = REG_CSR_MTVEC;
                     MC_d           = 1;
-                    MCState_d      = mcMem;
+                    MCState_d      = mcStore;
                 end
                 5'b00100: begin // immediate
                     ExcInvalidInsn = ~Insn_q[13] & Insn_q[12] &
@@ -936,13 +959,10 @@ module Pipeline #(
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemWidth = 2'b10;
-                    RdNo1 = REG_CSR_MTVEC;
-                        // read MTVEC in 2nd cycle, so that its value is
-                        // available if Exc is raised
                     DecodeWrEn = 1;
                     DecodeWrNo = {3'b001, Insn_q[4:2]};
                     MC_d = 1;
-                    MCState_d = mcMem;
+                    MCState_d = mcLoad;
                 end
                 4'b1100: begin // C.SW
                     ExcInvalidInsn = Insn_q[13];
@@ -951,9 +971,8 @@ module Pipeline #(
                     AddrFromSum = 1;
                     MemStore = 1;
                     MemWidth = 2'b10;
-                    RdNo1 = REG_CSR_MTVEC;
                     MC_d = 1;
-                    MCState_d = mcMem;
+                    MCState_d = mcStore;
                 end
                 4'b0001: begin
                     ExcInvalidInsn = 0;
@@ -1036,11 +1055,8 @@ module Pipeline #(
                     BubbleD_d = 1;
                     AddrFromSum = 1;
                     MemWidth = 2'b10;
-                    RdNo1 = REG_CSR_MTVEC;
-                        // read MTVEC in 2nd cycle, so that its value is
-                        // available if Exc is raised
                     MC_d = 1;
-                    MCState_d = mcMem;
+                    MCState_d = mcLoad;
                 end
                 4'b1010: begin
                     ExcInvalidInsn = Insn_q[13];
@@ -1061,25 +1077,15 @@ module Pipeline #(
                                 NoIrq_d = 1;
                                 DecodeWrEn = 1;
                                 DecodeWrNo = 1;
-
-                                // disable JALR, if it is the memory bubble and there is no memory exception
-                                // TODO: get rid of it
-                                if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
-                                    InsnJALR = 1;
-                                    AddrFromSum = 1;
-                                end
+                                InsnJALR = 1;
+                                AddrFromSum = 1;
                             end
                         end else begin // C.JR
                             ExcInvalidInsn = (Insn_q[11:7]==0);
                             DecodeWrEn = 0;
                             NoIrq_d = 1;
-
-                            // disable JALR, if it is the memory bubble and there is no memory exception
-                            // TODO: get rid of it
-                            if ((e_MemWidth==2'b11) | MemMisaligned) begin // no mem access or misaligned
-                                InsnJALR    = 1;
-                                AddrFromSum = 1;
-                            end
+                            InsnJALR    = 1;
+                            AddrFromSum = 1;
                         end
                     end else begin // C.MV or C.ADD
                         SelSum = 1;
@@ -1093,9 +1099,8 @@ module Pipeline #(
                     AddrFromSum = 1;
                     MemStore = 1;
                     MemWidth = 2'b10;
-                    RdNo1 = REG_CSR_MTVEC;
                     MC_d = 1;
-                    MCState_d = mcMem;
+                    MCState_d = mcStore;
                 end
                 default: begin
                     ExcInvalidInsn = 1;
@@ -1130,6 +1135,32 @@ module Pipeline #(
 
         // 101 MEM-To-MEM
         if (BubbleD_d & BubbleM_q & ~m_Kill) begin
+//        if (BubbleD_d & BubbleM_q & ~m_Kill & ~FetchAgainM_q) begin
+
+if (FetchAgainM_q) begin
+            DecodeGrubbyInsn = mem_rgrubby;
+            if (RealignedPC_d) begin
+                Insn_d = PartialInsn_q;
+            end else if (OddPC_d) begin
+                Insn_d = {mem_rdata[15:0], PartialInsn_q[31:16]};
+            end else begin
+                Insn_d = mem_rdata;
+            end
+
+            DelayedInsnGrubby_d = mem_rgrubby;
+        if (RealignedPC_d) begin //4
+            DelayedInsn_d = PartialInsn_q;
+        end else begin
+            DelayedInsn_d       = mem_rdata;
+        end
+
+//            if (RealignedPC_d) begin
+                PartialInsn_d   = PartialInsn_q;
+//            end else begin
+//                PartialInsn_d   = mem_rdata;
+//            end
+
+end else begin
             DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (OddPC_d) begin
                 Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
@@ -1142,9 +1173,12 @@ module Pipeline #(
             end else begin
                 DelayedInsn_d       = DelayedInsn_q;
             end
-            PartialInsn_d       = DelayedInsn_q;
+//3            PartialInsn_d       = DelayedInsn_q;
+            PartialInsn_d       = PartialInsn_q;
+end
 
-        // 010 POP and PUSH
+
+        // 010 POP and PUSH (also 110)
         end else if (BubbleE_q & ~m_Kill) begin
             DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (OddPC_d) begin
@@ -1152,6 +1186,16 @@ module Pipeline #(
             end else begin
                 Insn_d = DelayedInsn_q;
             end
+
+if (BubbleD_d) begin
+            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
+            DelayedInsn_d       = DelayedInsn_q;
+//            if (RealignedPC_d) begin
+                PartialInsn_d       = PartialInsn_q;
+//2            end else begin
+//2                PartialInsn_d       = DelayedInsn_q;
+//2            end
+end else begin
             DelayedInsnGrubby_d = mem_rgrubby;
             DelayedInsn_d       = mem_rdata;
             if (RealignedPC_d) begin
@@ -1159,6 +1203,7 @@ module Pipeline #(
             end else begin
                 PartialInsn_d       = DelayedInsn_q;
             end
+end
 
         // 000 MC
         end else if (MC_q & (MCState_q!=mcUnalignedJump) & ~m_Kill) begin
@@ -1199,7 +1244,8 @@ module Pipeline #(
             end
 
         // 001 POP
-        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill) begin
+//        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill) begin
+        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill & ~FetchAgainM_q) begin
             DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (RealignedPC_d) begin
                 Insn_d = PartialInsn_q;
@@ -1296,7 +1342,6 @@ module Pipeline #(
 
     // forwarding
 
-    // 6*(4 + 32) LC = 216 LC
     wire FwdAE = e_WrEn & (d_RdNo1 == e_WrNo);
     wire FwdAM = m_WrEn & (d_RdNo1 == m_WrNo);
     wire FwdAW = w_WrEn & (d_RdNo1 == w_WrNo);
@@ -1402,6 +1447,9 @@ module Pipeline #(
 
     wire [WORD_WIDTH-1:0] AddrSum_w = e_A +
         {{(WORD_WIDTH-12){Imm12PlusReg_q[11]}}, Imm12PlusReg_q};
+    wire [WORD_WIDTH-1:0] AddrSum2_w =
+        MemMisaligned_q ? (AddrSum_q + 4) : AddrSum_w;
+
 
     wire [WORD_WIDTH-1:0] NextFetchAddr_w = FetchAddr_q + 4;
 
@@ -1409,8 +1457,8 @@ module Pipeline #(
         Branch_w // taken PC-relative branch
             ? {e_PCImm[WORD_WIDTH-1:2], 2'b00}
             : (e_AddrFromSum & ~m_Kill)
-                ? {AddrSum_w[WORD_WIDTH-1:1], 1'b0}
-                : RealignedPC_d
+                ? {AddrSum2_w[WORD_WIDTH-1:1], 1'b0}
+                : (RealignedPC_d | FetchAgainE_q)
                     ? FetchAddr_q
                     : NextFetchAddr_w;
 
@@ -1575,7 +1623,7 @@ module Pipeline #(
 
     reg [31:0] CsrRDataInternal_d;
     always @* case (e_CsrAddr)
-        12'h300: begin // mstatus
+        12'h300: begin // MSTATUS
             CsrRDataInternal_d = {28'b0, f_MModeIntEnable, 3'b0};
         end
         default: begin
@@ -1584,7 +1632,7 @@ module Pipeline #(
     endcase
 
 
-    // regsiter-mapped CSRs
+    // register-mapped CSRs
 /*
     reg [5:0] CsrTranslateD_d;
     reg CsrFromRegD_d;
@@ -1647,51 +1695,38 @@ module Pipeline #(
         4'b0010: MemSignals = 13'b0_00011_001_0100;
         4'b0011: MemSignals = 13'b0_00101_110_1000;
         4'b0100: MemSignals = 13'b0_01010_100_0011;
-        4'b0101: MemSignals = 13'b1_00000_000_0000;
+        4'b0101: MemSignals = 13'b0_00000_000_0110;
+        //                          ^^^^^^^^^ don't care
         4'b0110: MemSignals = 13'b0_01011_100_1100;
-        4'b0111: MemSignals = 13'b1_00000_000_0000;
+        4'b0111: MemSignals = 13'b1_00000_000_1000;
         4'b1000: MemSignals = 13'b0_11010_000_1111;
-        4'b1001: MemSignals = 13'b1_00000_000_0000;
-        4'b1010: MemSignals = 13'b1_00000_000_0000;
-        4'b1011: MemSignals = 13'b1_00000_000_0000;
+        4'b1001: MemSignals = 13'b1_00000_000_1110;
+        4'b1010: MemSignals = 13'b1_00000_000_1100;
+        4'b1011: MemSignals = 13'b1_00000_000_1000;
         default: MemSignals = 0;
     endcase
 
     wire MemMisaligned = MemSignals[12] & ~m_Kill;
     wire [4:0] MemByte = m_Kill ? 5'b0 : MemSignals[11:7];
-    wire [2:0] MemSign = (m_Kill | e_MemUnsignedLoad) ? 3'b0 : MemSignals[6:4];
 
 
 
     // memory stage
 
-/*
-    wire [7:0] LoRData = (m_MemByte[0] ? mem_rdata[23:16] : mem_rdata[ 7:0]);
-    wire [7:0] HiRData = (m_MemByte[0] ? mem_rdata[31:24] : mem_rdata[15:8]);
-
-    // OPTIMIZE: combine m_MemByte[0] and  m_MemSign[0]
-    wire vHiHalfSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[2] & HiRData[7]);
-    wire vHiByteSigned = (m_MemSign[0] & LoRData[7]) | (m_MemSign[1] & HiRData[7]);
-
-    wire [15:0] HiHalf = (m_MemByte[4] ? mem_rdata[31:16] : (vHiHalfSigned ? 16'hFFFF : 16'b0)) | OverwrittenResult_w[31:16];
-    wire  [7:0] HiByte = (m_MemByte[3] ? HiRData          : (vHiByteSigned ?  8'hFF   :  8'b0)) | OverwrittenResult_w[15:8];
-    wire  [7:0] LoByte = (m_MemByte[1] ? LoRData : 8'b0) | (m_MemByte[2] ? HiRData : 8'b0)      | OverwrittenResult_w[7:0];
-*/
-
-    reg [23:0] MemSel_w;
+    reg [26:0] MemSel_w;
     always @* case ({MemWidthM_q, AddrOfsM_q})
-        4'b0000: MemSel_w = 24'b0001_110000_000000_00000001;
-        4'b0001: MemSel_w = 24'b0010_110000_000000_00000010;
-        4'b0010: MemSel_w = 24'b0100_110000_000000_00000100;
-        4'b0011: MemSel_w = 24'b1000_110000_000000_00001000;
-        4'b0100: MemSel_w = 24'b0010_100000_000010_00000001;
-//        4'b0101: MemSel_w = 24'b0100_100000_000100_00000010;
-        4'b0110: MemSel_w = 24'b1000_100000_001000_00000100;
-//        4'b0111: MemSel_w = 24'b0001_100000_000001_10000000;
-        4'b1000: MemSel_w = 24'b0000_000001_000010_00000001;
-//        4'b1001: MemSel_w = 24'b0000_000010_010000_00100000;
-//        4'b1010: MemSel_w = 24'b0000_000100_100000_01000000;
-//        4'b1011: MemSel_w = 24'b0000_001000_000001_10000000;
+        4'b0000: MemSel_w = 27'b000_0001_110000_000000_00000001;
+        4'b0001: MemSel_w = 27'b000_0010_110000_000000_00000010;
+        4'b0010: MemSel_w = 27'b000_0100_110000_000000_00000100;
+        4'b0011: MemSel_w = 27'b000_1000_110000_000000_00001000;
+        4'b0100: MemSel_w = 27'b000_0010_100000_000010_00000001;
+        4'b0101: MemSel_w = 27'b000_0100_100000_000100_00000010;
+        4'b0110: MemSel_w = 27'b000_1000_100000_001000_00000100;
+        4'b0111: MemSel_w = 27'b001_0001_100000_000001_10000000;
+        4'b1000: MemSel_w = 27'b000_0000_000001_000010_00000001;
+        4'b1001: MemSel_w = 27'b001_0000_000010_010000_00100000;
+        4'b1010: MemSel_w = 27'b011_0000_000100_100000_01000000;
+        4'b1011: MemSel_w = 27'b111_0000_001000_000001_10000000;
         default: MemSel_w = 0;
     endcase
 
@@ -1699,7 +1734,7 @@ module Pipeline #(
                       | (MemSel_w[21] & mem_rdata[15])
                       | (MemSel_w[22] & mem_rdata[23])
                       | (MemSel_w[23] & mem_rdata[31])) 
-                      & ~MemUnsignedLoadM_q & ~m_Kill;
+                      & MemSignedLoadM_q & ~m_Kill;
     wire MemSigned0_w = MemSel_w[18] & MemSigned_w;
     wire MemSigned1_w = MemSel_w[19] & MemSigned_w;
 
@@ -1732,23 +1767,31 @@ module Pipeline #(
 
 
 
-
-
-
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
     wire MemResultGrubby = m_MemByte[4] & mem_rgrubby;
         // grubby if 32 bit load of grubby word
 
-    wire [WORD_WIDTH-1:0] MemWriteData = {
-         e_MemWidth[1] ? e_B[31:24] : (e_MemWidth[0]  ? e_B[15:8] : e_B[7:0]),
-         e_MemWidth[1] ? e_B[23:16]                               : e_B[7:0],
-        (e_MemWidth[1] |               e_MemWidth[0]) ? e_B[15:8] : e_B[7:0],
-                                                                    e_B[7:0]};
+    reg [3:0] MemWMask_d;
+    reg [WORD_WIDTH-1:0] MemWData_d;
+    always @* begin
+        if (MemMisaligned_q) begin
+            MemWMask_d = {1'b0, MemSel_w[26:24]};
+            MemWData_d = MemWData_q;
+        end else begin
+            MemWMask_d = MemSignals[3:0];
+            case (AddrOfs)
+                2'b01: MemWData_d = {e_B[23:0], e_B[31:24]};
+                2'b10: MemWData_d = {e_B[15:0], e_B[31:16]};
+                2'b11: MemWData_d = {e_B[7:0], e_B[31:8]};
+                default: MemWData_d = e_B;
+            endcase
+        end
+    end
 
     assign mem_valid = 1;
     assign mem_write = e_MemStore & ~m_Kill;
-    assign mem_wmask = MemSignals[3:0];
-    assign mem_wdata = MemWriteData;
+    assign mem_wmask = MemWMask_d;
+    assign mem_wdata = MemWData_d;
     assign mem_wgrubby = (e_MemWidth!=2'b10) | e_AGrubby | e_BGrubby;
     assign mem_addr  = MemAddr;
 
@@ -1791,13 +1834,15 @@ module Pipeline #(
 
         PartialInsn_q <= PartialInsn_d;
         OddPC_q <= OddPC_d;
-        RealignedPC_q <= RealignedPC_d;
+//        RealignedPC_q <= RealignedPC_d;
         DelayedInsn_q <= DelayedInsn_d;
         DelayedInsnGrubby_q <= DelayedInsnGrubby_d;
         BubbleM_q <= BubbleE_d;
         BubbleE_q <= BubbleD_d;
 
         FetchAddr_q <= FetchAddr_d;
+        FetchAgainE_q <= FetchAgainD_d;
+        FetchAgainM_q <= FetchAgainE_q;
 
 
 
@@ -1861,13 +1906,16 @@ module Pipeline #(
         m_WrNo <= ExecuteWrNo;
         m_WrData <= ALUResult;
         m_Kill <= Kill;
-        m_MemSign <= MemSign;
         m_MemByte <= MemByte;
 
-        MemUnsignedLoadM_q <= e_MemUnsignedLoad;
-        MemWidthM_q <= m_Kill ? 2'b11 : e_MemWidth;
-        AddrOfsM_q <= AddrSum_w[1:0];
-        MemRData_q <= mem_rdata;
+        MemSignedLoadM_q    <= MemMisaligned_q ? MemSignedLoadM_q : ~e_InsnBit14;
+        MemWidthM_q         <= MemMisaligned_q ? MemWidthM_q :
+                                (m_Kill ? 2'b11 : e_MemWidth);
+        AddrOfsM_q          <= MemMisaligned_q ? AddrOfsM_q : AddrSum_w[1:0];
+        AddrSum_q           <= AddrSum_w;
+        MemRData_q          <= mem_rdata;
+        MemWData_q          <= MemWData_d;
+        MemMisaligned_q     <= MemMisaligned;
 
         // mem stage
         w_WrEn <= MemWrEn;
@@ -1886,7 +1934,7 @@ module Pipeline #(
         f_ExcGrubbyJump     <= ExcGrubbyJump;
         d_ExcGrubbyJump     <= f_ExcGrubbyJump;
         e_ExcGrubbyJump     <= d_ExcGrubbyJump;
-        m_ExcMem            <= MemMisaligned & ~m_Kill;
+        m_ExcMem            <= 0;//MemMisaligned & ~m_Kill;
         w_ExcMem            <= m_ExcMem & ~m_Kill;
         m_MemStore          <= e_MemStore;
         m_WriteMCAUSE       <= WriteMCAUSE;
@@ -1976,11 +2024,12 @@ module Pipeline #(
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2, vSelImm, ImmALU_w);
         $display("D Bubble=%b%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
             BubbleD_d, BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q, PartialInsn_q);
+/*
         $display("D P=%h align=%b%b RVC=%b",
             PartialInsn_d, RealignedPC_d, OddPC_d, RVCInsn_w);
         $display("D Imm21PCRel=%b",
             Imm21PCRel_w);
-
+*/
 
         $display("E a=%h b=%h -> %h -> x%d wrenDE=%b%b",
             e_A, e_B, ALUResult, e_WrNo, DecodeWrEn, e_WrEn);
@@ -1993,6 +2042,7 @@ module Pipeline #(
             SelDivOrMul_d, DivSigned_q, DivQuot_q, MulDivResult_d);
 */
 
+/*
         $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
             ExcGrubbyInsn,
             e_ExcGrubbyInsn,
@@ -2005,6 +2055,7 @@ module Pipeline #(
             w_ExcMem,
             vWriteMEPC
             );
+*/
 
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchAddr_d);
 
@@ -2047,6 +2098,7 @@ module Pipeline #(
             RegSet.regs[REG_CSR_MCAUSE],
             RegSet.regs[REG_CSR_MTVAL]);
 
+/*
         $display("C CsrTranslateD_d=%h CsrOp=%b e_%b m_%b",
             CsrTranslateD_d, CsrOp, e_CsrOp, m_CsrOp);
         $display("C CsrResult_w=%h OverwrittenResult_w=%h",
@@ -2058,15 +2110,13 @@ module Pipeline #(
             CsrFromExtM_q, CsrRDataInternal_q);
         $display("C CSR addr=%h rdata=%h valid=%b",
             csr_addr, csr_rdata, csr_valid);
+*/
 
 
-
-        $display("M MemResult=%h m_MemSign=%b m_MemByte=%b",
-            MemResult, m_MemSign, m_MemByte);
-        $display("M e_MemWidth=%b AddrOfs=%b",
-            e_MemWidth, AddrOfs);
-        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemSel_w=%b",
-            MemWidthM_q, AddrOfsM_q, MemSel_w);
+        $display("M e_MemWidth=%b AddrOfs=%b RealignedPC_d=%b MemAddr=%h FetchAgainE_q=%b",
+            e_MemWidth, AddrOfs, RealignedPC_d, MemAddr, FetchAgainE_q);
+        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemSel_w=%b MemMisaligned_q=%b",
+            MemWidthM_q, AddrOfsM_q, MemSel_w, MemMisaligned_q);
         $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelE=%b",
             Overwrite_d, OverwriteE_q, OverwriteM_q,
             OverwriteVal_d, OverwriteValE_q, OverwriteValM_q,
@@ -2079,7 +2129,7 @@ module Pipeline #(
 //            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
         $display("X vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b m_Cause=%h",
             vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
-        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h OverwrittenResult_w=%h",
+        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h OverResult_w=%h",
             ExcWrData, e_ExcWrData2, m_ExcWrData, OverwrittenResult_w);
 //        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
 //            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
@@ -2126,6 +2176,7 @@ module Pipeline #(
     end
 
 
+
 `ifdef RISCV_FORMAL
     reg [31:0]           RvfiInsnM_q;
     reg                  RvfiTrapE_q;
@@ -2153,11 +2204,23 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] RvfiMemWDataM_q;
     reg                  RvfiAltResultM_q;
     reg [WORD_WIDTH-1:0] RvfiResultM_q;
+    reg                  RvfiRetireMisLoadW_q;
+
+    wire [3:0] RvfiMemMask =
+        e_MemWidth[1] ? (e_MemWidth[0] ? 4'b0000 : 4'b1111)
+                      : (e_MemWidth[0] ? 4'b0011 : 4'b0001);
+    wire RvfiRetireMisLoadM_d = RetiredM_q
+        & MC_q
+        & (MCState_q==mcMem)
+        & ~m_MemStore;
+    wire RvfiRetire_w = RvfiTrapM_q 
+        | (RetiredM_q & ~RvfiRetireMisLoadM_d)
+        | RvfiRetireMisLoadW_q;
 
     always @(posedge clk) begin
-        rvfi_valid      <= rstn & !rvfi_halt & (RetiredM_q | RvfiTrapM_q);
+
+        rvfi_valid      <= rstn & !rvfi_halt & RvfiRetire_w;
         rvfi_order      <= rstn ? rvfi_order + rvfi_valid : 0;
-        rvfi_insn       <= RvfiInsnM_q;
         rvfi_trap       <= RvfiTrapM_q;
 
         rvfi_halt       <= RvfiTrapM_q | rvfi_halt;
@@ -2165,26 +2228,29 @@ module Pipeline #(
         rvfi_mode       <= 3;
         rvfi_ixl        <= 1;
 
-        rvfi_rs1_addr   <= RvfiRdNo1M_q;
-        rvfi_rs2_addr   <= RvfiRdNo2M_q;
-        rvfi_rs1_rdata  <= RvfiRdData1M_q;
-        rvfi_rs2_rdata  <= RvfiRdData2M_q;
+        // For the 2nd cycle of a misaligned load, just hold the values
+        if (~RvfiRetireMisLoadW_q) begin
+            rvfi_insn       <= RvfiInsnM_q;
+            rvfi_rs1_addr   <= RvfiRdNo1M_q;
+            rvfi_rs2_addr   <= RvfiRdNo2M_q;
+            rvfi_rs1_rdata  <= RvfiRdData1M_q;
+            rvfi_rs2_rdata  <= RvfiRdData2M_q;
+            rvfi_pc_rdata   <= RvfiPcM_q;
+            rvfi_pc_wdata   <= RvfiExcRetM_q ? FetchAddr_d : RvfiNextPcM_q;
+            rvfi_mem_addr   <= RvfiMemAddrM_q;
+            rvfi_mem_rmask  <= RvfiMemRMaskM_q;
+            rvfi_mem_wmask  <= RvfiMemWMaskM_q;
+            rvfi_mem_wdata  <= RvfiMemWDataM_q;
+        end
+
         rvfi_rd_addr    <= (MemWrEn & ~MemWrNo[5]) ? MemWrNo : 0;
         rvfi_rd_wdata   <= RvfiAltResultM_q ? RvfiResultM_q :
                            (MemWrEn & ~MemWrNo[5]) ? MemResult : 0;
+        rvfi_mem_rdata  <= MemResult;
 
-        rvfi_pc_rdata   <= RvfiPcM_q;
-        rvfi_pc_wdata   <= RvfiExcRetM_q ? FetchAddr_d : RvfiNextPcM_q;
-
-        rvfi_mem_addr   <= RvfiMemAddrM_q;
-        rvfi_mem_rmask  <= RvfiMemRMaskM_q;
-        rvfi_mem_wmask  <= RvfiMemWMaskM_q;
-        rvfi_mem_rdata  <= mem_rdata;
-        rvfi_mem_wdata  <= RvfiMemWDataM_q;
-
+        RvfiRetireMisLoadW_q <= RvfiRetireMisLoadM_d;
         RvfiInsnM_q     <= InsnE_q;
         RvfiTrapM_q     <= (RvfiTrapE_q         // illegal instruction
-                            | MemMisaligned     // unaligned memory access
                             | (MC_q && MCState_q==mcWFI)) & ~m_Kill;    // WFI insn
         RvfiTrapE_q     <= ExcInvalidInsn;
         RvfiIntrM_q     <= RvfiIntrE_q; // long delay (jump to MTVEC)
@@ -2206,12 +2272,12 @@ module Pipeline #(
         RvfiNextPcM_q   <= Kill ? FetchAddr_d : PC_q;
         RvfiExcRetM_q   <= MC_q & ((MCState_q==mcJumpReg) | (MCState_q==mcException));
 
-        RvfiMemAddrM_q  <= {mem_addr[31:2], 2'b00};
-        RvfiMemRMaskM_q <= ((e_MemWidth!=2'b11) & ~e_MemStore) ? 4'b1111 : 0;
-        RvfiMemWMaskM_q <= mem_write ? mem_wmask : 0;
-        RvfiMemWDataM_q <= mem_wdata &
-                            {{8{mem_wmask[3]}}, {8{mem_wmask[2]}},
-                             {8{mem_wmask[1]}}, {8{mem_wmask[0]}}};
+        RvfiMemAddrM_q  <= AddrSum_w;
+        RvfiMemRMaskM_q <= e_MemStore ? 0 : RvfiMemMask;
+        RvfiMemWMaskM_q <= mem_write ? RvfiMemMask : 0;
+        RvfiMemWDataM_q <= e_B & {{8{RvfiMemMask[3]}}, {8{RvfiMemMask[2]}},
+                                  {8{RvfiMemMask[1]}}, {8{RvfiMemMask[0]}}};
+
 
 
 `ifdef RISCV_FORMAL_ALTOPS

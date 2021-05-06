@@ -1,1 +1,3 @@
 riscv-formal/
+disasm.s
+tmp.*

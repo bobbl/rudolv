@@ -24,9 +24,8 @@ esc="\033[0m"
 clone() {
     git clone https://github.com/YosysHQ/riscv-formal.git
     mkdir riscv-formal/cores/rudolv
-    cp formal/checks.cfg riscv-formal/cores/rudolv/
+    cp checks.cfg riscv-formal/cores/rudolv/
 }
-
 
 
 while [ $# -ne 0 ]
@@ -58,32 +57,32 @@ do
                 dirname=riscv-formal/cores/rudolv/checks/$name
                 if [ -e $dirname/PASS ]
                 then
-                    echo "ok -     ${esc_green}PASS${esc} $name"
+                    printf "ok -     ${esc_green}PASS${esc} $name\n"
                     passed=$(($passed + 1))
                 fi
                 if [ -e $dirname/FAIL ]
                 then
-                    echo "not ok - ${esc_red}FAIL${esc} $name"
+                    printf "not ok - ${esc_red}FAIL${esc} $name\n"
                     failed=$(($failed + 1))
                 fi
             done
             if [ $passed -eq $total ]
             then
-                echo "# ${esc_green}All $total tests passed${esc}"
+                printf "# ${esc_green}All $total tests passed.${esc}\n"
             else
-                echo "# ${esc_red}$failed/$total tests FAILED${esc}"
+                printf "# ${esc_red}Failed ${failed} of ${total} tests${esc}\n"
             fi
             ;;
 
         wave)
-            gtkwave riscv-formal/cores/rudolv/checks/$2/engine_0/trace0.vcd &
+            gtkwave riscv-formal/cores/rudolv/checks/$2/engine_0/trace.vcd &
             shift
             ;;
 
         disasm)
             python3 disasm.py \
                 riscv-formal/cores/rudolv/checks/$2/engine_0/trace.vcd
-            ${RV_PREFIX}gcc -c -o tmp.o tmp.s
+            ${RV_PREFIX}gcc -c -o tmp.o disasm.s
             ${RV_PREFIX}objdump -d -M numeric,no-aliases tmp.o
             shift
             ;;
