@@ -101,7 +101,6 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] PC_q;
     reg [31:0] DelayedInsn_q;
-    reg DelayedInsnGrubby_q;
     reg BubbleM_q;
     reg BubbleE_q;
 
@@ -154,8 +153,6 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] ImmUpper_q;
     reg [11:0] Imm12PlusReg_q;
     reg [WORD_WIDTH-1:0] e_PCImm;
-    reg e_AGrubby;
-    reg e_BGrubby;
 
     reg e_NegB;
     reg e_WrEn;
@@ -182,26 +179,11 @@ module Pipeline #(
     reg w_WrEn;
     reg [5:0] w_WrNo;
     reg [WORD_WIDTH-1:0] w_WrData;
-    reg w_WrGrubby;
 
     reg RetiredE_q;
     reg RetiredM_q;
 
     // exceptions
-    reg [WORD_WIDTH-1:0] e_ExcWrData2;
-    reg [WORD_WIDTH-1:0] m_ExcWrData;
-    reg e_ExcGrubbyInsn;
-    reg m_ExcGrubbyInsn;
-    reg f_ExcGrubbyJump;
-    reg d_ExcGrubbyJump;
-    reg e_ExcGrubbyJump;
-    reg m_ExcMem;
-    reg w_ExcMem;
-    reg m_MemStore;
-    reg m_WriteMCAUSE;
-    reg m_WriteMTVAL;
-    reg [4:0] m_Cause;
-
     reg OverwriteE_q;
     reg [WORD_WIDTH-1:0] OverwriteValE_q;
     reg OverwriteM_q;
@@ -232,7 +214,6 @@ module Pipeline #(
     reg TimerIrq_q;      // external pin high
     reg ExternalIrq_q;
 
-    reg d_GrubbyInsn;
 
 
 
@@ -465,11 +446,9 @@ module Pipeline #(
 
     // Fetching
     reg [31:0] Insn_d;
-    reg DecodeGrubbyInsn;
     reg [5:0] RdNo1;
     reg [5:0] RdNo2;
     reg [31:0] DelayedInsn_d;
-    reg DelayedInsnGrubby_d;
 
     reg [WORD_WIDTH-1:0] FetchAddr_d;
     reg [WORD_WIDTH-1:0] PC_d;
@@ -517,7 +496,7 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] ImmUpper_d;
     reg [11:0] Imm12PlusReg_d;
-    reg Overwrite_d;              // overwrite result in M-stage (used by exceptions
+    reg Overwrite_d;              // overwrite result in M-stage (used by exceptions)
     reg [WORD_WIDTH-1:0] OverwriteVal_d;
     reg OverwriteSelD_d;
     reg InsnMRET_d;
@@ -605,20 +584,7 @@ module Pipeline #(
                 MC_d = 1;
                 MCState_d = mcUnalignedJump;
             end
-
             ExcInvalidInsn = 0;
-            if (f_ExcGrubbyJump) begin
-                RdNo1          = REG_CSR_MTVEC;
-                MC_d           = 1;
-                MCState_d      = mcJumpReg;
-                TrapEnter_d    = 1;
-            end
-
-        end else if (d_GrubbyInsn) begin
-            RdNo1          = REG_CSR_MTVEC;
-            MC_d           = 1;
-            MCState_d      = mcJumpReg;
-            TrapEnter_d    = 1;
 
         // microcoded cycles of multi-cycle instructions
         end else if (MC_q) begin
@@ -1138,7 +1104,6 @@ module Pipeline #(
 //        if (BubbleD_d & BubbleM_q & ~m_Kill & ~FetchAgainM_q) begin
 
 if (FetchAgainM_q) begin
-            DecodeGrubbyInsn = mem_rgrubby;
             if (RealignedPC_d) begin
                 Insn_d = PartialInsn_q;
             end else if (OddPC_d) begin
@@ -1147,7 +1112,6 @@ if (FetchAgainM_q) begin
                 Insn_d = mem_rdata;
             end
 
-            DelayedInsnGrubby_d = mem_rgrubby;
         if (RealignedPC_d) begin //4
             DelayedInsn_d = PartialInsn_q;
         end else begin
@@ -1161,13 +1125,11 @@ if (FetchAgainM_q) begin
 //            end
 
 end else begin
-            DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (OddPC_d) begin
                 Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
             end else begin
                 Insn_d = DelayedInsn_q;
             end
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
             if (RealignedPC_d) begin
                 DelayedInsn_d       = PartialInsn_q;
             end else begin
@@ -1180,7 +1142,6 @@ end
 
         // 010 POP and PUSH (also 110)
         end else if (BubbleE_q & ~m_Kill) begin
-            DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (OddPC_d) begin
                 Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
             end else begin
@@ -1188,7 +1149,6 @@ end
             end
 
 if (BubbleD_d) begin
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
             DelayedInsn_d       = DelayedInsn_q;
 //            if (RealignedPC_d) begin
                 PartialInsn_d       = PartialInsn_q;
@@ -1196,7 +1156,6 @@ if (BubbleD_d) begin
 //2                PartialInsn_d       = DelayedInsn_q;
 //2            end
 end else begin
-            DelayedInsnGrubby_d = mem_rgrubby;
             DelayedInsn_d       = mem_rdata;
             if (RealignedPC_d) begin
                 PartialInsn_d       = PartialInsn_q;
@@ -1207,13 +1166,11 @@ end
 
         // 000 MC
         end else if (MC_q & (MCState_q!=mcUnalignedJump) & ~m_Kill) begin
-            DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (OddPC_d) begin
                 Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
             end else begin
                 Insn_d = DelayedInsn_q;
             end
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
             DelayedInsn_d       = DelayedInsn_q;
             if (RealignedPC_d) begin
                 PartialInsn_d   = PartialInsn_q;
@@ -1223,7 +1180,6 @@ end
 
         // 100 PUSH
         end else if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d) begin
-            DecodeGrubbyInsn = mem_rgrubby;
             if (RealignedPC_d) begin
                 Insn_d = PartialInsn_q;
             end else if (OddPC_d) begin
@@ -1231,7 +1187,6 @@ end
             end else begin
                 Insn_d = mem_rdata;
             end
-            DelayedInsnGrubby_d = mem_rgrubby;
             if (RealignedPC_d) begin
                 DelayedInsn_d       = PartialInsn_q;
                 PartialInsn_d       = mem_rdata;
@@ -1246,7 +1201,6 @@ end
         // 001 POP
 //        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill) begin
         end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill & ~FetchAgainM_q) begin
-            DecodeGrubbyInsn = DelayedInsnGrubby_q;
             if (RealignedPC_d) begin
                 Insn_d = PartialInsn_q;
             end else if (OddPC_d) begin
@@ -1254,7 +1208,6 @@ end
             end else begin
                 Insn_d = DelayedInsn_q;
             end
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
             DelayedInsn_d       = DelayedInsn_q;
             if (RealignedPC_d) begin
                 PartialInsn_d       = PartialInsn_q;
@@ -1265,7 +1218,6 @@ end
 
         // 000 NOT DELAYED
         end else begin
-            DecodeGrubbyInsn = mem_rgrubby;
             if (RealignedPC_d) begin
                 Insn_d = PartialInsn_q;
             end else if (OddPC_d) begin
@@ -1273,7 +1225,6 @@ end
             end else begin
                 Insn_d = mem_rdata;
             end
-            DelayedInsnGrubby_d = DelayedInsnGrubby_q;
             DelayedInsn_d       = DelayedInsn_q;
             if (RealignedPC_d) begin
                 PartialInsn_d   = PartialInsn_q;
@@ -1356,19 +1307,6 @@ end
     wire [WORD_WIDTH-1:0] ForwardBR = vSelImm ?    0 : (FwdBW ? w_WrData : regset_rd2);
     wire [WORD_WIDTH-1:0] ForwardBM =  FwdBM ? MemResult : (ForwardBR | ForwardImm);
     wire [WORD_WIDTH-1:0] ForwardBE = (FwdBE ? ALUResult : ForwardBM) ^ {WORD_WIDTH{NegB}};
-
-    wire ALUResultGrubby = 0;
-    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : regset_rg1;
-    wire ForwardAMGrubby =  FwdAM ? MemResultGrubby : ForwardAWGrubby;
-    wire ForwardAEGrubby = (FwdAE ? ALUResultGrubby : ForwardAMGrubby)
-        & ~d_RdNo1[5];
-    wire ForwardBRGrubby = ~vSelImm & (FwdBW ? w_WrGrubby : regset_rg2);
-    wire ForwardBMGrubby =  FwdBM ? MemResultGrubby : ForwardBRGrubby;
-    wire ForwardBEGrubby = (FwdBE ? ALUResultGrubby : ForwardBMGrubby)
-        & ~d_RdNo2[5]; 
-        // No grubby flag for CSR regsiters, because this would complicate
-        // exception handling (for all exceptions, not just the grubby ones)
-
 
 
 
@@ -1545,48 +1483,13 @@ end
 
 
 
-    // exception handling
-
-    wire ExcGrubbyInsn  = d_GrubbyInsn;
-    wire ExcGrubbyJump  = e_InsnJALR & e_AGrubby & ~m_Kill;
-
-    wire vWriteMEPC     = f_ExcGrubbyJump | m_ExcGrubbyInsn | m_ExcMem;
-    wire WriteMCAUSE    = f_ExcGrubbyJump | m_ExcGrubbyInsn | w_ExcMem;
-    wire WriteMTVAL     = d_ExcGrubbyJump | m_ExcMem;
-
-    wire vExcOverwrite  = vWriteMEPC | m_WriteMTVAL | m_WriteMCAUSE;
-    wire MemWrEn        = m_WrEn | vExcOverwrite | OverwriteM_q;
-
-    wire [5:0] MemWrNo  =
-        vWriteMEPC      ? REG_CSR_MEPC :
-        (m_WriteMTVAL   ? REG_CSR_MTVAL :
-        (m_WriteMCAUSE  ? REG_CSR_MCAUSE :
-        m_WrNo));
-
-
-    wire [4:0] Cause = m_ExcMem        ? (m_MemStore ? 5'h06 : 5'h04) :
-                      (e_ExcGrubbyInsn ? 5'h0e :
-                      (ExcGrubbyJump   ? 5'h0a :
-                      /* e_ExcJump */    5'h00 )); // -> m_Cause
-
-
-    wire [WORD_WIDTH-1:0] ExcWrData2 =
-        MemMisaligned   ? AddrSum_w     // MTVAL for mem access
-                        : PC_q;         // MEPC 
-
-
-    wire [WORD_WIDTH-1:0] ExcWrData =
-        WriteMCAUSE     ? {m_Cause[4], {(WORD_WIDTH-5){1'b0}}, m_Cause[3:0]}  // MCAUSE
-                        : e_ExcWrData2;
-
+    wire MemWrEn        = m_WrEn | OverwriteM_q;
+    wire [5:0] MemWrNo  = m_WrNo;
 
     wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q ? MulDivResult_d : OverwriteValE_q;
 
     wire [WORD_WIDTH-1:0] OverwrittenResult_w =
-        OverwriteM_q ? OverwriteValM_q
-                     : (vExcOverwrite ? (e_ExcGrubbyJump ? e_ExcWrData2 // MTVAL for jump
-                                                         : m_ExcWrData)
-                                      : CsrResult_w);
+        OverwriteM_q ? OverwriteValM_q : CsrResult_w;
 
 
 
@@ -1768,8 +1671,6 @@ end
 
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
-    wire MemResultGrubby = m_MemByte[4] & mem_rgrubby;
-        // grubby if 32 bit load of grubby word
 
     reg [3:0] MemWMask_d;
     reg [WORD_WIDTH-1:0] MemWData_d;
@@ -1792,7 +1693,7 @@ end
     assign mem_write = e_MemStore & ~m_Kill;
     assign mem_wmask = MemWMask_d;
     assign mem_wdata = MemWData_d;
-    assign mem_wgrubby = (e_MemWidth!=2'b10) | e_AGrubby | e_BGrubby;
+    assign mem_wgrubby = 0;
     assign mem_addr  = MemAddr;
 
 
@@ -1804,7 +1705,7 @@ end
     assign regset_we = MemWrEn;
     assign regset_wa = MemWrNo;
     assign regset_wd = MemResult;
-    assign regset_wg = MemResultGrubby;
+    assign regset_wg = 0;
     assign regset_ra1 = RdNo1;
     assign regset_ra2 = RdNo2;
 
@@ -1834,18 +1735,13 @@ end
 
         PartialInsn_q <= PartialInsn_d;
         OddPC_q <= OddPC_d;
-//        RealignedPC_q <= RealignedPC_d;
         DelayedInsn_q <= DelayedInsn_d;
-        DelayedInsnGrubby_q <= DelayedInsnGrubby_d;
         BubbleM_q <= BubbleE_d;
         BubbleE_q <= BubbleD_d;
 
         FetchAddr_q <= FetchAddr_d;
         FetchAgainE_q <= FetchAgainD_d;
         FetchAgainM_q <= FetchAgainE_q;
-
-
-
 
         StartMulDiv_q <= StartMulDiv_d;
         DivSigned_q <= DivSigned_d;
@@ -1861,14 +1757,10 @@ end
         Long_q <= Long_d;
 
 
-
-
         // decode
         PC_q <= PC_d;
         e_A <= ForwardAE;
         e_B <= ForwardBE;
-        e_AGrubby <= ForwardAEGrubby;
-        e_BGrubby <= ForwardBEGrubby;
         ImmUpper_q <= ImmUpper_d;
         Imm12PlusReg_q <= Imm12PlusReg_d;
         e_PCImm <= PCImm;
@@ -1895,11 +1787,10 @@ end
 
         e_SelLogic <= SelLogic;
         e_NegB <= NegB;
-
         e_WrNo <= DecodeWrNo;
         InvertBranch_q <= InvertBranch_d;
-
         e_InsnBit14 <= Insn_q[14];
+
 
         // execute
         m_WrEn <= ExecuteWrEn;
@@ -1921,26 +1812,11 @@ end
         w_WrEn <= MemWrEn;
         w_WrNo <= MemWrNo;
         w_WrData <= MemResult;
-        w_WrGrubby <= MemResultGrubby;
 
         RetiredM_q <= RetiredE_q & ~m_Kill;
         RetiredE_q <= RetiredD_d;
 
         // exception handling
-        e_ExcWrData2        <= ExcWrData2;
-        m_ExcWrData         <= ExcWrData; 
-        e_ExcGrubbyInsn     <= ExcGrubbyInsn;
-        m_ExcGrubbyInsn     <= (e_ExcGrubbyInsn & ~m_Kill);
-        f_ExcGrubbyJump     <= ExcGrubbyJump;
-        d_ExcGrubbyJump     <= f_ExcGrubbyJump;
-        e_ExcGrubbyJump     <= d_ExcGrubbyJump;
-        m_ExcMem            <= 0;//MemMisaligned & ~m_Kill;
-        w_ExcMem            <= m_ExcMem & ~m_Kill;
-        m_MemStore          <= e_MemStore;
-        m_WriteMCAUSE       <= WriteMCAUSE;
-        m_WriteMTVAL        <= WriteMTVAL;
-        m_Cause             <= Cause;
-
         OverwriteE_q        <= Overwrite_d;
         OverwriteValE_q     <= OverwriteVal_d;
         OverwriteM_q        <= OverwriteE_q;
@@ -1971,15 +1847,11 @@ end
         ExternalIrq_q       <= irq_external;
 
 
-        d_GrubbyInsn <= DecodeGrubbyInsn;
-
-
-
 
 
 `ifdef DEBUG
-        $display("F write=%b wmask=%b wdata=%h wgrubby=%b addr=%h rdata=%h rgrubby=%b",
-            mem_write, mem_wmask, mem_wdata, mem_wgrubby, mem_addr, mem_rdata, mem_rgrubby);
+        $display("F write=%b wmask=%b wdata=%h addr=%h rdata=%h",
+            mem_write, mem_wmask, mem_wdata, mem_addr, mem_rdata);
         if (MC_q==0) begin
             if (Insn_q[1:0]==2'b11) begin
                 $display("D pc=\033[1;33m%h\033[0m insn=%h next=%h \033[1;30mMC=no\033[0m",
@@ -2006,20 +1878,6 @@ end
             RegSet.regs[24], RegSet.regs[25], RegSet.regs[26], RegSet.regs[27], 
             RegSet.regs[28], RegSet.regs[29], RegSet.regs[30], RegSet.regs[31]);
 
-/*
-        $display("R grubby %b%b%b%b %b%b%b%b %b%b%b%b %b%b%b%b",
-            RegSet.grubby[0], RegSet.grubby[1], RegSet.grubby[2], RegSet.grubby[3],
-            RegSet.grubby[4], RegSet.grubby[5], RegSet.grubby[6], RegSet.grubby[7],
-            RegSet.grubby[8], RegSet.grubby[9], RegSet.grubby[10], RegSet.grubby[11],
-            RegSet.grubby[12], RegSet.grubby[13], RegSet.grubby[14], RegSet.grubby[15]);
-*/
-
-        $display("R grubby %b%b%b%b %b%b%b%b %b%b%b%b %b%b%b%b",
-            RegSet.regs[0][32], RegSet.regs[1][32], RegSet.regs[2][32], RegSet.regs[3][32],
-            RegSet.regs[4][32], RegSet.regs[5][32], RegSet.regs[6][32], RegSet.regs[7][32],
-            RegSet.regs[8][32], RegSet.regs[9][32], RegSet.regs[10][32], RegSet.regs[11][32],
-            RegSet.regs[12][32], RegSet.regs[13][32], RegSet.regs[14][32], RegSet.regs[15][32]);
-
         $display("D read x%d=%h x%d=%h SelImm=%b %h",
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2, vSelImm, ImmALU_w);
         $display("D Bubble=%b%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
@@ -2042,23 +1900,7 @@ end
             SelDivOrMul_d, DivSigned_q, DivQuot_q, MulDivResult_d);
 */
 
-/*
-        $display("X Exc GInsnDEM %b%b%b GJumpFDE %b%b%b MemEMW %b%b%b vWriteMEPC=%b",
-            ExcGrubbyInsn,
-            e_ExcGrubbyInsn,
-            m_ExcGrubbyInsn,
-            f_ExcGrubbyJump,
-            d_ExcGrubbyJump,
-            e_ExcGrubbyJump,
-            MemMisaligned,
-            m_ExcMem,
-            w_ExcMem,
-            vWriteMEPC
-            );
-*/
-
         if (Kill) $display("B \033[1;35mjump %h\033[0m", FetchAddr_d);
-
 /*
         $display("B vBEQ=%b vNotBEQ=%b e_InsnJALR=%b KillEMW=%b%b",
             vBEQ, vNotBEQ, e_InsnJALR, Kill, m_Kill);
@@ -2067,23 +1909,6 @@ end
         $display("  e_InsnBEQ=%b InvertBranch_q=%b vEqual=%b",
             e_InsnBEQ, InvertBranch_q, vEqual);
 */
-
-
-/*
-        $display("G MemResultGrubby=%b e_AGrubby=%b ExcGrubbyJump",
-            MemResultGrubby, e_AGrubby, ExcGrubbyJump);
-        $display("G FwdAEGrubby=%b d_RdNo1[5]=%b w_WrGrubby=%b regset_rg1=%b",
-            ForwardAEGrubby, d_RdNo1[5], w_WrGrubby, regset_rg1);
-*/
-
-/*
-    wire ForwardAWGrubby =  FwdAW ? w_WrGrubby : regset_rg1;
-    wire ForwardAMGrubby =  FwdAM ? MemResultGrubby : ForwardAWGrubby;
-    wire ForwardAEGrubby = (FwdAE ? ALUResultGrubby : ForwardAMGrubby)
-        & ~d_RdNo1[5];
-*/
-
-
 /*
         $display("F AE=%b AM=%b AW=%b AR=%h AM=%h AE=%h",
             FwdAE, FwdAM, FwdAW, ForwardAR, ForwardAM, ForwardAE);
@@ -2127,10 +1952,8 @@ end
 //            DecodeWrNo, e_WrNo, ExecuteWrNo, m_WrNo);
 //        $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
 //            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
-        $display("X vWriteMEPC=%b m_WriteMTVAL=%b m_WriteMCAUSE=%b m_Cause=%h",
-            vWriteMEPC, m_WriteMTVAL, m_WriteMCAUSE, m_Cause);
-        $display("X ExcWrData=%h e_ExcWrData2=%h m_ExcWrData=%h OverResult_w=%h",
-            ExcWrData, e_ExcWrData2, m_ExcWrData, OverwrittenResult_w);
+        $display("X OverwrittenResult_w=%h",
+            OverwrittenResult_w);
 //        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
 //            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
 
@@ -2159,7 +1982,6 @@ end
             BubbleM_q <= 0;
             BubbleE_q <= 0;
             DelayedInsn_q <= 'h13;
-            DelayedInsnGrubby_q <= 0;
 
             StartMulDiv_q <= 0;
 
@@ -2198,6 +2020,7 @@ end
     reg [WORD_WIDTH-1:0] RvfiPcM_q;
     reg [WORD_WIDTH-1:0] RvfiNextPcM_q;
     reg                  RvfiExcRetM_q;
+    reg                  RvfiMemStoreM_q;
     reg [WORD_WIDTH-1:0] RvfiMemAddrM_q;
     reg [3:0]            RvfiMemRMaskM_q;
     reg [3:0]            RvfiMemWMaskM_q;
@@ -2212,7 +2035,7 @@ end
     wire RvfiRetireMisLoadM_d = RetiredM_q
         & MC_q
         & (MCState_q==mcMem)
-        & ~m_MemStore;
+        & ~RvfiMemStoreM_q;
     wire RvfiRetire_w = RvfiTrapM_q 
         | (RetiredM_q & ~RvfiRetireMisLoadM_d)
         | RvfiRetireMisLoadW_q;
@@ -2272,6 +2095,7 @@ end
         RvfiNextPcM_q   <= Kill ? FetchAddr_d : PC_q;
         RvfiExcRetM_q   <= MC_q & ((MCState_q==mcJumpReg) | (MCState_q==mcException));
 
+        RvfiMemStoreM_q <= e_MemStore;
         RvfiMemAddrM_q  <= AddrSum_w;
         RvfiMemRMaskM_q <= e_MemStore ? 0 : RvfiMemMask;
         RvfiMemWMaskM_q <= mem_write ? RvfiMemMask : 0;

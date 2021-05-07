@@ -5,7 +5,6 @@ RISC-V processor for real-time systems. 32 bit in-order pipeline with 5 stages.
 Features
   * [Multiple target FPGAs](#supported-fpgas)
   * [Predictable timing model](#instruction-timing)
-  * [Security extension](#security-extension)
   * [CSR extension interface](#csr-extension-interface)
   * [Simulation with Icarus Verilog or Verilator](#simulation)
 
@@ -145,92 +144,6 @@ cycle.
 | not taken branch   | BEQ, BNE, BLT, BGE, BLTU, BGEU                 | 1      |
 | barrel shifter     | SLL, SRL, SRA                                  | 1      |
 | arithmetic         | ADD, SUB, SLT, SLTU, XOR, OR, AND, LUI, AUIPC  | 1      |
-
-
-
-
-Security extension
-------------------
-
-RudolV started as a submission to the
-[2018 RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
-Also participating in the 
-[2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
-it made the 
-[third place](https://riscv.org/2019/10/announcing-the-winners-of-the-risc-v-soft-cpu-contest/)
-.
-
-The objective of the contest was to thwart 5 particular attacks of RIPE, the
-[Runtime Intrusion Prevention Evaluator](https://github.com/johnwilander/RIPE).
-RudolV can detect all these 5 attacks and responds with an exception. No
-compiler modifications are necessary.
-
-### Grubby attack detection
-
-RudolV monitors if a memory location was written as a whole 32 bit word or if
-narrow byte accesses modified it. Memory locations that were not written as a
-whole are called _grubby_. If an instruction is fetched from such a grubby
-memory location, an exception (14) is thrown. If the value from a grubby memory
-location is used as function pointer or return address, exception 10 is throw.
-
-### Technical implementation
-
-Each memory word requires an additional grubby bit. The bit is cleared, if a 
-aligned `sw` instruction writes the word. The other store instructions (`sh` and
-`sb`) set the grubby bit. If a word with grubby bit set is fetched, execution
-continues at the address `mtvec` and `mcause` is set to 14.
-
-The detection of an indirect jump to an address from a grubby memory location is
-a bit more complex. There is no single instruction to jump to the address in a
-memory location. At least two instructions are involved instead. First, `lw`
-reads the target address from memory to a register and then `jalr` jumps to the
-address in the register. Therefore, all registers also need a grubby bit. It is
-written by a load and tested by a jump.
-
-### Hardware costs
-
-The hardware costs are not very high. The logic is simple (only a few dozend LUT4s)
-and most FPGAs provide block RAMs with parity bits that are 36 bits wide, not 32
-bits. These parity bits can be used as grubby bits. Only the Lattice FPGAs do not
-provide a parity bit.
-
-| Manufacturer    | Intel      | Lattice       | Microsemi       | Xilinx    |
-| --------------- |:----------:|:-------------:|:---------------:|:---------:|
-| Logic Elements  |       3114 |          4010 |            4650 |       640 |
-| LUTs            |       2994 |          3351 |            4602 |      2083 |
-| DFFs            |       1210 |          1244 |            2379 |      1190 |
-| MHz             |         70 |            20 |              64 |       200 |
-
-If available on the board, a switch (DE2-115, Genesys-2) or a button (IGLOO2)
-can disable the grubby detection.
-
-### Detection quality
-
-All buffer overflows that write the memory byte by byte can be detected with the
-grubby mechanism. RIPE tests 850 different stack overflow attacks, subdivided by
-five dimensions. Four dimensions (location, target code pointer, overflow technique
-and attack code) are irrelevat for the grubby detection, the only dimension that
-has an influence is the abused function. Grubby detection only works for functions
-that write the memory byte by byte. Fortunately, 9 of the 10 functions use `sb`
-to write to memory (at least in the glibc implementation). Only `memcpy()` writes
-on a word basis and is resistant to the grubby detection.
-
-Replacing `memcpy()` by a byte by byte implementation is not an option, because
-`memcpy()` may be used for legal copies of function pointers that may lead to false
-positives. So far, no other false positives are known, as long as no dirty hacks
-are used in the source code.
-
-### Comparison with Pulserain Rattlesnake
-
-The grubby detection is very similar to the _Dirty Address Trace_ (DAT) technique
-used by [Pulserain Rattlesnake](https://github.com/PulseRain/Rattlesnake). It
-also needs an additional bit per memory word and register. The dirty bit is set,
-if more than 8 consecutive writes to memory are detected. 
-
-DAT also covers word by word like `memcpy()` attacks, but it is vulnerable to attacks
-with short consecutive writes and contexts switches during a write sequence.
-I may be biased, but in my opinion, the DAT and grubby detection rate are roughly
-comparable. However, the hardware costs of the grubby detection are lower.
 
 
 
@@ -474,6 +387,20 @@ By default, the build scripts of RudolV expect that the external toolchains
 are in the search path (see [config_default.sh](config_default.sh). To set
 specific path for every tool, copy `config_default.sh` to `config.sh` and
 edit the paths there.
+
+
+
+
+History
+-------
+
+RudolV started as a submission to the
+[2018 RISC-V SoftCPU Contest](https://riscv.org/2018contest/) called Danzig.
+Also participating in the 
+[2019 RISC-V SoftCPU Contest on Security](https://riscv.org/2019/07/risc-v-softcpu-core-contest/)
+it made the 
+[third place](https://riscv.org/2019/10/announcing-the-winners-of-the-risc-v-soft-cpu-contest/)
+.
 
 
 
