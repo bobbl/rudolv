@@ -84,8 +84,55 @@ endmodule
 
 
 
+// Minimal set of counters: only one 32 bit cycle counter for
+// RDCYCLE, RDTIME and RDINSTRET
+//
+// To simplify logic, HPMCOUNTER3 also mirrors the counter
+//   0C00hex CYCLE        0C80hex 0
+//   0C01hex TIME         0C81hex 0
+//   0C02hex INSTRET      0C82hex 0
+//   0C03hex HPMCOUNTER3  0C83hex 0
+module CsrRDCYCLE32 (
+    input clk,
+    input rstn,
 
-// Counters from unpriv spec 2.2 and lower (RDCYCLE and RDINSTRET)
+    input read,
+    input [2:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = read | |modify | |wdata;
+
+    reg [31:0] q_RData;
+    assign rdata = q_RData;
+
+    // asynchronos in D stage: decode CSR address
+    wire Valid_w = (addr[11:8]==4'hC) & (addr[6:2]==0);
+    assign valid = Valid_w;
+
+    reg Sel_q;
+    reg [31:0] CounterCYCLE_q;
+
+    always @(posedge clk) begin
+        // E stage: read CSR
+        q_RData <= Sel_q ? CounterCYCLE_q : 32'b0;
+
+        // D stage: select CSR for next cycle
+        Sel_q <= Valid_w & ~addr[7];
+
+        // increment counters (spread over two cycles)
+        CounterCYCLE_q    <= rstn ? (CounterCYCLE_q + 1) : 32'b0;
+    end
+endmodule
+
+
+
+
+// Counters from unprivileged spec (RDCYCLE, RDTIME and RDINSTRET)
 module CsrCounter (
     input clk,
     input rstn,
@@ -157,6 +204,103 @@ module CsrCounter (
     end
 endmodule
 
+
+
+
+// Counters from unprileged and privileged spec (MCYCLE and MINSTRET)
+module CsrMCYCLE (
+    input clk,
+    input rstn,
+
+    input read,
+    input [2:0] modify,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    input retired,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = read | |modify | |wdata;
+
+    reg [31:0] q_RData;
+    assign rdata = q_RData;
+
+    // asynchronos in D stage: decode CSR address
+    wire SelCycleL_w   = (addr == 12'hB00) |     // MCYCLE
+                         (addr == 12'hC00) |     // CYCLE
+                         (addr == 12'hC01);      // TIME
+    wire SelCycleH_w   = (addr == 12'hB80) |     // MCYCLEH
+                         (addr == 12'hC80) |     // CYCLEH
+                         (addr == 12'hC81);      // TIMEH
+    wire SelInstRetL_w = (addr == 12'hB02) |     // MINSTRET
+                         (addr == 12'hC02);      // INSTRET
+    wire SelInstRetH_w = (addr == 12'hB82) |     // MINSTRETH
+                         (addr == 12'hC82);      // INSRETH
+    assign valid = SelCycleL_w | SelCycleH_w | SelInstRetL_w | SelInstRetH_w;
+
+    reg SelCycleL_q;
+    reg SelCycleH_q;
+    reg SelInstRetL_q;
+    reg SelInstRetH_q;
+
+    reg [32:0] CounterCYCLE_q;
+    reg [31:0] CounterCYCLEH_q;
+    reg [32:0] CounterINSTRET_q;
+    reg [31:0] CounterINSTRETH_q;
+
+    always @(posedge clk) begin
+        // E stage: read CSR
+        q_RData <= (SelCycleL_q   ? CounterCYCLE_q[31:0]   : 32'b0)
+                 | (SelCycleH_q   ? CounterCYCLEH_q        : 32'b0)
+                 | (SelInstRetL_q ? CounterINSTRET_q[31:0] : 32'b0)
+                 | (SelInstRetH_q ? CounterINSTRETH_q      : 32'b0);
+
+        // E stage: write CSR
+        if (modify==3'b001) begin // set and clear not supported
+            if (SelCycleL_q) CounterCYCLE_q <= wdata;
+            if (SelCycleL_q) CounterCYCLEH_q <= wdata;
+            if (SelInstRetL_q) CounterINSTRET_q <= wdata;
+            if (SelInstRetH_q) CounterINSTRETH_q <= wdata;
+
+            // The select signals are also valid for the read-only CSRs.
+            // Thats no problem, because the processor pipeline throws and
+            // exception if these CSR should be written and we never reach
+            // this point for a readonly CSR.
+        end
+
+// Full implementation with set and clear for one CSR (unnecessary)
+//        if (SelCycleL_q) begin
+//            case (modify)
+//                3'b001: CounterCYCLE_q <= wdata[COUNT-1:0]; // write
+//                3'b010: CounterCYCLE_q <= CounterCYCLE_q | wdata; // set
+//                3'b011: CounterCYCLE_q <= CounterCYCLE_q &~ wdata; // clear
+//                default: ;
+//            endcase
+//        end
+
+        // D stage: select CSR for next cycle
+        SelCycleL_q   <= SelCycleL_w;
+        SelCycleH_q   <= SelCycleH_w;
+        SelInstRetL_q <= SelInstRetL_w;
+        SelInstRetH_q <= SelInstRetH_w;
+
+        // increment counters (spread over two cycles)
+        CounterCYCLE_q    <= {1'b0, CounterCYCLE_q[31:0]} + 1;
+        CounterCYCLEH_q   <= CounterCYCLEH_q + {31'b0, CounterCYCLE_q[32]};
+        CounterINSTRET_q  <= {1'b0, CounterINSTRET_q[31:0]} + {32'b0, retired};
+        CounterINSTRETH_q <= CounterINSTRETH_q + {31'b0, CounterINSTRET_q[32]};
+
+        if (~rstn) begin
+            CounterCYCLE_q    <= 0;
+            CounterCYCLEH_q   <= 0;
+            CounterINSTRET_q  <= 0;
+            CounterINSTRETH_q <= 0;
+        end
+    end
+endmodule
 
 
 
@@ -430,6 +574,8 @@ module CsrUartChar #(
 endmodule
 
 
+
+
 // simple timer that raises an interrupt after a specified number of cycles
 module CsrTimerAdd #(
     parameter [11:0]  BASE_ADDR  = 12'hbc2,     // CSR address
@@ -493,6 +639,7 @@ module CsrTimerAdd #(
         end
     end
 endmodule
+
 
 
 
@@ -647,6 +794,98 @@ module CsrDefault #(
         .AVOID_WARNING()
     );
 endmodule
+
+
+
+
+// Same interface as CsrDefault, but not everything is implemented
+module CsrMinimal #(
+    parameter [31:0] ISA = 0,
+    parameter [31:0] VENDORID = 0,
+    parameter [31:0] ARCHID = 23,
+    parameter [31:0] IMPID = 0,
+    parameter [31:0] HARTID = 0,
+
+    parameter integer OUTPINS_COUNT = 4,
+    parameter integer CLOCK_RATE    = 12_000_000,
+    parameter integer BAUD_RATE     = 115200,
+    parameter integer TIMER_WIDTH   = 32,
+
+    parameter integer CSR_UART  = 12'hBC0,
+    parameter integer CSR_LEDS  = 12'hBC1,
+    parameter integer CSR_TIMER = 12'hBC2,
+    parameter integer CSR_KHZ   = 12'hFC0
+) (
+    input         clk,
+    input         rstn,
+
+    input         read,
+    input   [2:0] modify,
+    input  [31:0] wdata,
+    input  [11:0] addr,
+    output [31:0] rdata,
+    output        valid,
+
+    input         retired,
+    output [OUTPINS_COUNT-1:0] outpins,
+    input         rx,
+    output        tx,
+    output        irq_timer,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = rstn | read | |modify | |wdata;
+
+
+    wire        CounterValid;
+    wire [31:0] CounterRData;
+    wire        UartValid;
+    wire [31:0] UartRData;
+
+    assign rdata = CounterRData | UartRData;
+    assign valid = CounterValid | UartValid;
+
+    assign outpins = 0;
+    assign irq_timer = 0;
+
+    CsrRDCYCLE32 Counter (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (CounterRData),
+        .valid  (CounterValid),
+
+        .AVOID_WARNING()
+    );
+
+    CsrUartBitbang #(
+        .BASE_ADDR(CSR_UART),
+        .CLOCK_RATE(CLOCK_RATE),
+        .BAUD_RATE(BAUD_RATE)
+    ) UART (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .modify (modify),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (UartRData),
+        .valid  (UartValid),
+
+        .rx     (rx),
+        .tx     (tx),
+
+        .AVOID_WARNING()
+    );
+
+endmodule
+
+
 
 
 // SPDX-License-Identifier: ISC
