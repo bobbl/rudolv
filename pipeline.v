@@ -166,12 +166,12 @@ module Pipeline #(
     reg m_WrEn;
     reg [5:0] m_WrNo;
     reg [WORD_WIDTH-1:0] m_WrData;
-    reg [4:0] m_MemByte;
     reg MemSignedLoadM_q;
     reg [1:0] MemWidthM_q;
     reg [1:0] AddrOfsM_q;
     reg [WORD_WIDTH-1:0] MemRData_q;
     reg [WORD_WIDTH-1:0] MemWData_q;
+    //reg [WORD_WIDTH-1:0] MemRDataPrev_q;
     reg MemMisaligned_q;
     reg [WORD_WIDTH-1:0] AddrSum_q;
 
@@ -203,8 +203,6 @@ module Pipeline #(
     reg CsrFromExtE_q;
     reg CsrFromExtM_q;
     reg [WORD_WIDTH-1:0] CsrRDataInternal_q;
-
-
 
     reg f_MModeIntEnable;        // mstatus.mie
     reg f_MModePriorIntEnable;   // mstatus.mpie
@@ -670,7 +668,7 @@ module Pipeline #(
                 end
 
                 mcLoad: begin
-                    if (MemMisaligned) begin
+                    if (MemMisaligned_d) begin
                         BubbleD_d = 1;
                         AddrFromSum = 1;
                         MemWidth = e_MemWidth;
@@ -681,7 +679,7 @@ module Pipeline #(
                     end
                 end
                 mcStore: begin
-                    if (MemMisaligned) begin
+                    if (MemMisaligned_d) begin
                         BubbleD_d = 1;
                         AddrFromSum = 1;
                         MemStore = 1;
@@ -1486,10 +1484,6 @@ end
     wire MemWrEn        = m_WrEn | OverwriteM_q;
     wire [5:0] MemWrNo  = m_WrNo;
 
-    wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q ? MulDivResult_d : OverwriteValE_q;
-
-    wire [WORD_WIDTH-1:0] OverwrittenResult_w =
-        OverwriteM_q ? OverwriteValM_q : CsrResult_w;
 
 
 
@@ -1571,6 +1565,7 @@ end
             // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
             // e_A is a bypass from the execute stage of the next cycle
 
+/*
     wire [WORD_WIDTH-1:0] CsrResult_w =
         (CsrFromRegM_q ? e_A           : 0) |
         (CsrFromRegW_q ? m_CsrModified : 0) |
@@ -1578,108 +1573,171 @@ end
         ((CsrFromRegM_q | CsrFromRegW_q | CsrFromExtM_q)
             ? 0 : m_WrData);
 
+    wire [WORD_WIDTH-1:0] OverwrittenResult_w =
+        OverwriteM_q ? OverwriteValM_q : CsrResult_w;
+*/
+    wire [WORD_WIDTH-1:0] OverwrittenResult_w =
+        (CsrFromRegM_q ? e_A                              : 0) |
+        (CsrFromRegW_q ? m_CsrModified                    : 0) |
+        (CsrFromExtM_q ? (CsrRDataInternal_q | csr_rdata) : 0) |
+        (OverwriteM_q  ? OverwriteValM_q                  : 0) |
+
+        ((CsrFromRegM_q | CsrFromRegW_q | CsrFromExtM_q | OverwriteM_q)
+                       ? 0 : m_WrData);
 
 
 
 
 
+    wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q
+        ? MulDivResult_d
+        : OverwriteValE_q;
 
-    // memory signals, generated in execute stage
+
+
+
+
+    // memory stage
 
     wire [1:0] AddrOfs = AddrSum_w[1:0];
     //wire [1:0] AddrOfs = {
     //    e_A[1] ^ Imm12PlusReg_q[1] ^ (e_A[0] & Imm12PlusReg_q[0]),
     //    e_A[0] ^ Imm12PlusReg_q[0]};
 
-    reg [12:0] MemSignals;
+    reg MemMisaligned_d;
     always @* case ({e_MemWidth, AddrOfs})
-        4'b0000: MemSignals = 13'b0_00010_001_0001;
-        4'b0001: MemSignals = 13'b0_00100_110_0010;
-        4'b0010: MemSignals = 13'b0_00011_001_0100;
-        4'b0011: MemSignals = 13'b0_00101_110_1000;
-        4'b0100: MemSignals = 13'b0_01010_100_0011;
-        4'b0101: MemSignals = 13'b0_00000_000_0110;
-        //                          ^^^^^^^^^ don't care
-        4'b0110: MemSignals = 13'b0_01011_100_1100;
-        4'b0111: MemSignals = 13'b1_00000_000_1000;
-        4'b1000: MemSignals = 13'b0_11010_000_1111;
-        4'b1001: MemSignals = 13'b1_00000_000_1110;
-        4'b1010: MemSignals = 13'b1_00000_000_1100;
-        4'b1011: MemSignals = 13'b1_00000_000_1000;
-        default: MemSignals = 0;
+        4'b0000: MemMisaligned_d = 0;
+        4'b0001: MemMisaligned_d = 0;
+        4'b0010: MemMisaligned_d = 0;
+        4'b0011: MemMisaligned_d = 0;
+        4'b0100: MemMisaligned_d = 0;
+        4'b0101: MemMisaligned_d = 0;
+        4'b0110: MemMisaligned_d = 0;
+        4'b0111: MemMisaligned_d = 1; // lh +3
+        4'b1000: MemMisaligned_d = 0;
+        4'b1001: MemMisaligned_d = 1; // lw +1
+        4'b1010: MemMisaligned_d = 1; // lw +2
+        4'b1011: MemMisaligned_d = 1; // lw +3
+        default: MemMisaligned_d = 0;
     endcase
 
-    wire MemMisaligned = MemSignals[12] & ~m_Kill;
-    wire [4:0] MemByte = m_Kill ? 5'b0 : MemSignals[11:7];
+    wire MemSigned2_w =         // LH                LB
+        ((MemWidthM_q[0] ? (AddrOfsM_q==3) : (AddrOfsM_q==0)) & mem_rdata[7]) |
+        ((MemWidthM_q[0] ? (AddrOfsM_q==0) : (AddrOfsM_q==1)) & mem_rdata[15]) |
+        ((MemWidthM_q[0] ? (AddrOfsM_q==1) : (AddrOfsM_q==2)) & mem_rdata[23]) |
+        ((MemWidthM_q[0] ? (AddrOfsM_q==2) : (AddrOfsM_q==3)) & mem_rdata[31]);
+    wire MemSigned_w = MemSignedLoadM_q & MemSigned2_w;
 
 
 
-    // memory stage
 
-    reg [26:0] MemSel_w;
+
+/*
+    reg [3:0] SelCurMemByte_d;
     always @* case ({MemWidthM_q, AddrOfsM_q})
-        4'b0000: MemSel_w = 27'b000_0001_110000_000000_00000001;
-        4'b0001: MemSel_w = 27'b000_0010_110000_000000_00000010;
-        4'b0010: MemSel_w = 27'b000_0100_110000_000000_00000100;
-        4'b0011: MemSel_w = 27'b000_1000_110000_000000_00001000;
-        4'b0100: MemSel_w = 27'b000_0010_100000_000010_00000001;
-        4'b0101: MemSel_w = 27'b000_0100_100000_000100_00000010;
-        4'b0110: MemSel_w = 27'b000_1000_100000_001000_00000100;
-        4'b0111: MemSel_w = 27'b001_0001_100000_000001_10000000;
-        4'b1000: MemSel_w = 27'b000_0000_000001_000010_00000001;
-        4'b1001: MemSel_w = 27'b001_0000_000010_010000_00100000;
-        4'b1010: MemSel_w = 27'b011_0000_000100_100000_01000000;
-        4'b1011: MemSel_w = 27'b111_0000_001000_000001_10000000;
+        4'b0000: SelCurMemByte_d = 4'b0001;
+        4'b0001: SelCurMemByte_d = 4'b0001;
+        4'b0010: SelCurMemByte_d = 4'b0001;
+        4'b0011: SelCurMemByte_d = 4'b0001;
+        4'b0100: SelCurMemByte_d = 4'b0011;
+        4'b0101: SelCurMemByte_d = 4'b0011;
+        4'b0110: SelCurMemByte_d = 4'b0011;
+        4'b0111: SelCurMemByte_d = 4'b0010; // lh +3
+        4'b1000: SelCurMemByte_d = 4'b1111;
+        4'b1001: SelCurMemByte_d = 4'b1000; // lw +1
+        4'b1010: SelCurMemByte_d = 4'b1100; // lw +2
+        4'b1011: SelCurMemByte_d = 4'b1110; // lw +3
+        default: SelCurMemByte_d = 0;
+    endcase
+
+    wire [31:0] MemRShiftedBy1_w = AddrOfsM_q[1]
+        ? {mem_rdata[15:0], mem_rdata[31:16]}
+        :  mem_rdata;
+    wire [31:0] MemRShifted_w = AddrOfsM_q[0]
+        ? {MemRShiftedBy1_w[7:0], MemRShiftedBy1_w[31:8]}
+        :  MemRShiftedBy1_w;
+
+    reg [31:0] MemSignOrPrev_w;
+    always @* begin
+        MemSignOrPrev_w[31:24] = MemSigned_w
+            ? 8'hFF
+            : OverwrittenResult_w[31:24];
+        MemSignOrPrev_w[23: 8] = (MemWidthM_q==2)
+            ? MemRDataPrev_q[23:8]
+            : (MemSigned_w ? 16'hFFFF
+                           : OverwrittenResult_w[23:8]);
+        MemSignOrPrev_w[ 7: 0] = (MemWidthM_q!=3)
+            ? MemRDataPrev_q[7:0]
+            : OverwrittenResult_w[7:0];
+    end
+
+    wire [31:0] MemResult = {
+        SelCurMemByte_d[3] ? MemRShifted_w[31:24] : MemSignOrPrev_w[31:24],
+        SelCurMemByte_d[2] ? MemRShifted_w[23:16] : MemSignOrPrev_w[23:16],
+        SelCurMemByte_d[1] ? MemRShifted_w[15: 8] : MemSignOrPrev_w[15: 8],
+        SelCurMemByte_d[0] ? MemRShifted_w[ 7: 0] : MemSignOrPrev_w[ 7: 0]};
+*/
+
+
+    reg [11:0] MemSel_w;
+    always @* case ({MemWidthM_q, AddrOfsM_q})
+        4'b0000: MemSel_w = 12'b00_000000_0001;
+        4'b0001: MemSel_w = 12'b00_000000_0010;
+        4'b0010: MemSel_w = 12'b00_000000_0100;
+        4'b0011: MemSel_w = 12'b00_000000_1000;
+        4'b0100: MemSel_w = 12'b00_000010_0001;
+        4'b0101: MemSel_w = 12'b00_000100_0010;
+        4'b0110: MemSel_w = 12'b00_001000_0100;
+        4'b0111: MemSel_w = 12'b00_000001_0000;
+        4'b1000: MemSel_w = 12'b01_000010_0001;
+        4'b1001: MemSel_w = 12'b00_010000_0000;
+        4'b1010: MemSel_w = 12'b00_100000_0000;
+        4'b1011: MemSel_w = 12'b10_000001_0000;
         default: MemSel_w = 0;
     endcase
-
-    wire MemSigned_w  = ((MemSel_w[20] & mem_rdata[7])
-                      | (MemSel_w[21] & mem_rdata[15])
-                      | (MemSel_w[22] & mem_rdata[23])
-                      | (MemSel_w[23] & mem_rdata[31])) 
-                      & MemSignedLoadM_q & ~m_Kill;
-    wire MemSigned0_w = MemSel_w[18] & MemSigned_w;
-    wire MemSigned1_w = MemSel_w[19] & MemSigned_w;
 
     wire  [7:0] LoByte0_w = (MemSel_w[0] ? mem_rdata[7:0] : 8'b0)
                           | (MemSel_w[1] ? mem_rdata[15:8] : 8'b0);
     wire  [7:0] LoByte1_w = (MemSel_w[2] ? mem_rdata[23:16] : 8'b0)
                           | (MemSel_w[3] ? mem_rdata[31:24] : 8'b0);
-    wire  [7:0] LoByte2_w = /*(MemSel_w[4] ?*/ OverwrittenResult_w[7:0]
-                          | (MemSel_w[5] ? MemRData_q[15:8] : 8'b0);
-    wire  [7:0] LoByte3_w = (MemSel_w[6] ? MemRData_q[23:16] : 8'b0)
-                          | (MemSel_w[7] ? MemRData_q[31:24] : 8'b0);
+    wire  [7:0] LoByte2_w = OverwrittenResult_w[7:0]
+                          | (MemSel_w[8] ? MemRData_q[15:8] : 8'b0);
+    wire  [7:0] LoByte3_w = (MemSel_w[9] ? MemRData_q[23:16] : 8'b0)
+                          | (MemSel_w[4] ? MemRData_q[31:24] : 8'b0);
     wire  [7:0] LoByte    = LoByte0_w | LoByte1_w | LoByte2_w | LoByte3_w;
 
-    wire  [7:0] HiByte0_w = (MemSel_w[8] ? mem_rdata[7:0] : 8'b0)
-                          | (MemSel_w[9] ? mem_rdata[15:8] : 8'b0);
-    wire  [7:0] HiByte1_w = (MemSel_w[10] ? mem_rdata[23:16] : 8'b0)
-                          | (MemSel_w[11] ? mem_rdata[31:24] : 8'b0);
-    wire  [7:0] HiByte2_w = (MemSel_w[12] ? MemRData_q[23:16] : 8'b0)
-                          | (MemSel_w[13] ? MemRData_q[31:24] : 8'b0);
-    wire  [7:0] HiByte3_w = MemSigned0_w ? 8'hFF : OverwrittenResult_w[15:8];
+    wire  [7:0] HiByte0_w = (MemSel_w[4] ? mem_rdata[7:0] : 8'b0)
+                          | (MemSel_w[5] ? mem_rdata[15:8] : 8'b0);
+    wire  [7:0] HiByte1_w = (MemSel_w[6] ? mem_rdata[23:16] : 8'b0)
+                          | (MemSel_w[7] ? mem_rdata[31:24] : 8'b0);
+    wire  [7:0] HiByte2_w = (MemSel_w[8] ? MemRData_q[23:16] : 8'b0)
+                          | (MemSel_w[9] ? MemRData_q[31:24] : 8'b0);
+    wire  [7:0] HiByte3_w = ((MemWidthM_q==0) & MemSigned_w)
+                          ? 8'hFF : OverwrittenResult_w[15:8];
     wire  [7:0] HiByte    = HiByte0_w | HiByte1_w | HiByte2_w | HiByte3_w;
 
-    wire  [15:0] HiHalf0_w = (MemSel_w[14] ? mem_rdata[31:16] : 16'b0)
-                           | (MemSel_w[15] ? {mem_rdata[7:0], MemRData_q[31:24]} : 16'b0);
-    wire  [15:0] HiHalf1_w = (MemSel_w[16] ? mem_rdata[15:0] : 16'b0)
-                           | (MemSel_w[17] ? mem_rdata[23:8] : 16'b0);
-    wire  [15:0] HiHalf3_w = MemSigned1_w ? 16'hFFFF : OverwrittenResult_w[31:16];
+    wire  [15:0] HiHalf0_w = (MemSel_w[10] ? mem_rdata[31:16] : 16'b0)
+                           | (MemSel_w[8] ? {mem_rdata[7:0], MemRData_q[31:24]} : 16'b0);
+    wire  [15:0] HiHalf1_w = (MemSel_w[9] ? mem_rdata[15:0] : 16'b0)
+                           | (MemSel_w[11] ? mem_rdata[23:8] : 16'b0);
+    wire  [15:0] HiHalf3_w = (~MemWidthM_q[1] & MemSigned_w)
+                           ? 16'hFFFF : OverwrittenResult_w[31:16];
     wire  [15:0] HiHalf    = HiHalf0_w | HiHalf1_w | HiHalf3_w;
-
-
-
 
     wire [31:0] MemResult = {HiHalf, HiByte, LoByte};
 
-    reg [3:0] MemWMask_d;
+
+
+
+
+
+
+
     reg [WORD_WIDTH-1:0] MemWData_d;
     always @* begin
         if (MemMisaligned_q) begin
-            MemWMask_d = {1'b0, MemSel_w[26:24]};
             MemWData_d = MemWData_q;
         end else begin
-            MemWMask_d = MemSignals[3:0];
             case (AddrOfs)
                 2'b01: MemWData_d = {e_B[23:0], e_B[31:24]};
                 2'b10: MemWData_d = {e_B[15:0], e_B[31:16]};
@@ -1688,6 +1746,46 @@ end
             endcase
         end
     end
+
+    reg [3:0] MemWMask_d;
+    always @* begin
+        if (MemMisaligned_q) begin
+/*
+            case ({MemWidthM_q[0], AddrOfsM_q})
+                3'b111: MemWMask_d = 4'b0001;
+                3'b001: MemWMask_d = 4'b0001;
+                3'b010: MemWMask_d = 4'b0011;
+                3'b011: MemWMask_d = 4'b0111;
+                // other cases don't care, because there won't be
+                // a second memory access cycle
+                default: MemWMask_d = 4'b0001;
+            endcase
+*/
+        MemWMask_d = {1'b0,
+                      ~MemWidthM_q[0] & AddrOfsM_q[1] & AddrOfsM_q[0],
+                      ~MemWidthM_q[0] & AddrOfsM_q[1],
+                      1'b1};
+        end else begin
+            case ({e_MemWidth, AddrOfs})
+                4'b0000: MemWMask_d = 4'b0001;
+                4'b0001: MemWMask_d = 4'b0010;
+                4'b0010: MemWMask_d = 4'b0100;
+                4'b0011: MemWMask_d = 4'b1000;
+                4'b0100: MemWMask_d = 4'b0011;
+                4'b0101: MemWMask_d = 4'b0110;
+                4'b0110: MemWMask_d = 4'b1100;
+                4'b0111: MemWMask_d = 4'b1000;
+                4'b1000: MemWMask_d = 4'b1111;
+                4'b1001: MemWMask_d = 4'b1110;
+                4'b1010: MemWMask_d = 4'b1100;
+                4'b1011: MemWMask_d = 4'b1000;
+                default: MemWMask_d = 0;
+            endcase
+        end
+    end
+
+
+
 
     assign mem_valid = 1;
     assign mem_write = e_MemStore & ~m_Kill;
@@ -1797,7 +1895,6 @@ end
         m_WrNo <= ExecuteWrNo;
         m_WrData <= ALUResult;
         m_Kill <= Kill;
-        m_MemByte <= MemByte;
 
         MemSignedLoadM_q    <= MemMisaligned_q ? MemSignedLoadM_q : ~e_InsnBit14;
         MemWidthM_q         <= MemMisaligned_q ? MemWidthM_q :
@@ -1806,7 +1903,8 @@ end
         AddrSum_q           <= AddrSum_w;
         MemRData_q          <= mem_rdata;
         MemWData_q          <= MemWData_d;
-        MemMisaligned_q     <= MemMisaligned;
+        MemMisaligned_q     <= MemMisaligned_d; // & ~m_Kill;
+        //MemRDataPrev_q      <= MemRShifted_w;
 
         // mem stage
         w_WrEn <= MemWrEn;
@@ -1940,8 +2038,8 @@ end
 
         $display("M e_MemWidth=%b AddrOfs=%b RealignedPC_d=%b MemAddr=%h FetchAgainE_q=%b",
             e_MemWidth, AddrOfs, RealignedPC_d, MemAddr, FetchAgainE_q);
-        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemSel_w=%b MemMisaligned_q=%b",
-            MemWidthM_q, AddrOfsM_q, MemSel_w, MemMisaligned_q);
+        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemMisaligned_q=%b",
+            MemWidthM_q, AddrOfsM_q, MemMisaligned_q);
         $display("X OverwriteDEM=%b%b%b ValDEM=%h %h %h SelE=%b",
             Overwrite_d, OverwriteE_q, OverwriteM_q,
             OverwriteVal_d, OverwriteValE_q, OverwriteValM_q,
@@ -1954,9 +2052,6 @@ end
 //            DestReg0Part, DisableWrite, EnableWrite2, DecodeWrEn, ExecuteWrEn, MemWrEn);
         $display("X OverwrittenResult_w=%h",
             OverwrittenResult_w);
-//        $display("  MemWidth=%b e_MemWidth=%b m_MemByte=%b m_MemSign=%b",
-//            MemWidth, e_MemWidth,  m_MemByte, m_MemSign);
-
 
         $display("I MIE=%b MPIE=%b Software=%b Timer=%b External=%b IRdq=%b%b",
             f_MModeIntEnable, f_MModePriorIntEnable, 
