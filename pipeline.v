@@ -90,6 +90,7 @@ module Pipeline #(
     // decode
     reg [31:0] Insn_q;
     reg [31:0] InsnE_q;
+    reg [31:0] InsnM_q;
     reg [5:0] d_RdNo1;
     reg [5:0] d_RdNo2;
 
@@ -184,6 +185,7 @@ module Pipeline #(
     reg RetiredM_q;
 
     // exceptions
+    reg [WORD_WIDTH-1:0] PrevPC_q;
     reg OverwriteE_q;
     reg [WORD_WIDTH-1:0] OverwriteValE_q;
     reg OverwriteM_q;
@@ -191,6 +193,7 @@ module Pipeline #(
     reg OverwriteSelE_q;
     reg InsnMRET_E_q;
     reg InsnMRET_M_q;
+    reg ExcInvalidInsn_q;
 
     // CSRs for exceptions
     reg [WORD_WIDTH-1:0] m_CsrUpdate;
@@ -572,6 +575,7 @@ module Pipeline #(
         SelDivOrMul_d   = SelDivOrMul_q;
         SelMulLowOrHigh_d = SelMulLowOrHigh_q;
 
+
         if (m_Kill) begin
             FetchAddr_d = FetchAddr_q + 4; // continue fetching
             PC_d = FetchAddr_q;
@@ -583,6 +587,17 @@ module Pipeline #(
                 MCState_d = mcUnalignedJump;
             end
             ExcInvalidInsn = 0;
+
+        end else if (ExcInvalidInsn_q) begin
+            ExcInvalidInsn = 0;
+            Overwrite_d = 1;
+            OverwriteVal_d = PrevPC_q;
+            DecodeWrNo = REG_CSR_MEPC;
+            RdNo1 = REG_CSR_MTVEC;
+            MC_d = 1;
+            MCState_d = mcException;
+            MCAux_d = 6'h02 + 1;
+            TrapEnter_d = 1;
 
         // microcoded cycles of multi-cycle instructions
         end else if (MC_q) begin
@@ -626,7 +641,7 @@ module Pipeline #(
                         OverwriteVal_d = OverwriteValE_q;
                     end else if (MCAux_q==(6'h02 + 1)) begin
                         // Illegal instruction exception: MTVAL=insn
-                        OverwriteVal_d = InsnE_q;
+                        OverwriteVal_d = InsnM_q;
                     end else begin
                         OverwriteVal_d = 0;
                     end
@@ -1073,17 +1088,6 @@ module Pipeline #(
             RetiredD_d = ~ExcInvalidInsn;
         end
 
-        // OPTIMISE
-        if (ExcInvalidInsn) begin
-            Overwrite_d = 1;
-            OverwriteVal_d = PC_q;
-            DecodeWrNo = REG_CSR_MEPC;
-            RdNo1 = REG_CSR_MTVEC;
-            MC_d = 1;
-            MCState_d = mcException;
-            MCAux_d = 6'h02 + 1;
-            TrapEnter_d = 1;
-        end
 
 
         ////////////
@@ -1823,6 +1827,8 @@ end
         Insn_q <= Insn_d;
         InsnE_q <= (Insn_q[1:0]==2'b11) ? Insn_q : {16'b0, Insn_q[15:0]};
             // only for illegal exception
+        InsnM_q <= InsnE_q;
+
         d_RdNo1 <= RdNo1;
         d_RdNo2 <= RdNo2;
         CsrTranslateE_q <= CsrTranslateD_d;
@@ -1915,6 +1921,7 @@ end
         RetiredE_q <= RetiredD_d;
 
         // exception handling
+        PrevPC_q            <= PC_q;
         OverwriteE_q        <= Overwrite_d;
         OverwriteValE_q     <= OverwriteVal_d;
         OverwriteM_q        <= OverwriteE_q;
@@ -1922,6 +1929,7 @@ end
         OverwriteSelE_q     <= OverwriteSelD_d;
         InsnMRET_E_q        <= InsnMRET_d;
         InsnMRET_M_q        <= InsnMRET_E_q;
+        ExcInvalidInsn_q    <= ExcInvalidInsn;
 
         // csr
         m_CsrUpdate         <= CsrUpdate;
@@ -2168,7 +2176,8 @@ end
 
         RvfiRetireMisLoadW_q <= RvfiRetireMisLoadM_d;
         RvfiInsnM_q     <= InsnE_q;
-        RvfiTrapM_q     <= (RvfiTrapE_q         // illegal instruction
+//        RvfiTrapM_q     <= (RvfiTrapE_q         // illegal instruction
+        RvfiTrapM_q     <= (ExcInvalidInsn_q         // illegal instruction
                             | (MC_q && MCState_q==mcWFI)) & ~m_Kill;    // WFI insn
         RvfiTrapE_q     <= ExcInvalidInsn;
         RvfiIntrM_q     <= RvfiIntrE_q; // long delay (jump to MTVEC)
