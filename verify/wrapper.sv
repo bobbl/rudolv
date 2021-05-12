@@ -1,6 +1,6 @@
 // BRAM with preinit for x0, parity bit for grubby
 // Xilinx, Icarus
-module RegSet33(
+module RegSet32(
     input             clk,
     input             we,
     input       [5:0] wa,
@@ -13,7 +13,7 @@ module RegSet33(
     output reg [31:0] rd2,
     output reg        rg2
 );
-    reg [32:0] regs [0:63];
+    reg [31:0] regs [0:63];
 
     integer i;
     initial begin
@@ -22,11 +22,11 @@ module RegSet33(
     end
 
     always @(posedge clk) begin
-        if (we && wa!=0) regs[wa] <= {wg, wd};
-        rd1 <= regs[ra1][31:0];
-        rg1 <= 0; //regs[ra1][32]; no grubby exception
-        rd2 <= regs[ra2][31:0];
-        rg2 <= 0; //regs[ra2][32]; no grubby exception
+        if (we && wa!=0) regs[wa] <= wd;
+        rd1 <= regs[ra1];
+        rd2 <= regs[ra2];
+        rg1 <= 0;
+        rg2 <= 0;
     end
 endmodule
 
@@ -106,7 +106,7 @@ module rvfi_wrapper (
         `RVFI_CONN
     );
 
-    RegSet33 RegSet (
+    RegSet32 RegSet (
         .clk    (clock),
         .we     (regset_we),
         .wa     (regset_wa),

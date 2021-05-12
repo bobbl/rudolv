@@ -391,8 +391,7 @@ trap_disable_softint:
         csrr    x20, mcause
         xor     x7, x7, x20
         add     x7, x7, 1
-        mret
-
+        j       skip_wfi
 
 trap_disable_ie:
         li      x20, 0x80       # MSTATUS.MPIE=0 disable ints after return
@@ -400,7 +399,18 @@ trap_disable_ie:
         csrr    x20, mcause
         xor     x7, x7, x20
         add     x7, x7, 1
-        mret
+
+# If trap response is so fast that execution is interruptet before the wfi,
+# the wfi will wait forever. Skip wfi in this case to avoid that.
+
+skip_wfi:
+        csrr    x21, mepc
+        lw      x22, 0(x21)             # read insn at return address
+        li      x23, 0x10500073         # wfi opcode
+        bne     x22, x23, 1f
+        add     x21, x21, 4             # if wfi, jump to next insn
+        csrw    mepc, x21
+1:      mret
 
 
 trap_disable_timer:
