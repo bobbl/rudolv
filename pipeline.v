@@ -142,8 +142,6 @@ module Pipeline #(
     reg e_ReturnPC;
     reg e_ReturnUI;
     reg e_BranchUncondPCRel;
-    reg ReturnA_q;
-    reg ReturnB_q;
 
     reg e_SetCond;
     reg e_LTU;
@@ -154,7 +152,6 @@ module Pipeline #(
     reg [1:0] e_MemWidth;
 
     reg [WORD_WIDTH-1:0] e_A;
-reg [WORD_WIDTH-1:0] m_A;
     reg [WORD_WIDTH-1:0] e_B;
     reg [WORD_WIDTH-1:0] ImmUpper_q;
     reg [11:0] Imm12PlusReg_q;
@@ -163,9 +160,6 @@ reg [WORD_WIDTH-1:0] m_A;
     reg e_NegB;
     reg e_WrEn;
     reg [5:0] e_WrNo;
-
-    reg  e_InsnBit14;
-    wire e_CsrSelImm       = e_InsnBit14;
 
     // mem stage
     reg m_Kill; // to decode and execute stage
@@ -201,13 +195,8 @@ reg [WORD_WIDTH-1:0] m_A;
     reg ExcInvalidInsn_q;
 
     // CSRs for exceptions
-    reg [WORD_WIDTH-1:0] m_CsrUpdate;
-    reg [1:0] e_CsrOp;
-    reg [1:0] m_CsrOp;
-    reg [WORD_WIDTH-1:0] m_CsrModified;
-    reg CsrFromRegE_q;
-    reg CsrFromRegM_q;
-    reg CsrFromRegW_q;
+    reg [1:0] CsrOpM_q;
+    reg [1:0] CsrOpW_q;
     reg CsrFromExtE_q;
     reg CsrFromExtM_q;
     reg [WORD_WIDTH-1:0] CsrRDataInternal_q;
@@ -435,7 +424,7 @@ reg [WORD_WIDTH-1:0] m_A;
 
 
     localparam [7:0] mcNop = 11;
-    localparam [7:0] mcCsr = 1;
+    localparam [7:0] mcCsrExt3 = 1;
     localparam [7:0] mcMem = 2;
     localparam [7:0] mcWFI = 3;
     localparam [7:0] mcJumpReg = 4;
@@ -449,8 +438,10 @@ reg [WORD_WIDTH-1:0] m_A;
     localparam [7:0] mcStore = 13;
     localparam [7:0] mcSystem = 14;
     localparam [7:0] mcCEBREAK = 15;
-    localparam [7:0] mcCsrReg1 = 16;
-    localparam [7:0] mcCsrReg2 = 17;
+    localparam [7:0] mcCsrReg3 = 16;
+    localparam [7:0] mcCsrReg4 = 17;
+    localparam [7:0] mcCsr2 = 18;
+    localparam [7:0] mcTrap2 = 19;
 
 
     // Fetching
@@ -475,7 +466,6 @@ reg [WORD_WIDTH-1:0] m_A;
 
     reg InsnCSR;
     reg CsrFromExtD_d;
-    reg [1:0] CsrOp;
     reg BubbleD_d;
 
     reg InsnBEQ;
@@ -492,19 +482,15 @@ reg [WORD_WIDTH-1:0] m_A;
     reg vSelImm;
     reg [1:0] SelLogic;
     reg ReturnUI;
-    reg ReturnA_d;
-    reg ReturnB_d;
 
     reg AddrFromSum;
     reg MemStore;
     reg [1:0] MemWidth;
 
-    reg [5:0] ModRdNo1;
     reg MC_d;
     reg [7:0] MCState_d;
     reg [5:0] MCAux_d;
     reg [4:0] MCRegNo_d;
-    reg RdNo2ForceTmp_v;
 
     reg [WORD_WIDTH-1:0] ImmUpper_d;
     reg [11:0] Imm12PlusReg_d;
@@ -537,12 +523,12 @@ reg [WORD_WIDTH-1:0] m_A;
         OddPC_d = OddPC_q;
         RealignedPC_d = 0;
         RdNo1 = 0;
+        RdNo2 = 0;
         RVCInsn_w = 0;
         FetchAgainD_d = 0;
 
         InsnCSR = 0;
         CsrFromExtD_d = 0;
-        CsrOp = 0;
         BubbleD_d = 0;
 
         InsnBEQ         = 0;
@@ -561,19 +547,15 @@ reg [WORD_WIDTH-1:0] m_A;
         vSelImm         = 0;
         SelLogic        = 2'b01;
         ReturnUI        = 0;
-        ReturnA_d       = 0;
-        ReturnB_d       = 0;
 
         AddrFromSum     = 0;
         MemStore        = 0;
         MemWidth        = 2'b11; // no memory access
 
-        ModRdNo1        = 0; // don't change the register read in the next cycle
         MC_d            = 0;
         MCState_d       = 0;
         MCAux_d         = MCAux_q - 1;
         MCRegNo_d       = MCRegNo_q;
-        RdNo2ForceTmp_v = 0;
 
         ImmUpper_d       = ImmUpper_w; // used for AUIPC, LUI, C.LUI, C.LI and CSR
         Imm12PlusReg_d  = Imm12PlusReg_w; // used for memory accesses and JALR
@@ -603,7 +585,6 @@ reg [WORD_WIDTH-1:0] m_A;
             ExcInvalidInsn = 0;
 
         end else if (ExcInvalidInsn_q) begin
-//$display("DEBUG ILL");
             ExcInvalidInsn = 0;
             Overwrite_d = 1;
             OverwriteVal_d = PrevPC_q;
@@ -616,21 +597,15 @@ reg [WORD_WIDTH-1:0] m_A;
 
         // microcoded cycles of multi-cycle instructions
         end else if (MC_q) begin
-//$display("DEBUG MC");
             ExcInvalidInsn = 0;
             case (MCState_q)
                 mcNop: begin
                 end
-                mcCsr: begin // 2nd cycle of CSR access
-                    DecodeWrEn     = CsrFromRegE_q;
-                    DecodeWrNo     = {1'b1, CsrTranslateE_q};
-
+                mcCsrExt3: begin // 3rd cycle of external CSR access
                     FetchAgainD_d = 1;
                     BubbleD_d = 1;
                     MC_d = 1;
                     MCState_d = mcNop;
-
-
                 end
                 mcMem: begin // 2nd cycle of memory access
                     FetchAgainD_d = 1;
@@ -728,83 +703,76 @@ reg [WORD_WIDTH-1:0] m_A;
                     end
                 end
 
-                mcCsrReg1: begin // 3rd cycle of CSR access: mv rd, csr
+                mcCsrReg3: begin // 3rd cycle of CSR access
+                                 // or rd, csr, x0
                     DecodeWrEn = (MCRegNo_q!=0); // OPTIMISE
                     DecodeWrNo = {1'b0, MCRegNo_q};
+                    SelLogic = 2'b10; // 
 
-                    ReturnA_d = 1;
-                    RdNo1 = {1'b1, CsrTranslateE_q};
-                    RdNo2ForceTmp_v = 1;
+                    RdNo1 = CsrOpM_q[1]
+                        ? {1'b1, CsrTranslateE_q} // CSRS, CSRC
+                        : 0; // CSRW
+                    RdNo2 = REG_CSR_TMP;
 
                     FetchAgainD_d = 1;
                     BubbleD_d = 1;
                     MC_d = 1;
-                    MCState_d = mcCsrReg2;
+                    MCState_d = mcCsrReg4;
                 end
 
-                mcCsrReg2: begin // 4th cycle of CSR access: mod csr, csr, tmp
+                mcCsrReg4: begin // 4th cycle of CSR access
+                                 // CSRW: or csr, x0, tmp
+                                 // CSRS: or csr, csr, tmp
+                                 // CSRC: and csr, csr, not tmp
                     DecodeWrEn = 1;
                     DecodeWrNo = {1'b1, CsrTranslateM_q};
-                    case (m_CsrOp)
-                        2'b01: begin // CSRW
-                            ReturnB_d = 1;
-                        end
-                        2'b10: begin // CSRS
-                            SelLogic = 2'b10;
-                        end
-                        2'b11: begin // CSRC
-                            SelLogic = 2'b11;
-                            NegB = 1;
-                        end
-                        default: begin
-                            DecodeWrEn = 0;
-                        end
-                    endcase
+
+                    SelLogic = {1'b1, CsrOpW_q[0] & CsrOpW_q[1]};
+                        // and for CSRC, or for CSRS and CSRW
+                    NegB = CsrOpW_q[0] & CsrOpW_q[1];
+                        // not for CSRC
                 end
 
-                mcSystem: begin // system
+                mcCsr2: begin // CSR access
+                    BubbleD_d = 1;
+                    OverwriteVal_d = InsnE_q[14]
+                        ? {{(WORD_WIDTH-5){1'b0}}, InsnE_q[19:15]}
+                        : e_A;
+
+                    if (CsrFromReg_w) begin
+                        Overwrite_d = 1;
+                        DecodeWrEn = 1; // required for forwarding
+                        DecodeWrNo = REG_CSR_TMP;
+
+                        RdNo1          = {1'b1, CsrTranslateD_d};
+                        RdNo2          = 0;
+                        MC_d           = 1;
+                        MCState_d      = mcCsrReg3;
+                    end else if (CsrValid_w) begin
+                        CsrFromExtD_d  = e_WrEn & CsrValid_w & (MCRegNo_q!=0);
+                        DecodeWrEn     = (MCRegNo_q!=0);
+                        DecodeWrNo     = {1'b0, MCRegNo_q}; // InsnE_q also possible
+                        InsnCSR        = 1;
+                        MC_d           = 1;
+                        MCState_d      = mcCsrExt3;
+                    end else begin
+                        Overwrite_d = 1;
+                        OverwriteVal_d = PrevPC_q; 
+                            // therefore ExcInvalidInsn=1 cannot be used
+                        DecodeWrNo = REG_CSR_MEPC;
+                        RdNo1 = REG_CSR_MTVEC;
+                        MC_d = 1;
+                        MCState_d = mcException;
+                        MCAux_d = 6'h02 + 1;
+                        TrapEnter_d = 1;
+                    end
+                end
+
+                mcTrap2: begin
                     BubbleD_d = 1;
                     MC_d = 1;
                     MCState_d = mcNop;
-                    ExcInvalidInsn = 1;
-                    if (InsnE_q[13] | InsnE_q[12]) begin // RVZicsr
-                        if (~InsnE_q[31] | ~InsnE_q[30] // rw-CSR or
-                            | (InsnE_q[13] & (InsnE_q[19:15]==0))) // ro-CSR and CSRRS/C and rs1=0
-                        begin
-                            if (CsrFromRegD_d) begin
-                                ExcInvalidInsn = 0;
-                                CsrOp          = InsnE_q[13:12];
-
-                                if (InsnE_q[14]) begin // uimm instead of rs1
-                                    Overwrite_d = 1;
-                                    OverwriteVal_d = InsnE_q[19:15];
-                                    DecodeWrEn = 1; // required for forwarding
-                                    DecodeWrNo = REG_CSR_TMP;
-                                end
-
-                                RdNo1          = {1'b1, CsrTranslateD_d};
-                                MC_d           = 1;
-                                MCState_d      = mcCsrReg1;
-                            end else begin
-                                ExcInvalidInsn = ~CsrFromRegD_d & ~CsrValid_w;
-                                CsrFromExtD_d  = e_WrEn & CsrValid_w & (MCRegNo_q!=0);
-//                                DecodeWrEn     = e_WrEn & CsrFromRegD_d;
-//                                DecodeWrNo     = e_WrNo; <---
-                    DecodeWrEn = (MCRegNo_q!=0);
-                    DecodeWrNo = {1'b0, MCRegNo_q}; // InsnE_q also possible
-
-
-                                InsnCSR        = 1;
-                                CsrOp          = InsnE_q[13:12];
-                                RdNo1          = {1'b1, CsrTranslateD_d};
-                                MC_d           = 1;
-                                MCState_d      = mcCsr;
-                            end
-                        end
-                    end else begin
-                        if (InsnE_q[19:7]==0) begin
-                            ExcInvalidInsn = 0;
-                            case (InsnE_q[31:20])
+                    case (InsnE_q[31:20])
                                 12'h000: begin // ECALL
                                     Overwrite_d = 1;
                                     OverwriteVal_d = PrevPC_q;
@@ -847,24 +815,20 @@ reg [WORD_WIDTH-1:0] m_A;
                                     MC_d = 1;
                                     MCState_d = mcWFI;
                                 end
-                                default: begin
-                                    ExcInvalidInsn = 1;
-                                end
-                            endcase
+                        default: begin
+                            Overwrite_d = 1;
+                            OverwriteVal_d = PrevPC_q;
+                                // therefore ExcInvalidInsn=1 cannot be used
+                            DecodeWrNo = REG_CSR_MEPC;
+                            RdNo1 = REG_CSR_MTVEC;
+                            MC_d = 1;
+                            MCState_d = mcException;
+                            MCAux_d = 6'h02 + 1;
+                            TrapEnter_d = 1;
                         end
-                    end
-                    if (ExcInvalidInsn) begin
-                        ExcInvalidInsn = 0;
-                        Overwrite_d = 1;
-                        OverwriteVal_d = PrevPC_q;
-                        DecodeWrNo = REG_CSR_MEPC;
-                        RdNo1 = REG_CSR_MTVEC;
-                        MC_d = 1;
-                        MCState_d = mcException;
-                        MCAux_d = 6'h02 + 1;
-                        TrapEnter_d = 1;
-                    end
+                    endcase
                 end
+
 
                 mcCEBREAK: begin // C.EBREAK
                     // delay 1 cycle for same timing as EBREAK
@@ -910,7 +874,7 @@ reg [WORD_WIDTH-1:0] m_A;
             PC_d = PC_q + 4;
 
             DecodeWrEn = (Insn_q[11:7]!=0); // do not write to x0
-            DecodeWrNo = {CsrFromRegE_q, Insn_q[11:7]};
+            DecodeWrNo = {1'b0, Insn_q[11:7]};
 
             case (Insn_q[6:2])
                 5'b01101: begin // LUI
@@ -1008,16 +972,26 @@ reg [WORD_WIDTH-1:0] m_A;
                     BranchUncondPCRel = Insn_q[12];
                 end
                 5'b11100: begin // system
-                    ExcInvalidInsn = 0;
-
-                    ReturnA_d = 1;
-                    DecodeWrEn = 1;
-                    DecodeWrNo = REG_CSR_TMP;
+                    ExcInvalidInsn = 1;
                     MCRegNo_d = Insn_q[11:7];
 
-                    BubbleD_d = 1;
-                    MC_d = 1;
-                    MCState_d = mcSystem;
+                    if (Insn_q[13] | Insn_q[12]) begin // RVZicsr
+                        if (~Insn_q[31] | ~Insn_q[30] // rw-CSR or
+                            | (Insn_q[13] & (Insn_q[19:15]==0))) // ro-CSR and CSRRS/C and rs1=0
+                        begin
+                            ExcInvalidInsn = 0;
+                            BubbleD_d = 1;
+                            MC_d = 1;
+                            MCState_d = mcCsr2;
+                        end
+                    end else begin
+                        if (Insn_q[19:7]==0) begin
+                            ExcInvalidInsn = 0;
+                            BubbleD_d = 1;
+                            MC_d = 1;
+                            MCState_d = mcTrap2;
+                        end
+                    end
                 end
                 default: begin
                 end
@@ -1157,23 +1131,10 @@ reg [WORD_WIDTH-1:0] m_A;
                     if (Insn_q[6:2]==0) begin
                         if (Insn_q[12]) begin
                             if (Insn_q[11:7]==0) begin // C.EBREAK
-/*
-                                Overwrite_d = 1;
-                                OverwriteVal_d = PC_q;
-                                DecodeWrEn = 1;
-                                DecodeWrNo = REG_CSR_MEPC;
-                                RdNo1 = REG_CSR_MTVEC;
+                                ExcInvalidInsn = 0;
+                                BubbleD_d = 1;
                                 MC_d = 1;
-                                MCState_d = mcException;
-                                MCAux_d = 6'h03 + 1;
-                                TrapEnter_d = 1;
-*/
-                    ExcInvalidInsn = 0;
-                    BubbleD_d = 1;
-                    MC_d = 1;
-                    MCState_d = mcCEBREAK;
-
-
+                                MCState_d = mcCEBREAK;
                             end else begin // C.JALR
                                 ReturnPC = 1;
                                 NoIrq_d = 1;
@@ -1365,7 +1326,7 @@ end
 
         // register numbers for next insn
 
-        if (~RdNo1[5]) begin
+        if (~MC_d) begin
 
             if (~Insn_d[1]) begin
                 if (~Insn_d[0]) begin // 00
@@ -1387,24 +1348,19 @@ end
                                                 RdNo1 = {1'b0, Insn_d[19:15]};  // RVI rs1
                 end
             end
-        end
 
-        if (~Insn_d[1]) begin
-            if (Insn_d[0] & Insn_d[14]) begin
-                RdNo2 = 0; // implicit x0 for C.BEQZ/BNEZ
+            if (~Insn_d[1]) begin
+                if (Insn_d[0] & Insn_d[14]) begin
+                    RdNo2 = 0; // implicit x0 for C.BEQZ/BNEZ
+                end else begin
+                    RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
+                end
+            end else if (Insn_d[0]) begin
+                RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
             end else begin
-                RdNo2 = {3'b001, Insn_d[4:2]};  // RVC rs2'
+                RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
             end
-        end else if (Insn_d[0]) begin
-            RdNo2 = {1'b0, Insn_d[24:20]};  // rs2
-        end else begin
-            RdNo2 = {1'b0, Insn_d[6:2]};  // RVC rs2
         end
-        if (RdNo2ForceTmp_v) begin
-            RdNo2 = REG_CSR_TMP;
-        end
-
-
 
     end
 
@@ -1453,10 +1409,8 @@ end
         ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
         : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
     wire [WORD_WIDTH-1:0] vPCResult =
-          (ReturnA_q ? e_A : 0) |
           (e_ReturnPC ? PC_q : 0);
     wire [WORD_WIDTH-1:0] vUIResult =
-          (ReturnB_q ? e_B : 0) |
           (e_ReturnUI ? ImmUpper_q : 0);
 
     // OPTIMIZE? vFastResult has one input left
@@ -1623,6 +1577,35 @@ end
 
 
 
+    // register-mapped CSRs
+/*
+    reg [5:0] CsrTranslateD_d;
+    reg CsrFromReg_w;
+    always @* begin
+        CsrFromReg_w <= InsnCSR;
+        case (Insn_q[31:20])
+            12'h305: CsrTranslateD_d <= REG_CSR_MTVEC;
+            12'h340: CsrTranslateD_d <= REG_CSR_MSCRATCH;
+            12'h341: CsrTranslateD_d <= REG_CSR_MEPC;
+            12'h342: CsrTranslateD_d <= REG_CSR_MCAUSE;
+            12'h343: CsrTranslateD_d <= REG_CSR_MTVAL;
+            default: begin
+                CsrTranslateD_d <= 0; // cannot be written, always 0
+                CsrFromReg_w <= 0;
+            end
+        endcase
+        CsrTranslateD_d <= {1'b1, Insn_q[26], Insn_q[23:20]};
+    end
+*/
+    wire [4:0] CsrTranslateD_d = {InsnE_q[26], InsnE_q[23:20]};
+    wire CsrFromReg_w = (InsnE_q[31:27]==5'b00110) &&
+        (InsnE_q[25:23]==3'b0) &&
+        (
+         (InsnE_q[22:20]==3'b100) || // mie, mip
+         ((~InsnE_q[26]) && (InsnE_q[22:20]==3'b101)) || // mtvec
+         ((InsnE_q[26]) && (~InsnE_q[22]))); // mscratch, mepc, mcause, mtval
+
+
     // external CSR interface
     //
     // D stage: decode tree for CSR number (csr_addr)
@@ -1630,23 +1613,20 @@ end
     // M stage: mux tree for csr_rdata
 
     reg  [2:0] e_CsrModify;
-    reg [31:0] e_CsrWData;
     reg [11:0] e_CsrAddr;
+    wire [31:0] e_CsrWData = OverwriteValE_q; // for internal CSRs
 
     always @(posedge clk) begin
         e_CsrModify <= {Kill, (InsnCSR & ~m_Kill & (~InsnE_q[13] | (InsnE_q[19:15]!=0))) 
             ? InsnE_q[13:12] : 2'b00};
-        e_CsrWData  <= InsnE_q[14] ? {{(WORD_WIDTH-5){1'b0}}, InsnE_q[19:15]} 
-                                   : e_A/*ForwardAE*/;
 
-        // for internal CSRs
-        e_CsrAddr   <= InsnE_q[31:20];
+        e_CsrAddr   <= InsnE_q[31:20]; // for internal CSRs
     end
 
     assign retired    = RetiredM_q;
     assign csr_read   = CsrFromExtE_q;
     assign csr_modify = e_CsrModify;
-    assign csr_wdata  = e_CsrWData;
+    assign csr_wdata  = OverwriteValE_q;
     assign csr_addr   = InsnE_q[31:20];
 
 
@@ -1665,81 +1645,15 @@ end
     endcase
 
 
-    // register-mapped CSRs
-/*
-    reg [5:0] CsrTranslateD_d;
-    reg CsrFromRegD_d;
-    always @* begin
-        CsrFromRegD_d <= InsnCSR;
-        case (Insn_q[31:20])
-            12'h305: CsrTranslateD_d <= REG_CSR_MTVEC;
-            12'h340: CsrTranslateD_d <= REG_CSR_MSCRATCH;
-            12'h341: CsrTranslateD_d <= REG_CSR_MEPC;
-            12'h342: CsrTranslateD_d <= REG_CSR_MCAUSE;
-            12'h343: CsrTranslateD_d <= REG_CSR_MTVAL;
-            default: begin
-                CsrTranslateD_d <= 0; // cannot be written, always 0
-                CsrFromRegD_d <= 0;
-            end
-        endcase
-        CsrTranslateD_d <= {1'b1, Insn_q[26], Insn_q[23:20]};
-    end
-*/
-    wire [4:0] CsrTranslateD_d = {InsnE_q[26], InsnE_q[23:20]};
-    wire CsrFromRegD_d = /*(InsnCSR) &&*/ (InsnE_q[31:27]==5'b00110) &&
-        (InsnE_q[25:23]==3'b0) &&
-        (
-         (InsnE_q[22:20]==3'b100) || // mie, mip
-         ((~InsnE_q[26]) && (InsnE_q[22:20]==3'b101)) || // mtvec
-         ((InsnE_q[26]) && (~InsnE_q[22]))); // mscratch, mepc, mcause, mtval
-
-    wire CsrFromReg_w = (InsnE_q[31:27]==5'b00110) &&
-        (InsnE_q[25:23]==3'b0) &&
-        (
-         (InsnE_q[22:20]==3'b100) || // mie, mip
-         ((~InsnE_q[26]) && (InsnE_q[22:20]==3'b101)) || // mtvec
-         ((InsnE_q[26]) && (~InsnE_q[22]))); // mscratch, mepc, mcause, mtval
 
 
 
 
-
-
-
-
-//    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, ImmUpper_q[19:15]} : m_A;
-//    wire [WORD_WIDTH-1:0] CsrUpdate = e_CsrSelImm ? {27'b0, InsnM_q[19:15]} : m_A;
-    wire [WORD_WIDTH-1:0] CsrUpdate = InsnM_q[14] ? {27'b0, InsnM_q[19:15]} : m_A;
-
-    wire [WORD_WIDTH-1:0] CsrModified = ~m_CsrOp[1]
-        ? (~m_CsrOp[0] ? 32'h0 : m_CsrUpdate)
-        : (~m_CsrOp[0] ? (e_A | m_CsrUpdate) : (e_A & ~m_CsrUpdate));
-            // TRY: e_A instead of e_B would also be possible, if vCsrInsn is adjusted
-            // e_A is a bypass from the execute stage of the next cycle
-
-/*
-    wire [WORD_WIDTH-1:0] CsrResult_w =
-        (CsrFromRegM_q ? e_A           : 0) |
-        (CsrFromRegW_q ? m_CsrModified : 0) |
-        (CsrFromExtM_q ? (CsrRDataInternal_q | csr_rdata) : 0) |
-        ((CsrFromRegM_q | CsrFromRegW_q | CsrFromExtM_q)
-            ? 0 : m_WrData);
 
     wire [WORD_WIDTH-1:0] OverwrittenResult_w =
-        OverwriteM_q ? OverwriteValM_q : CsrResult_w;
-*/
-    wire [WORD_WIDTH-1:0] OverwrittenResult_w =
-        (CsrFromRegM_q ? e_A                              : 0) |
-        (CsrFromRegW_q ? m_CsrModified                    : 0) |
         (CsrFromExtM_q ? (CsrRDataInternal_q | csr_rdata) : 0) |
         (OverwriteM_q  ? OverwriteValM_q                  : 0) |
-
-        ((CsrFromRegM_q | CsrFromRegW_q | CsrFromExtM_q | OverwriteM_q)
-                       ? 0 : m_WrData);
-
-
-
-
+        ((CsrFromExtM_q | OverwriteM_q) ? 0 : m_WrData);
 
     wire [WORD_WIDTH-1:0] OverwriteValE_d = OverwriteSelE_q
         ? MulDivResult_d
@@ -2029,8 +1943,6 @@ end
         ShiftArith_q <= ShiftArith_d;
         e_ReturnPC <= ReturnPC;
         e_ReturnUI <= ReturnUI;
-        ReturnA_q <= ReturnA_d;
-        ReturnB_q <= ReturnB_d;
 
         e_SelSum <= SelSum;
         e_SetCond <= SetCond;
@@ -2044,7 +1956,6 @@ end
         e_NegB <= NegB;
         e_WrNo <= DecodeWrNo;
         InvertBranch_q <= InvertBranch_d;
-        e_InsnBit14 <= Insn_q[14];
 
 
         // execute
@@ -2053,7 +1964,7 @@ end
         m_WrData <= ALUResult;
         m_Kill <= Kill;
 
-        MemSignedLoadM_q    <= MemMisaligned_q ? MemSignedLoadM_q : ~e_InsnBit14;
+        MemSignedLoadM_q    <= MemMisaligned_q ? MemSignedLoadM_q : ~InsnE_q[14];
         MemWidthM_q         <= MemMisaligned_q ? MemWidthM_q :
                                 (m_Kill ? 2'b11 : e_MemWidth);
         AddrOfsM_q          <= MemMisaligned_q ? AddrOfsM_q : AddrSum_w[1:0];
@@ -2083,14 +1994,8 @@ end
         ExcInvalidInsn_q    <= ExcInvalidInsn;
 
         // csr
-m_A <= e_A;
-        m_CsrUpdate         <= CsrUpdate;
-        e_CsrOp             <= CsrOp;
-        m_CsrOp             <= e_CsrOp;
-        m_CsrModified       <= CsrModified;
-        CsrFromRegE_q       <= 0;//CsrFromRegD_d;
-        CsrFromRegM_q       <= CsrFromRegE_q;
-        CsrFromRegW_q       <= CsrFromRegM_q;
+        CsrOpM_q            <= InsnE_q[13:12];
+        CsrOpW_q            <= CsrOpM_q;
         CsrFromExtE_q       <= CsrFromExtD_d;
         CsrFromExtM_q       <= CsrFromExtE_q;
         CsrRDataInternal_q  <= CsrRDataInternal_d;
@@ -2182,11 +2087,8 @@ m_A <= e_A;
             RegSet.regs[REG_CSR_MTVAL]);
 
 
-        $display("C CsrTranslateD_d=%h CsrOp=%b e_%b m_%b InsnCSR=%b CsrUpdate=%h",
-            CsrTranslateD_d, CsrOp, e_CsrOp, m_CsrOp, InsnCSR, CsrUpdate);
-        $display("C CsrFromRegD_d %b e_%b m_%b w_%b m_CsrModified=%h m_WrData=%h", 
-            CsrFromRegD_d, CsrFromRegE_q, CsrFromRegM_q, CsrFromRegW_q,
-            m_CsrModified, m_WrData);
+        $display("C CsrTranslateD_d=%h InsnCSR=%b",
+            CsrTranslateD_d, InsnCSR);
         $display("C e_CsrModify=%b e_CsrAddr=%h e_CsrWData=%h TrapEnter_d=%b",
             e_CsrModify, e_CsrAddr, e_CsrWData, TrapEnter_d);
 /*
@@ -2296,7 +2198,7 @@ m_A <= e_A;
         & (MCState_q==mcMem)
         & ~RvfiMemStoreM_q;
     wire RvfiRetire_w = Rvfi_Trap_w
-        | (RetiredM_q & ~RvfiRetireMisLoadM_d & ~(MCState_q==mcCsr) & ~(MCState_q==mcCsrReg1))
+        | (RetiredM_q & ~RvfiRetireMisLoadM_d & ~(MCState_q==mcCsrExt3) & ~(MCState_q==mcCsrReg3))
         | RvfiRetireMisLoadW_q;
 
 
@@ -2365,7 +2267,7 @@ m_A <= e_A;
                                   {8{RvfiMemMask[1]}}, {8{RvfiMemMask[0]}}};
 
         RvfiValidCsrE_q <= 0;
-        if ((MCState_q==mcCsr) | (MCState_q==mcCsrReg1)) begin 
+        if ((MCState_q==mcCsrExt3) | (MCState_q==mcCsrReg3)) begin 
             // delay one cycle
             rvfi_valid <= 0;
             RvfiValidCsrE_q <= 1;
@@ -2374,7 +2276,7 @@ m_A <= e_A;
             rvfi_valid <= rstn & !rvfi_halt;
         end
         // hold values for next cycle
-        if ((MCState_q==mcCsr) | (MCState_q==mcCsrReg1)) begin
+        if ((MCState_q==mcCsrExt3) | (MCState_q==mcCsrReg3)) begin
             RvfiInsnM_q <= RvfiInsnM_q;
             RvfiRdNo1M_q <= RvfiRdNo1M_q;
             RvfiRdNo2M_q <= RvfiRdNo2M_q;
@@ -2383,7 +2285,7 @@ m_A <= e_A;
             RvfiPcM_q      <= RvfiPcM_q;
             RvfiNextPcM_q  <= RvfiNextPcM_q;
         end
-        if (MCState_q==mcCsrReg2) begin
+        if (MCState_q==mcCsrReg4) begin
             rvfi_rd_addr <= (ExecuteWrEn & ~ExecuteWrNo[5]) ? ExecuteWrNo : 0;
             rvfi_rd_wdata <= (ExecuteWrEn & ~ExecuteWrNo[5]) ? ALUResult : 0;
         end
