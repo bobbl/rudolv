@@ -17,6 +17,7 @@ fi
 
 esc_green="\033[32m"
 esc_red="\033[31m"
+esc_orange="\033[33m"
 esc="\033[0m"
 
 
@@ -69,8 +70,11 @@ do
             if [ $passed -eq $total ]
             then
                 printf "# ${esc_green}All $total tests passed.${esc}\n"
+            elif [ $failed -eq 0 ]
+            then
+                printf "# ${esc_orange}No fails but $(($total - $passed)) of ${total} tests still pending${esc}\n"
             else
-                printf "# ${esc_red}Failed ${failed} of ${total} tests${esc}\n"
+                printf "# ${esc_red}Failed ${failed} of ${total} tests (${passed})${esc}\n"
             fi
             ;;
 
