@@ -190,13 +190,12 @@ module Pipeline #(
     reg OverwriteM_q;
     reg [WORD_WIDTH-1:0] OverwriteValM_q;
     reg OverwriteSelE_q;
-    reg InsnMRET_E_q;
-    reg InsnMRET_M_q;
+    reg TrapReturnE_q;
+    reg TrapReturnM_q;
     reg ExcInvalidInsn_q;
 
     // CSRs for exceptions
-    reg [1:0] CsrOpM_q;
-    reg [1:0] CsrOpW_q;
+    reg CsrClearW_q;
     reg CsrFromExtE_q;
     reg CsrFromExtM_q;
     reg [WORD_WIDTH-1:0] CsrRDataInternal_q;
@@ -286,8 +285,8 @@ module Pipeline #(
                   : 2'b00
     };
 
-    wire [11:0] Imm12PlusReg_w = (~Insn_q[0] & Insn_q[1] & ~Insn_q[14])
-        ? 0 // C.JR or C.JALR
+    wire [11:0] Imm12PlusReg_w = ((~Insn_q[0] & Insn_q[1] & ~Insn_q[14]) | MC_q)
+        ? 0 // C.JR or C.JALR or enter/leave trap
         : Imm12PlusReg2_w;
 
 
@@ -371,25 +370,22 @@ module Pipeline #(
 
 
 
-
-
     localparam [7:0] mcUnalignedJump    = 1;
     localparam [7:0] mcFetchAgain       = 2;
     localparam [7:0] mcNop              = 3;
-    localparam [7:0] mcTrapReturn       = 4;
-    localparam [7:0] mcTrapEnter        = 5;
-    localparam [7:0] mcTrapWrCause      = 6;
-    localparam [7:0] mcMulDiv           = 7;
+    localparam [7:0] mcTrapWrMtval      = 4;
+    localparam [7:0] mcTrapWrCause      = 5;
+    localparam [7:0] mcMulDivFirst      = 6;
+    localparam [7:0] mcMulDivLoop       = 7;
     localparam [7:0] mcMulDivWriteback  = 8;
     localparam [7:0] mcMulDivLast       = 9;
     localparam [7:0] mcCsr2             = 10;
     localparam [7:0] mcCsrReg3          = 11;
     localparam [7:0] mcCsrReg4          = 12;
-    localparam [7:0] mcTrap2            = 13;
+    localparam [7:0] mcNoCsr            = 13;
     localparam [7:0] mcCEBREAK          = 14;
     localparam [7:0] mcWFI              = 15;
-    localparam [7:0] mcLoad             = 16;
-    localparam [7:0] mcStore            = 17;
+    localparam [7:0] mcMem              = 16;
 
 
 
@@ -438,11 +434,12 @@ module Pipeline #(
 
     reg MC_d;
     reg [7:0] MCState_d;
+
+    // MC exclusive
     reg [5:0] MCAux_d;
     reg [4:0] MCRegNo_d;
 
     reg [WORD_WIDTH-1:0] ImmUpper_d;
-    reg [11:0] Imm12PlusReg_d;
     reg Overwrite_d;              // overwrite result in M-stage (used by exceptions)
     reg [WORD_WIDTH-1:0] OverwriteVal_d;
     reg OverwriteSelD_d;
@@ -494,7 +491,7 @@ module Pipeline #(
         SetCond         = 0;
         EnShift         = 0;
         vSelImm         = 0;
-        SelLogic        = 2'b01;
+        SelLogic        = 2'b01; // disable
         ReturnUI        = 0;
 
         AddrFromSum     = 0;
@@ -503,11 +500,10 @@ module Pipeline #(
 
         MC_d            = 0;
         MCState_d       = 0;
-        MCAux_d         = MCAux_q - 1;
+        MCAux_d         = MCAux_q;
         MCRegNo_d       = MCRegNo_q;
 
         ImmUpper_d      = ImmUpper_w; // used for AUIPC, LUI, C.LUI, C.LI and CSR
-        Imm12PlusReg_d  = Imm12PlusReg_w; // used for memory accesses and JALR
 
         Overwrite_d     = 0;
         OverwriteVal_d  = PC_q;
@@ -540,8 +536,8 @@ module Pipeline #(
             WrNoD_d = REG_CSR_MEPC;
             RdNo1 = REG_CSR_MTVEC;
             MC_d = 1;
-            MCState_d = mcTrapEnter;
-            MCAux_d = 6'h02 + 1;
+            MCState_d = mcTrapWrMtval;
+            MCAux_d = 6'h02;
             TrapEnter_d = 1;
 
         // microcoded cycles of multi-cycle instructions
@@ -561,26 +557,19 @@ module Pipeline #(
                 end
                 mcNop: begin
                 end
-                mcTrapReturn: begin // MRET
-                    // jump to adddress in first register (MTVEC)
-                    NoIrq_d       = 1;
-                    InsnJALR    = 1;
-                    AddrFromSum = 1;
-                    Imm12PlusReg_d = 0;
-                    MC_d = 1;
-                    MCState_d = mcNop;
-                end
-                mcTrapEnter: begin 
+                mcTrapWrMtval: begin 
+                    // Enter or return from trap
+                    // Difference: don't write CSRs when returning
                     // jump to adddress in first register (MEPC) and write MTVAL
+                    // Imm12PlusReg_w is set to 0
                     NoIrq_d = 1;
                     InsnJALR = 1;
                     AddrFromSum = 1;
-                    Imm12PlusReg_d = 0;
-                    Overwrite_d = 1;
-                    if (MCAux_q==(6'h03 + 1)) begin
+                    Overwrite_d = ~TrapReturnE_q; // don't write if returning
+                    if (MCAux_q==6'h03) begin
                         // EBREAK exception: MTVAL=PC
-                        OverwriteVal_d = OverwriteValE_q;
-                    end else if (MCAux_q==(6'h02 + 1)) begin
+                        OverwriteVal_d = PrevPC_q;
+                    end else if (MCAux_q==6'h02) begin
                         // Illegal instruction exception: MTVAL=insn
                         OverwriteVal_d = InsnM_q;
                     end else begin
@@ -593,15 +582,22 @@ module Pipeline #(
                 mcTrapWrCause: begin 
                     // write MCAUSE
                     NoIrq_d = 1;
-                    Overwrite_d = 1;
+                    Overwrite_d = ~TrapReturnM_q; // don't write if returning
                     OverwriteVal_d = {MCAux_q[4], {(WORD_WIDTH-5){1'b0}}, MCAux_q[3:0]};
                     WrNoD_d = REG_CSR_MCAUSE;
                 end
 
-                mcMulDiv: begin
+                mcMulDivFirst: begin
+                    MCRegNo_d = InsnE_q[11:7];
+                    MCAux_d = 30;
+                    MC_d = 1;
+                    MCState_d = mcMulDivLoop;
+                end
+                mcMulDivLoop: begin
+                    MCAux_d = MCAux_q - 1;
                     MC_d = 1;
                     if (MCAux_q != 0) begin
-                        MCState_d = mcMulDiv;
+                        MCState_d = mcMulDivLoop;
                     end else begin
                         MCState_d = mcMulDivWriteback;
                     end
@@ -622,45 +618,45 @@ module Pipeline #(
 
                 mcCsr2: begin // CSR access
                     BubbleD_d = 1;
+                    MCRegNo_d = InsnE_q[11:7];
                     OverwriteVal_d = InsnE_q[14]
                         ? {{(WORD_WIDTH-5){1'b0}}, InsnE_q[19:15]}
                         : e_A;
 
                     if (CsrFromReg_w) begin
-                        Overwrite_d = 1;
-                        WrEnD_d = 1; // required for forwarding
-                        WrNoD_d = REG_CSR_TMP;
-
-                        RdNo1          = {1'b1, CsrTranslateD_d};
-                        RdNo2          = 0;
-                        MC_d           = 1;
-                        MCState_d      = mcCsrReg3;
+                        Overwrite_d     = 1;
+                        WrEnD_d         = 1; // required for forwarding
+                        WrNoD_d         = REG_CSR_TMP;
+                        RdNo1           = {1'b1, CsrTranslateD_d};
+                        RdNo2           = 0;
+                        MC_d            = 1;
+                        MCState_d       = mcCsrReg3;
                     end else if (CsrValid_w) begin
-                        CsrFromExtD_d  = WrEnE_q & CsrValid_w & (MCRegNo_q!=0);
-                        WrEnD_d     = (MCRegNo_q!=0);
-                        WrNoD_d     = {1'b0, MCRegNo_q}; // InsnE_q also possible
-                        InsnCSR        = 1;
-                        MC_d           = 1;
-                        MCState_d      = mcFetchAgain;
+                        CsrFromExtD_d   = WrEnE_q & CsrValid_w & (InsnE_q[11:7]!=0);
+                        WrEnD_d         = (InsnE_q[11:7]!=0);
+                        WrNoD_d         = {1'b0, InsnE_q[11:7]}; // InsnE_q also possible
+                        InsnCSR         = 1;
+                        MC_d            = 1;
+                        MCState_d       = mcFetchAgain;
                     end else begin
-                        Overwrite_d = 1;
-                        OverwriteVal_d = PrevPC_q; 
+                        Overwrite_d     = 1;
+                        OverwriteVal_d  = PrevPC_q;
                             // therefore ExcInvalidInsn=1 cannot be used
-                        WrNoD_d = REG_CSR_MEPC;
-                        RdNo1 = REG_CSR_MTVEC;
-                        MC_d = 1;
-                        MCState_d = mcTrapEnter;
-                        MCAux_d = 6'h02 + 1;
-                        TrapEnter_d = 1;
+                        WrNoD_d         = REG_CSR_MEPC;
+                        RdNo1           = REG_CSR_MTVEC;
+                        MC_d            = 1;
+                        MCState_d       = mcTrapWrMtval;
+                        MCAux_d         = 6'h02;
+                        TrapEnter_d     = 1;
                     end
                 end
                 mcCsrReg3: begin // 3rd cycle of CSR access
                                  // or rd, csr, x0
-                    WrEnD_d = (MCRegNo_q!=0); // OPTIMISE
+                    WrEnD_d = (MCRegNo_q!=0);
                     WrNoD_d = {1'b0, MCRegNo_q};
                     SelLogic = 2'b10; // 
 
-                    RdNo1 = CsrOpM_q[1]
+                    RdNo1 = InsnM_q[13]
                         ? {1'b1, CsrTranslateE_q} // CSRS, CSRC
                         : 0; // CSRW
                     RdNo2 = REG_CSR_TMP;
@@ -677,67 +673,59 @@ module Pipeline #(
                     WrEnD_d = 1;
                     WrNoD_d = {1'b1, CsrTranslateM_q};
 
-                    SelLogic = {1'b1, CsrOpW_q[0] & CsrOpW_q[1]};
+                    SelLogic = {1'b1, CsrClearW_q};
                         // and for CSRC, or for CSRS and CSRW
-                    NegB = CsrOpW_q[0] & CsrOpW_q[1];
+                    NegB = CsrClearW_q;
                         // not for CSRC
                 end
-                mcTrap2: begin
+                mcNoCsr: begin
                     BubbleD_d = 1;
+                    OverwriteVal_d = PrevPC_q;
                     MC_d = 1;
                     MCState_d = mcNop;
                     case (InsnE_q[31:20])
                         12'h000: begin // ECALL
                             Overwrite_d = 1;
-                            OverwriteVal_d = PrevPC_q;
                             WrNoD_d = REG_CSR_MEPC;
                             RdNo1 = REG_CSR_MTVEC;
-                            MC_d = 1;
-                            MCState_d = mcTrapEnter;
-                            MCAux_d = 6'h0b + 1;
+                            MCState_d = mcTrapWrMtval;
+                            MCAux_d = 6'h0b;
                             TrapEnter_d = 1;
                         end
                         12'h001: begin // EBREAK
                             Overwrite_d = 1;
-                            OverwriteVal_d = PrevPC_q;
                             WrNoD_d = REG_CSR_MEPC;
                             RdNo1 = REG_CSR_MTVEC;
-                            MC_d = 1;
-                            MCState_d = mcTrapEnter;
-                            MCAux_d = 6'h03 + 1;
+                            MCState_d = mcTrapWrMtval;
+                            MCAux_d = 6'h03;
                             TrapEnter_d = 1;
                         end
                         12'h002: begin // URET
                             RdNo1 = REG_CSR_MEPC;
-                            MC_d = 1;
-                            MCState_d = mcTrapReturn;
+                            MCState_d = mcTrapWrMtval;
                             TrapReturn_d = 1;
                         end
                         12'h102: begin // SRET
                             RdNo1 = REG_CSR_MEPC;
-                            MC_d = 1;
-                            MCState_d = mcTrapReturn;
+                            MCState_d = mcTrapWrMtval;
                             TrapReturn_d = 1;
                         end
                         12'h302: begin // MRET
                             RdNo1 = REG_CSR_MEPC;
-                            MC_d = 1;
-                            MCState_d = mcTrapReturn;
+                            MCState_d = mcTrapWrMtval;
                             TrapReturn_d = 1;
                         end
                         12'h105: begin // WFI
-                            MC_d = 1;
                             MCState_d = mcWFI;
                         end
                         default: begin
+                            // ExcInvalidInsn=1 cannot be used because
+                            // MEPC=PrevPC, not PC
                             Overwrite_d = 1;
-                            OverwriteVal_d = PrevPC_q;
-                                // therefore ExcInvalidInsn=1 cannot be used
                             WrNoD_d = REG_CSR_MEPC;
                             RdNo1 = REG_CSR_MTVEC;
-                            MC_d = 1;
-                            MCState_d = mcTrapEnter;
-                            MCAux_d = 6'h02 + 1;
+                            MCState_d = mcTrapWrMtval;
+                            MCAux_d = 6'h02;
                             TrapEnter_d = 1;
                         end
                     endcase
@@ -745,14 +733,14 @@ module Pipeline #(
                 mcCEBREAK: begin // C.EBREAK
                     // delay 1 cycle for same timing as EBREAK
                     BubbleD_d = 1;
-                        Overwrite_d = 1;
-                        OverwriteVal_d = PrevPC_q;
-                        WrNoD_d = REG_CSR_MEPC;
-                        RdNo1 = REG_CSR_MTVEC;
-                        MC_d = 1;
-                        MCState_d = mcTrapEnter;
-                        MCAux_d = 6'h02 + 1;
-                        TrapEnter_d = 1;
+                    Overwrite_d = 1;
+                    OverwriteVal_d = PrevPC_q;
+                    WrNoD_d = REG_CSR_MEPC;
+                    RdNo1 = REG_CSR_MTVEC;
+                    MC_d = 1;
+                    MCState_d = mcTrapWrMtval;
+                    MCAux_d = 6'h02;
+                    TrapEnter_d = 1;
                 end
                 mcWFI: begin // WFI
                     if (~IrqResponse_q) begin
@@ -760,10 +748,11 @@ module Pipeline #(
                         MCState_d = mcWFI;
                     end
                 end
-                mcLoad: begin
+                mcMem: begin
                     if (MemMisaligned_d) begin
                         BubbleD_d = 1;
                         AddrFromSum = 1;
+                        MemStore = e_MemStore;
                         MemWidth = e_MemWidth;
                         WrEnD_d = WrEnE_q;
                         WrNoD_d = WrNoE_q;
@@ -771,18 +760,6 @@ module Pipeline #(
                         MCState_d = mcFetchAgain;
                     end
                 end
-                mcStore: begin
-                    if (MemMisaligned_d) begin
-                        BubbleD_d = 1;
-                        AddrFromSum = 1;
-                        MemStore = 1;
-                        MemWidth = e_MemWidth;
-                        WrEnD_d = 0;
-                        MC_d = 1;
-                        MCState_d = mcFetchAgain;
-                    end
-                end
-
                 default: begin
                 end
             endcase
@@ -791,18 +768,18 @@ module Pipeline #(
         end else if (IrqResponse_q) begin
             ExcInvalidInsn = 0;
             if (ExternalIrq_q) begin
-                MCAux_d = 6'h1b + 1;
+                MCAux_d = 6'h1b;
             end else if (SoftwareIrq_q) begin
-                MCAux_d = 6'h13 + 1;
+                MCAux_d = 6'h13;
             end else begin
-                MCAux_d = 6'h17 + 1;
+                MCAux_d = 6'h17;
             end
             Overwrite_d = 1;
             OverwriteVal_d = PC_q;
             WrNoD_d = REG_CSR_MEPC;
             RdNo1 = REG_CSR_MTVEC;
             MC_d = 1;
-            MCState_d = mcTrapEnter;
+            MCState_d = mcTrapWrMtval;
             TrapEnter_d = 1;
 
 
@@ -852,7 +829,7 @@ module Pipeline #(
                     AddrFromSum    = 1;
                     MemWidth       = Insn_q[13:12];
                     MC_d           = 1;
-                    MCState_d      = mcLoad;
+                    MCState_d      = mcMem;
                 end
                 5'b01000: begin // store
                     ExcInvalidInsn = (Insn_q[14] | (Insn_q[13] & Insn_q[12]));
@@ -862,7 +839,7 @@ module Pipeline #(
                     MemStore       = 1;
                     MemWidth       = Insn_q[13:12];
                     MC_d           = 1;
-                    MCState_d      = mcStore;
+                    MCState_d      = mcMem;
                 end
                 5'b00100: begin // immediate
                     ExcInvalidInsn = ~Insn_q[13] & Insn_q[12] &
@@ -880,20 +857,14 @@ module Pipeline #(
                 5'b01100: begin
                     if (Insn_q[25]) begin // RVM
                         ExcInvalidInsn = (Insn_q[31:26]!=0);
-
                         FetchAddr_d = FetchAddr_q;
                             // increment not before last cycle
-
                         MC_d = 1;
-                        MCState_d = mcMulDiv;
-                        MCAux_d = 31;
-                        MCRegNo_d = Insn_q[11:7];
-
+                        MCState_d = mcMulDivFirst;
                         StartMulDiv_d = 1;
                         SelRemOrDiv_d = Insn_q[13] | InsnMULH_d;
                         SelDivOrMul_d = Insn_q[14];
                         SelMulLowOrHigh_d = (Insn_q[13:12]==2'b00);
-
                     end else begin // arith
                         ExcInvalidInsn = Insn_q[31] | (Insn_q[29:26]!=0) |
                             (Insn_q[30] & (Insn_q[13] | (Insn_q[14]!=Insn_q[12])));
@@ -912,8 +883,6 @@ module Pipeline #(
                 end
                 5'b11100: begin // system
                     ExcInvalidInsn = 1;
-                    MCRegNo_d = Insn_q[11:7];
-
                     if (Insn_q[13] | Insn_q[12]) begin // RVZicsr
                         if (~Insn_q[31] | ~Insn_q[30] // rw-CSR or
                             | (Insn_q[13] & (Insn_q[19:15]==0))) // ro-CSR and CSRRS/C and rs1=0
@@ -928,7 +897,7 @@ module Pipeline #(
                             ExcInvalidInsn = 0;
                             BubbleD_d = 1;
                             MC_d = 1;
-                            MCState_d = mcTrap2;
+                            MCState_d = mcNoCsr;
                         end
                     end
                 end
@@ -969,7 +938,7 @@ module Pipeline #(
                     WrEnD_d = 1;
                     WrNoD_d = {3'b001, Insn_q[4:2]};
                     MC_d = 1;
-                    MCState_d = mcLoad;
+                    MCState_d = mcMem;
                 end
                 4'b1100: begin // C.SW
                     ExcInvalidInsn = Insn_q[13];
@@ -979,7 +948,7 @@ module Pipeline #(
                     MemStore = 1;
                     MemWidth = 2'b10;
                     MC_d = 1;
-                    MCState_d = mcStore;
+                    MCState_d = mcMem;
                 end
                 4'b0001: begin
                     ExcInvalidInsn = 0;
@@ -1063,7 +1032,7 @@ module Pipeline #(
                     AddrFromSum = 1;
                     MemWidth = 2'b10;
                     MC_d = 1;
-                    MCState_d = mcLoad;
+                    MCState_d = mcMem;
                 end
                 4'b1010: begin
                     ExcInvalidInsn = Insn_q[13];
@@ -1102,7 +1071,7 @@ module Pipeline #(
                     MemStore = 1;
                     MemWidth = 2'b10;
                     MC_d = 1;
-                    MCState_d = mcStore;
+                    MCState_d = mcMem;
                 end
                 default: begin
                     ExcInvalidInsn = 1;
@@ -1616,7 +1585,7 @@ end
             MModeIntEnable = 0;
             MModePriorIntEnable = f_MModeIntEnable;
         end
-        if (InsnMRET_M_q) begin
+        if (TrapReturnM_q) begin
             MModeIntEnable = f_MModePriorIntEnable;
             MModePriorIntEnable = 1;
         end
@@ -1895,7 +1864,7 @@ end
         e_A <= ForwardAE;
         e_B <= ForwardBE;
         ImmUpper_q <= ImmUpper_d;
-        Imm12PlusReg_q <= Imm12PlusReg_d;
+        Imm12PlusReg_q <= Imm12PlusReg_w;
         e_PCImm <= PCImm;
 
         WrEnE_q <= WrEnD_d;
@@ -1955,13 +1924,12 @@ end
         OverwriteM_q        <= OverwriteE_q;
         OverwriteValM_q     <= OverwriteValE_d;
         OverwriteSelE_q     <= OverwriteSelD_d;
-        InsnMRET_E_q        <= TrapReturn_d;
-        InsnMRET_M_q        <= InsnMRET_E_q;
+        TrapReturnE_q       <= TrapReturn_d;
+        TrapReturnM_q       <= TrapReturnE_q;
         ExcInvalidInsn_q    <= ExcInvalidInsn;
 
         // csr
-        CsrOpM_q            <= InsnE_q[13:12];
-        CsrOpW_q            <= CsrOpM_q;
+        CsrClearW_q         <= InsnM_q[13] & InsnM_q[12];
         CsrFromExtE_q       <= CsrFromExtD_d;
         CsrFromExtM_q       <= CsrFromExtE_q;
         CsrRDataInternal_q  <= CsrRDataInternal_d;
@@ -2165,8 +2133,7 @@ end
                       | RvfiValidCsrE_q
                       | RvfiRetireMisLoadW_q;
 
-    wire Rvfi_Trap_w = (MCState_q==mcTrapEnter) 
-                     | (MCState_q==mcTrapReturn)
+    wire Rvfi_Trap_w = (MCState_q==mcTrapWrMtval) 
                      | (MCState_q==mcWFI);
 
     always @(posedge clk) begin
@@ -2203,7 +2170,7 @@ end
         RvfiIntrD_q     <= RvfiIntrF_q;
         RvfiIntrF_q     <= RvfiIntr1_q;
         RvfiIntr1_q     <= RvfiIntr0_q;
-        RvfiIntr0_q     <= MC_q & (MCState_q==mcTrapEnter);
+        RvfiIntr0_q     <= MC_q & (MCState_q==mcTrapWrMtval) & ~TrapReturnE_q;
 
         RvfiRdNo1M_q    <= RvfiRdNo1E_q;
         RvfiRdNo1E_q    <= d_RdNo1[5] ? 5'b0 : d_RdNo1; // no CSRs
@@ -2215,7 +2182,7 @@ end
         RvfiPcM_q       <= RvfiPcE_q;
         RvfiPcE_q       <= PC_q;
         RvfiNextPcM_q   <= Kill ? FetchAddr_d : PC_q;
-        RvfiExcRetM_q   <= MC_q & ((MCState_d==mcTrapReturn) | (MCState_d==mcTrapEnter));
+        RvfiExcRetM_q   <= MC_q & (MCState_d==mcTrapWrMtval);
 
         RvfiMemStoreM_q <= e_MemStore;
         RvfiMemAddrM_q  <= AddrSum_w;
@@ -2224,7 +2191,7 @@ end
         RvfiMemWDataM_q <= e_B & {{8{RvfiMemMask[3]}}, {8{RvfiMemMask[2]}},
                                   {8{RvfiMemMask[1]}}, {8{RvfiMemMask[0]}}};
 
-        RvfiRetireMisLoadM_q <= ((MCState_q==mcLoad) | (MCState_q==mcStore)); // load
+        RvfiRetireMisLoadM_q <= (MCState_q==mcMem); // load
         RvfiRetireMisLoadW_q <= RvfiRetireMisLoadM_q
                                 & (MCState_q==mcFetchAgain); // misaligned
 
