@@ -135,7 +135,8 @@ module Pipeline #(
     reg e_InsnBEQ;
     reg e_InsnBLTorBLTU;
     reg InvertBranch_q;
-    reg [1:0] e_SelLogic;
+    reg [1:0] LogicOp_q;
+    reg EnLogic_q;
     reg e_EnShift;
     reg ShiftRight_q;
     reg ShiftArith_q;
@@ -185,6 +186,7 @@ module Pipeline #(
 
     // exceptions
     reg [WORD_WIDTH-1:0] PrevPC_q;
+    reg [WORD_WIDTH-1:0] PrevPrevPC_q;
     reg OverwriteE_q;
     reg [WORD_WIDTH-1:0] OverwriteValE_q;
     reg OverwriteM_q;
@@ -425,7 +427,8 @@ module Pipeline #(
     reg SetCond;
     reg EnShift;
     reg vSelImm;
-    reg [1:0] SelLogic;
+    reg [1:0] LogicOp_d;
+    reg EnLogic_d;
     reg ReturnUI;
 
     reg AddrFromSum;
@@ -491,7 +494,8 @@ module Pipeline #(
         SetCond         = 0;
         EnShift         = 0;
         vSelImm         = 0;
-        SelLogic        = 2'b01; // disable
+        LogicOp_d       = 0; // dont care
+        EnLogic_d       = 0;
         ReturnUI        = 0;
 
         AddrFromSum     = 0;
@@ -568,7 +572,7 @@ module Pipeline #(
                     Overwrite_d = ~TrapReturnE_q; // don't write if returning
                     if (MCAux_q==6'h03) begin
                         // EBREAK exception: MTVAL=PC
-                        OverwriteVal_d = PrevPC_q;
+                        OverwriteVal_d = PrevPrevPC_q;
                     end else if (MCAux_q==6'h02) begin
                         // Illegal instruction exception: MTVAL=insn
                         OverwriteVal_d = InsnM_q;
@@ -654,7 +658,8 @@ module Pipeline #(
                                  // or rd, csr, x0
                     WrEnD_d = (MCRegNo_q!=0);
                     WrNoD_d = {1'b0, MCRegNo_q};
-                    SelLogic = 2'b10; // 
+                    LogicOp_d = 2'b10; // or
+                    EnLogic_d = 1;
 
                     RdNo1 = InsnM_q[13]
                         ? {1'b1, CsrTranslateE_q} // CSRS, CSRC
@@ -673,8 +678,9 @@ module Pipeline #(
                     WrEnD_d = 1;
                     WrNoD_d = {1'b1, CsrTranslateM_q};
 
-                    SelLogic = {1'b1, CsrClearW_q};
+                    LogicOp_d = {1'b1, CsrClearW_q};
                         // and for CSRC, or for CSRS and CSRW
+                    EnLogic_d = 1;
                     NegB = CsrClearW_q;
                         // not for CSRC
                 end
@@ -739,7 +745,7 @@ module Pipeline #(
                     RdNo1 = REG_CSR_MTVEC;
                     MC_d = 1;
                     MCState_d = mcTrapWrMtval;
-                    MCAux_d = 6'h02;
+                    MCAux_d = 6'h03;
                     TrapEnter_d = 1;
                 end
                 mcWFI: begin // WFI
@@ -820,8 +826,9 @@ module Pipeline #(
                     InsnBEQ        = (Insn_q[14:13]==2'b00);
                     InsnBLTorBLTU  = Insn_q[14];
                     NoIrq_d          = 1;
-                    NegB           = 1;
-                    SelLogic       = InsnBEQ ? 2'b00 : 2'b01;
+                    NegB            = 1;
+                    LogicOp_d       = 2'b00;
+                    EnLogic_d       = InsnBEQ;
                 end
                 5'b00000: begin // load
                     ExcInvalidInsn = (Insn_q[13] & (Insn_q[14] | Insn_q[12]));
@@ -851,8 +858,9 @@ module Pipeline #(
                     SetCond  = ~Insn_q[14] &  Insn_q[13]; // SLTI, SLTIU
                     EnShift  = ~Insn_q[13] &  Insn_q[12]; // SLLI, SRAI, SRLI
                     vSelImm  = 1; // only for forwarding
-                    SelLogic =  Insn_q[14] ? Insn_q[13:12] : 2'b01;
+                    LogicOp_d =  Insn_q[13:12];
                         // ANDI, ORI, XORI
+                    EnLogic_d = Insn_q[14] & (Insn_q[13:12]!=2'b01);
                 end
                 5'b01100: begin
                     if (Insn_q[25]) begin // RVM
@@ -873,7 +881,8 @@ module Pipeline #(
                         SelSum   = ~Insn_q[14] & ~Insn_q[13] & ~Insn_q[12]; // ADD, SUB
                         SetCond  = ~Insn_q[14] &  Insn_q[13]; // SLT, SLTU
                         EnShift  = ~Insn_q[13] &  Insn_q[12]; // SLL, SRA, SRL
-                        SelLogic =  Insn_q[14] ? Insn_q[13:12] : 2'b01; // AND, OR, XOR
+                        LogicOp_d = Insn_q[13:12]; // AND, OR, XOR
+                        EnLogic_d = Insn_q[14] & (Insn_q[13:12]!=2'b01);
                     end
                 end
                 5'b00011: begin // fence
@@ -985,17 +994,21 @@ module Pipeline #(
                                         SelSum = 1;
                                     end
                                     2'b01: begin // C.XOR
-                                        SelLogic = 2'b00;
+                                        LogicOp_d = 2'b00;
+                                        EnLogic_d = 1;
                                     end
                                     2'b10: begin // C.OR
-                                        SelLogic = 2'b10;
+                                        LogicOp_d = 2'b10;
+                                        EnLogic_d = 1;
                                     end
                                     2'b11: begin // C.AND
-                                        SelLogic = 2'b11;
+                                        LogicOp_d = 2'b11;
+                                        EnLogic_d = 1;
                                     end
                                 endcase
                             end else begin // C.ANDI
-                                SelLogic = 2'b11;
+                                LogicOp_d = 2'b11;
+                                EnLogic_d = 1;
                                 vSelImm = 1;
                             end
                         end else begin // C.SRLI and C.SRAI
@@ -1017,7 +1030,8 @@ module Pipeline #(
                         // InvertBranch_q is set independently
                     NoIrq_d        = 1;
                     NegB           = 1;
-                    SelLogic       = 2'b00; // xor
+                    LogicOp_d       = 2'b00; // xor
+                    EnLogic_d = 1;
                 end
                 4'b0010: begin // C.SLLI
                     ExcInvalidInsn = Insn_q[13] | Insn_q[12];
@@ -1058,9 +1072,10 @@ module Pipeline #(
                             InsnJALR    = 1;
                             AddrFromSum = 1;
                         end
-                    end else begin // C.MV or C.ADD
-                        SelSum = 1;
-                            // implicit rs1=x0 for C.MV is set in predecode
+                    end else begin
+                        SelSum = Insn_q[12]; // C.ADD
+                        EnLogic_d = ~Insn_q[12]; // C.MV
+                        LogicOp_d = 2'b01; // copy rs2
                     end
                 end
                 4'b1110: begin // C.SWSP
@@ -1093,139 +1108,69 @@ module Pipeline #(
             FetchAddr_d = e_PCImm;
         end
 
-        // 101 MEM-To-MEM
-        if (BubbleD_d & BubbleM_q & ~m_Kill) begin
-//        if (BubbleD_d & BubbleM_q & ~m_Kill & ~FetchAgainM_q) begin
 
-if (FetchAgainM_q) begin
-            if (RealignedPC_d) begin
-                Insn_d = PartialInsn_q;
-            end else if (OddPC_d) begin
-                Insn_d = {mem_rdata[15:0], PartialInsn_q[31:16]};
+
+
+        // Insn_d
+        if (RealignedPC_d) begin
+            Insn_d = PartialInsn_q;
+        end else begin
+/*
+            if (~m_Kill & (0
+                | (MC_q & (MCState_q!=mcUnalignedJump))
+                | (BubbleE_q)
+                | (~FetchAgainM_q & BubbleM_q & (BubbleD_d | ~StartMulDiv_d))
+            )) begin
+                Insn_d = (OddPC_d)
+                    ? {DelayedInsn_q[15:0], PartialInsn_q[31:16]}
+                    : DelayedInsn_q;
+            end else begin
+                Insn_d = (OddPC_d)
+                    ? {mem_rdata[15:0], PartialInsn_q[31:16]}
+                    : mem_rdata;
+            end
+*/
+            if (~m_Kill & (0
+                | (MC_q & (MCState_q!=mcUnalignedJump))
+                |  BubbleE_q
+                | (BubbleM_q & ~FetchAgainM_q & ~StartMulDiv_d)
+            )) begin
+                Insn_d = DelayedInsn_q;
             end else begin
                 Insn_d = mem_rdata;
             end
+            Insn_d = OddPC_d ? {Insn_d[15:0], PartialInsn_q[31:16]} : Insn_d;
+        end
 
-        if (RealignedPC_d) begin //4
+        // DelayedInsn_d
+        if (RealignedPC_d) begin
             DelayedInsn_d = PartialInsn_q;
+        end else if (
+            ( BubbleD_d & ~BubbleM_q & ~BubbleE_q) |
+            (~BubbleD_d &  BubbleE_q) |
+            FetchAgainM_q |
+            m_Kill |
+            StartMulDiv_d
+        ) begin
+            DelayedInsn_d = mem_rdata;
         end else begin
-            DelayedInsn_d       = mem_rdata;
+            DelayedInsn_d = DelayedInsn_q;
         end
 
-//            if (RealignedPC_d) begin
-                PartialInsn_d   = PartialInsn_q;
-//            end else begin
-//                PartialInsn_d   = mem_rdata;
-//            end
-
-end else begin
-            if (OddPC_d) begin
-                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
-            end else begin
-                Insn_d = DelayedInsn_q;
-            end
-            if (RealignedPC_d) begin
-                DelayedInsn_d       = PartialInsn_q;
-            end else begin
-                DelayedInsn_d       = DelayedInsn_q;
-            end
-//3            PartialInsn_d       = DelayedInsn_q;
-            PartialInsn_d       = PartialInsn_q;
-end
-
-
-        // 010 POP and PUSH (also 110)
-        end else if (BubbleE_q & ~m_Kill) begin
-            if (OddPC_d) begin
-                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
-            end else begin
-                Insn_d = DelayedInsn_q;
-            end
-
-if (BubbleD_d) begin
-            DelayedInsn_d       = DelayedInsn_q;
-//            if (RealignedPC_d) begin
-                PartialInsn_d       = PartialInsn_q;
-//2            end else begin
-//2                PartialInsn_d       = DelayedInsn_q;
-//2            end
-end else begin
-            DelayedInsn_d       = mem_rdata;
-            if (RealignedPC_d) begin
-                PartialInsn_d       = PartialInsn_q;
-            end else begin
-                PartialInsn_d       = DelayedInsn_q;
-            end
-end
-
-        // 000 MC
-        end else if (MC_q & (MCState_q!=mcUnalignedJump) & ~m_Kill) begin
-            if (OddPC_d) begin
-                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
-            end else begin
-                Insn_d = DelayedInsn_q;
-            end
-            DelayedInsn_d       = DelayedInsn_q;
-            if (RealignedPC_d) begin
-                PartialInsn_d   = PartialInsn_q;
-            end else begin
-                PartialInsn_d   = DelayedInsn_q;
-            end
-
-        // 100 PUSH
-        end else if ((BubbleD_d & ~BubbleM_q) | StartMulDiv_d) begin
-            if (RealignedPC_d) begin
-                Insn_d = PartialInsn_q;
-            end else if (OddPC_d) begin
-                Insn_d = {mem_rdata[15:0], PartialInsn_q[31:16]};
-            end else begin
-                Insn_d = mem_rdata;
-            end
-            if (RealignedPC_d) begin
-                DelayedInsn_d       = PartialInsn_q;
-                PartialInsn_d       = mem_rdata;
-            end else if (OddPC_d) begin
-                DelayedInsn_d       = mem_rdata;
-                PartialInsn_d       = PartialInsn_q;
-            end else begin
-                DelayedInsn_d       = mem_rdata;
-                PartialInsn_d       = mem_rdata;
-            end
-
-        // 001 POP
-//        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill) begin
-        end else if ((~BubbleD_d & BubbleM_q) & ~m_Kill & ~FetchAgainM_q) begin
-            if (RealignedPC_d) begin
-                Insn_d = PartialInsn_q;
-            end else if (OddPC_d) begin
-                Insn_d = {DelayedInsn_q[15:0], PartialInsn_q[31:16]};
-            end else begin
-                Insn_d = DelayedInsn_q;
-            end
-            DelayedInsn_d       = DelayedInsn_q;
-            if (RealignedPC_d) begin
-                PartialInsn_d       = PartialInsn_q;
-            end else begin
-                PartialInsn_d       = DelayedInsn_q;
-            end
-
-
-        // 000 NOT DELAYED
+        // PartialInsn_d
+        if (RealignedPC_d | (BubbleD_d & ~m_Kill) | StartMulDiv_d) begin
+            PartialInsn_d = PartialInsn_q;
+        end else if (~m_Kill & (
+              (BubbleM_q & ~FetchAgainM_q)
+            | (MC_q & (MCState_q!=mcUnalignedJump))
+        )) begin
+            PartialInsn_d = DelayedInsn_q;
         end else begin
-            if (RealignedPC_d) begin
-                Insn_d = PartialInsn_q;
-            end else if (OddPC_d) begin
-                Insn_d = {mem_rdata[15:0], PartialInsn_q[31:16]};
-            end else begin
-                Insn_d = mem_rdata;
-            end
-            DelayedInsn_d       = DelayedInsn_q;
-            if (RealignedPC_d) begin
-                PartialInsn_d   = PartialInsn_q;
-            end else begin
-                PartialInsn_d   = mem_rdata;
-            end
+            PartialInsn_d = mem_rdata;
         end
+
+
+
 
 
 
@@ -1236,9 +1181,10 @@ end
 
         if (~MC_d) begin
 
+/*
             if (~Insn_d[1]) begin
                 if (~Insn_d[0]) begin // 00
-                    if (Insn_d[15:13]==3'b000)  RdNo1 = 2;
+                    if (Insn_d[14:13]==2'b00)   RdNo1 = 2; // C.ADDI4SPN
                     else                        RdNo1 = {3'b001, Insn_d[9:7]};  // RVC rs1'
                 end else begin // 01
                     if (~Insn_d[15])            RdNo1 = {1'b0, Insn_d[11:7]};   // RVC rs1
@@ -1247,15 +1193,61 @@ end
             end else begin
                 if (~Insn_d[0]) begin // 10
                     if (Insn_d[14:13]==2'b00) begin
-                        // implicit x0 for C.MV
-                        if (Insn_d[15] & ~Insn_d[12] & (Insn_d[6:2]!=0))
-                                                RdNo1 = 0;
-                        else                    RdNo1 = {1'b0, Insn_d[11:7]};   // RVC rs1
+                                                RdNo1 = {1'b0, Insn_d[11:7]};   // RVC rs1
                     end else                    RdNo1 = 2;
                 end else begin // 11
                                                 RdNo1 = {1'b0, Insn_d[19:15]};  // RVI rs1
                 end
             end
+
+            RdNo1 = ~Insn_d[0]
+                ? (~Insn_d[1]
+                    ? (~Insn_d[14]
+                        ? 6'b000010             // x2
+                        : {3'b001, Insn_d[9:7]} // RVC rs1'
+                      )
+                    : (~Insn_d[14]
+                        ? {1'b0, Insn_d[11:7]}  // RVC rs1
+                        : 6'b000010             // x2
+                      )
+                  )
+                : (~Insn_d[1]
+                    ? (~Insn_d[15]
+                        ? {1'b0, Insn_d[11:7]}  // RVC rs1
+                        : {3'b001, Insn_d[9:7]} // RVC rs1'
+                      )
+                    : {1'b0, Insn_d[19:15]}     // RVI rs1
+                  )
+                ;
+
+        Optimised by hand (10% increase in clockrate with IceStorm):
+*/
+            RdNo1[5] = 1'b0;
+            RdNo1[4] = ~Insn_d[0]
+                ? (Insn_d[1] & ~Insn_d[14] & Insn_d[11])
+                : (~Insn_d[1]
+                    ? (~Insn_d[15] & Insn_d[11])
+                    : Insn_d[19]
+                  );
+            RdNo1[3] = ~Insn_d[0]
+                ? (~Insn_d[1]
+                    ? Insn_d[14]
+                    : (~Insn_d[14] & Insn_d[10])
+                  )
+                : (~Insn_d[1]
+                    ? (Insn_d[15] | Insn_d[10])
+                    : Insn_d[18]
+                  );
+            RdNo1[2] = ~Insn_d[0]
+                ? ((Insn_d[1] ^ Insn_d[14]) & Insn_d[9])
+                : (~Insn_d[1] ? Insn_d[9] : Insn_d[17]);
+            RdNo1[1] = ~Insn_d[0]
+                ? (Insn_d[8] | ~(Insn_d[1] ^ Insn_d[14]))
+                : (~Insn_d[1] ? Insn_d[8] : Insn_d[16]);
+            RdNo1[0] = ~Insn_d[0]
+                ? ((Insn_d[1] ^ Insn_d[14]) & Insn_d[7])
+                : (~Insn_d[1] ? Insn_d[7] : Insn_d[15]);
+
 
             if (~Insn_d[1]) begin
                 if (Insn_d[0] & Insn_d[14]) begin
@@ -1318,17 +1310,18 @@ end
 
 
 
-    wire [WORD_WIDTH-1:0] vLogicResult = ~e_SelLogic[1]
-        ? (~e_SelLogic[0] ? (e_A ^ e_B) : 32'h0)
-        : (~e_SelLogic[0] ? (e_A | e_B) : (e_A & e_B));
-    wire [WORD_WIDTH-1:0] vPCResult =
+    wire [WORD_WIDTH-1:0] LogicResult_w = ~LogicOp_q[1]
+        ? (~LogicOp_q[0] ? (e_A ^ e_B) : e_B)
+        : (~LogicOp_q[0] ? (e_A | e_B) : (e_A & e_B));
+    wire [WORD_WIDTH-1:0] PCResult_w =
           (e_ReturnPC ? PC_q : 0);
-    wire [WORD_WIDTH-1:0] vUIResult =
+    wire [WORD_WIDTH-1:0] UIResult_w =
           (e_ReturnUI ? ImmUpper_q : 0);
 
     // OPTIMIZE? vFastResult has one input left
-    wire [WORD_WIDTH-1:0] vFastResult = 
-        vLogicResult | vUIResult | vPCResult;
+    wire [WORD_WIDTH-1:0] vFastResult = EnLogic_q
+        ? LogicResult_w
+        : (UIResult_w | PCResult_w);
     wire [WORD_WIDTH-1:0] Sum = e_A + e_B + {{(WORD_WIDTH-1){1'b0}}, e_NegB};
     wire [WORD_WIDTH-1:0] vShiftAlternative = {
         e_SelSum ? Sum[WORD_WIDTH-1:1] :  vFastResult[WORD_WIDTH-1:1],
@@ -1359,7 +1352,7 @@ end
 
     // branch unit
 
-    wire vEqual = (vLogicResult == ~0);
+    wire vEqual = (LogicResult_w == ~0);
     wire vLessXor = InvertBranch_q ^ ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
     wire vLess = (Sum[31] & (e_A[31] ^ e_B[31])) ^ vLessXor;
     wire vBEQ = e_InsnBEQ & (InvertBranch_q ^ vEqual) & ~m_Kill;
@@ -1887,7 +1880,8 @@ end
         e_MemStore <= MemStore;
         e_MemWidth <= MemWidth;
 
-        e_SelLogic <= SelLogic;
+        LogicOp_q <= LogicOp_d;
+        EnLogic_q <= EnLogic_d;
         e_NegB <= NegB;
         WrNoE_q <= WrNoD_d;
         InvertBranch_q <= InvertBranch_d;
@@ -1919,6 +1913,7 @@ end
 
         // exception handling
         PrevPC_q            <= PC_q;
+        PrevPrevPC_q        <= PrevPC_q;
         OverwriteE_q        <= Overwrite_d;
         OverwriteValE_q     <= OverwriteVal_d;
         OverwriteM_q        <= OverwriteE_q;

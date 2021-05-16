@@ -2,8 +2,7 @@
 # rudolv_ecall.S
 #-----------------------------------------------------------------------------
 #
-# Test user exceptions with ecall and ebreak
-#   Test 1-3: test if instructions in delay slot are ignored
+# Test user exceptions with ecall, ebreak and c.ebreak
 #
 # Copyright Jörg Mische <bobbl@gmx.de>
 # SPDX-License-Identifier: ISC
@@ -52,15 +51,7 @@ init:
         # Test 1-5: ecall
         #-------------------------------------------------------------
 
-        TEST_DELAYSLOTS(11, 11,           \
-            ecall                       ;\
-            add     x12, x12, 3         ;\
-            lw      x12, 4(x9)          ;\
-            add     x12, x12, 3         ;
-        )
-        lw      x4, 0(x9)               # test if sw was not executed
-        bnez    x4, fail
-
+        li      x13, 0                  # MTVAL=0
         TEST_DELAYSLOTS(1, 11,           \
             ecall                       ;\
             add     x12, x12, 3         ;\
@@ -70,6 +61,7 @@ init:
         lw      x4, 0(x9)               # test if sw was not executed
         bnez    x4, fail
 
+        li      x13, 0                  # MTVAL=0
         TEST_DELAYSLOTS(2, 11,           \
             ecall                       ;\
             lw      x12, 4(x9)          ;\
@@ -79,6 +71,7 @@ init:
         lw      x4, 0(x9)               # test if sw was not executed
         bnez    x4, fail
 
+        li      x13, 0                  # MTVAL=0
         TEST_DELAYSLOTS(3, 11,           \
             ecall                       ;\
             sw      x8, 0(x9)           ;\
@@ -91,6 +84,7 @@ init:
         li      x5, 100
         bne     x4, x5, fail
 
+        li      x13, 0                  # MTVAL=0
         TEST_DELAYSLOTS(4, 11,           \
             ecall                       ;\
             rdcycle x12                 ;\
@@ -101,6 +95,7 @@ init:
         li      x5, 100
         bne     x4, x5, fail
 
+        li      x13, 0                  # MTVAL=0
         TEST_DELAYSLOTS(5, 11,           \
             ecall                       ;\
             csrw    mscratch, 3         ;\
@@ -113,9 +108,10 @@ init:
 
 
         #-------------------------------------------------------------
-        # Test 5-10: ecall
+        # Test 5-10: ebreak
         #-------------------------------------------------------------
 
+        la      x13, 1f                 # MTVAL=PC
         TEST_DELAYSLOTS(6, 3,            \
             ebreak                      ;\
             beqz    x12, fail           ;\
@@ -123,6 +119,7 @@ init:
             jr      x7                  ;
         )
 
+        la      x13, 1f                 # MTVAL=PC
         TEST_DELAYSLOTS(7, 3,            \
             ebreak                      ;\
             j       fail                ;\
@@ -130,6 +127,7 @@ init:
             ecall                       ;
         )
 
+        la      x13, 1f                 # MTVAL=PC
         TEST_DELAYSLOTS(8, 3,            \
             ebreak                      ;\
             jr      x7                  ;\
@@ -137,6 +135,7 @@ init:
             mret                        ;
         )
 
+        la      x13, 1f                 # MTVAL=PC
         TEST_DELAYSLOTS(9, 3,            \
             ebreak                      ;\
             ecall                       ;\
@@ -144,12 +143,90 @@ init:
             add     x12, x12, 97        ;
         )
 
+        la      x13, 1f                 # MTVAL=PC
         TEST_DELAYSLOTS(10, 3,           \
             ebreak                      ;\
             mret                        ;\
             add     x12, x12, 97        ;\
             lw      x12, 4(x9)          ;
         )
+
+
+        #-------------------------------------------------------------
+        # Test 11-15: c.ebreak
+        #-------------------------------------------------------------
+        # CAUTION: code must be exactly 16 bytes or more if the
+        #          instructions beyond 16 bytes are nops
+
+        csrr    x13, misa               # dont check if RVC not supported
+        andi    x13, x13, 4
+        beqz    x13, pass
+
+        .option push
+        .option rvc
+        c.nop
+
+        la      x13, 1f                 # MTVAL=PC
+        TEST_DELAYSLOTS(11, 3,            \
+            c.ebreak                      ;\
+            beqz    x12, fail           ;\
+            j       fail                ;\
+            jr      x7                  ;\
+            bne     x8, x9, fail        ;\
+            c.nop                       ;\
+            c.nop                       ;
+        )
+
+
+
+        la      x13, 1f                 # MTVAL=PC
+        TEST_DELAYSLOTS(12, 3,           \
+            c.ebreak                    ;\
+            j       fail                ;\
+            jr      x7                  ;\
+            ecall                       ;\
+            bne     x8, x9, fail        ;\
+            c.nop                       ;\
+            c.nop                       ;
+        )
+
+        la      x13, 1f                 # MTVAL=PC
+        TEST_DELAYSLOTS(13, 3,           \
+            c.ebreak                    ;\
+            jr      x7                  ;\
+            ecall                       ;\
+            mret                        ;\
+            bne     x8, x9, fail        ;\
+            c.nop                       ;\
+            c.nop                       ;
+        )
+
+        la      x13, 1f                 # MTVAL=PC
+        TEST_DELAYSLOTS(14, 3,           \
+            c.ebreak                    ;\
+            ecall                       ;\
+            mret                        ;\
+            add     x12, x12, 97        ;\
+            c.nop                       ;\
+            c.nop                       ;
+        )
+
+        la      x13, 1f                 # MTVAL=PC
+        TEST_DELAYSLOTS(15, 3,           \
+            c.ebreak                    ;\
+            mret                        ;\
+            add     x12, x12, 97        ;\
+            lw      x12, 4(x9)          ;\
+            bne     x8, x9, fail        ;\
+            c.nop                       ;\
+            c.nop                       ;
+        )
+
+        j       pass
+        .option pop
+        .align  2
+
+
 
         TEST_PASSFAIL
 
@@ -163,6 +240,8 @@ trap_handler:
         bne     x20, x10, fail
         csrr    x21, mcause
         bne     x21, x11, fail
+        csrr    x23, mtval
+        bne     x23, x13, fail
         add     x20, x20, 16            # ignore 3 instructions after ecall/ebreak
         csrw    mepc, x20
         mret
