@@ -1541,7 +1541,8 @@ module Pipeline #(
     reg [31:0] CsrRDataInternal_d;
     always @* case (e_CsrAddr)
         12'h300: begin // MSTATUS
-            CsrRDataInternal_d = {28'b0, f_MModeIntEnable, 3'b0};
+            CsrRDataInternal_d = {24'b0, f_MModePriorIntEnable, 3'b0,
+                                         f_MModeIntEnable, 3'b0};
         end
         default: begin
             CsrRDataInternal_d = 0;

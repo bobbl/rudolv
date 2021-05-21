@@ -32,20 +32,94 @@
 RVTEST_RV64U
 RVTEST_CODE_BEGIN
 
+        #-------------------------------------------------------------
+        # Test 1: clear and set MSTATUS.MIE
+        #-------------------------------------------------------------
 test_1:
-        csrrc   x10, mstatus, 8         # MSTATUS.IE=0 disable interrupts
+        li      TESTNUM, 1
+        li      x10, 8
+        csrrs   x4, mstatus, 8
+        csrrc   x5, mstatus, 8
+        csrrs   x6, mstatus, x10
+        csrrc   x7, mstatus, x10
+        andi    x5, x5, 8
+        beqz    x5, fail
+        andi    x6, x6, 8
+        bnez    x6, fail
+        andi    x7, x7, 8
+        beqz    x7, fail
+
+        # now IE is cleared => iterrupts disabled
+
+
+        #-------------------------------------------------------------
+        # Test 2: clear and set MSTATUS.MPIE
+        #-------------------------------------------------------------
+test_2:
+        li      TESTNUM, 2
+        li      x10, 0x80
+        csrrs   x4, mstatus, x10
+        csrrc   x5, mstatus, x10
+        csrrs   x6, mstatus, x10
+        csrrc   x7, mstatus, x10
+        andi    x5, x5, 0x80
+        beqz    x5, fail
+        andi    x6, x6, 0x80
+        bnez    x6, fail
+        andi    x7, x7, 0x80
+        beqz    x7, fail
+
+
+        #-------------------------------------------------------------
+        # Test 3: set MSTATUS.MIE via MRET
+        #-------------------------------------------------------------
+test_3:
+        li      TESTNUM, 3
+        li      x10, 0x80
+        csrc    mstatus, 8          # MIE=0
+        csrs    mstatus, x10        # MPIE=1
+        la      x4, return_3
+        csrw    mepc, x4
+        mret
+        j       fail
+return_3:
+        csrr    x4, mstatus         # after MRET:
+        andi    x4, x4, 0x88        # MIE = previous MPIE = 1
+        li      x5, 0x88            # MPIE = 1
+        bne     x4, x5, fail
+
+
+        #-------------------------------------------------------------
+        # Test 4: clear MSTATUS.MIE via MRET
+        #-------------------------------------------------------------
+test_4:
+        li      TESTNUM, 4
+        li      x4, 0x80
+        csrc    mstatus, x4     # MPIE := 0 (MIE still 1)
+        la      x4, return_4
+        csrw    mepc, x4
+        mret
+        j       fail
+return_4:
+        csrr    x4, mstatus     # after MRET:
+        andi    x4, x4, 0x88    # MIE = previous MPIE = 0
+        li      x5, 0x80        # MPIE = 1
+        bne     x4, x5, fail
+
+        # MSTATUS.MIE=0 interrupts disabled
+
+
+
+
+        #-------------------------------------------------------------
+        # Test 11: IE=0 SWI=0 => no trap
+        #-------------------------------------------------------------
+test_11:
+        li      TESTNUM, 11
         la      x11, trap_disable_softint       # set interrupt handler
         csrrw   x11, mtvec, x11
 
         li      x6, 100                 # number of cycles to wait
-
-
-
-
-        #-------------------------------------------------------------
-        # Test 1: IE=0 SWI=0 => no trap
-        #-------------------------------------------------------------
-        li      TESTNUM, 1
         li      x7, 100
         DISABLE_SOFTINT
         jal     wait_for_int            # wait, handler should not be called
@@ -53,10 +127,10 @@ test_1:
         bne     x7, x4, restore_fail
 
         #-------------------------------------------------------------
-        # Test 2: IE=0 SWI=1 => no trap
+        # Test 12: IE=0 SWI=1 => no trap
         #-------------------------------------------------------------
-test_2:
-        li      TESTNUM, 2
+test_12:
+        li      TESTNUM, 12
         li      x7, 100
         ENABLE_SOFTINT
         jal     wait_for_int            # wait, handler should not be called
@@ -64,10 +138,10 @@ test_2:
         bne     x7, x4, restore_fail
 
         #-------------------------------------------------------------
-        # Test 3: IE=1 SWI=0 => no trap
+        # Test 13: IE=1 SWI=0 => no trap
         #-------------------------------------------------------------
-test_3:
-        li      TESTNUM, 3
+test_13:
+        li      TESTNUM, 13
         li      x7, 100
         DISABLE_SOFTINT
         fence.i
@@ -82,10 +156,10 @@ test_3:
 
 
         #-------------------------------------------------------------
-        # Test 11: IE=1 then SWI=1 => trap (interrupt li sequence)
+        # Test 21: IE=1 then SWI=1 => trap (interrupt li sequence)
         #-------------------------------------------------------------
-test_11:
-        li      TESTNUM, 11
+test_21:
+        li      TESTNUM, 21
         li      x7, 0x70
         ENABLE_SOFTINT
         xor     x7, x7, 0x400
@@ -97,10 +171,10 @@ test_11:
         bne     x7, x4, restore_fail
 
         #-------------------------------------------------------------
-        # Test 12: IE=1 then SWI=1 => trap (interrupt jal)
+        # Test 22: IE=1 then SWI=1 => trap (interrupt jal)
         #-------------------------------------------------------------
-test_12:
-        li      TESTNUM, 12
+test_22:
+        li      TESTNUM, 22
         li      x7, 0x70
         ENABLE_SOFTINT
         jal     wait_for_int            # wait, handler should modify x7
@@ -108,10 +182,10 @@ test_12:
         bne     x7, x4, restore_fail
 
         #-------------------------------------------------------------
-        # Test 13: IE=1 then SWI=1 => trap (interrupt multicycle div)
+        # Test 23: IE=1 then SWI=1 => trap (interrupt multicycle div)
         #-------------------------------------------------------------
-test_13:
-        li      TESTNUM, 13
+test_23:
+        li      TESTNUM, 23
         li      x7, 0x400
         li      x10, 1000000000
         li      x11, 1000000
@@ -124,10 +198,10 @@ test_13:
         bne     x12, x4, restore_fail
 
         #-------------------------------------------------------------
-        # Test 14: IE=1 then SWI=1 => trap (interrupt wfi)
+        # Test 24: IE=1 then SWI=1 => trap (interrupt wfi)
         #-------------------------------------------------------------
-test_14:
-        li      TESTNUM, 14
+test_24:
+        li      TESTNUM, 24
         li      x7, 0x90
         ENABLE_SOFTINT
         wfi
@@ -150,10 +224,10 @@ test_14:
         fence.i
 
         #-------------------------------------------------------------
-        # Test 21: SWI=1 then IE=1 => trap (interrupt li sequence)
+        # Test 31: SWI=1 then IE=1 => trap (interrupt li sequence)
         #-------------------------------------------------------------
-test_21:
-        li      TESTNUM, 21
+test_31:
+        li      TESTNUM, 31
         li      x7, 0x70
         ENABLE_INTS
         xor     x7, x7, 0x400
@@ -166,10 +240,10 @@ test_21:
 
 
         #-------------------------------------------------------------
-        # Test 22: SWI=1 then IE=1 => trap (interrupt jal)
+        # Test 32: SWI=1 then IE=1 => trap (interrupt jal)
         #-------------------------------------------------------------
-test_22:
-        li      TESTNUM, 22
+test_32:
+        li      TESTNUM, 32
         li      x7, 0x70
         ENABLE_INTS
         jal     wait_for_int            # wait, handler should modify x7
@@ -178,10 +252,10 @@ test_22:
 
 
         #-------------------------------------------------------------
-        # Test 23: SWI=1 then IE=1 => trap (interrupt multicycle div)
+        # Test 33: SWI=1 then IE=1 => trap (interrupt multicycle div)
         #-------------------------------------------------------------
-test_23:
-        li      TESTNUM, 23
+test_33:
+        li      TESTNUM, 33
         li      x7, 0x400
         li      x10, 1000000000
         li      x11, 1000000
@@ -195,10 +269,10 @@ test_23:
 
 
         #-------------------------------------------------------------
-        # Test 24: SWI=1 then IE=1 => trap (interrupt wfi)
+        # Test 34: SWI=1 then IE=1 => trap (interrupt wfi)
         #-------------------------------------------------------------
-test_24:
-        li      TESTNUM, 24
+test_34:
+        li      TESTNUM, 34
         li      x7, 0x70
         ENABLE_INTS
         wfi
@@ -207,14 +281,14 @@ test_24:
 
 
         #-------------------------------------------------------------
-        # Test 25: SWI=1 then mret to set IE=1 => trap back-to-back to mret
+        # Test 35: SWI=1 then mret to set IE=1 => trap back-to-back to mret
         #-------------------------------------------------------------
-test_25:
-        li      TESTNUM, 25
+test_35:
+        li      TESTNUM, 35
         li      x7, 0x70
         li      x4, 0x80
         csrs    mstatus, x4             # MSTATUS.MPIE=1
-        la      x4, target_25
+        la      x4, target_35
         csrw    mepc, x4
         mret                            # set IE to MPIE => trap
         li      x7, 0x666
@@ -222,7 +296,7 @@ test_25:
         nop
         nop
 
-target_25:
+target_35:
         li      x4, 0x80000074          # cause: software interrupt
         bne     x7, x4, restore_fail
 
@@ -236,10 +310,10 @@ target_25:
         csrw    mtvec, x4
 
         #-------------------------------------------------------------
-        # Test 31: IE=1 then timer int => trap (interrupt loop)
+        # Test 41: IE=1 then timer int => trap (interrupt loop)
         #-------------------------------------------------------------
-test_31:
-        li      TESTNUM, 31
+test_41:
+        li      TESTNUM, 41
         li      x7, 0x60
 
         ENABLE_INTS
@@ -253,10 +327,10 @@ test_31:
 
 
         #-------------------------------------------------------------
-        # Test 32: IE=1 then timer int => trap (interrupt wfi)
+        # Test 42: IE=1 then timer int => trap (interrupt wfi)
         #-------------------------------------------------------------
-test_32:
-        li      TESTNUM, 32
+test_42:
+        li      TESTNUM, 42
         li      x7, 0x50
 
         ENABLE_INTS
@@ -270,10 +344,10 @@ test_32:
 
 
         #-------------------------------------------------------------
-        # Test 33: IE=1 then timer int => trap (interrupt wfi in subroutine)
+        # Test 43: IE=1 then timer int => trap (interrupt wfi in subroutine)
         #-------------------------------------------------------------
-test_33:
-        li      TESTNUM, 33
+test_43:
+        li      TESTNUM, 43
         li      x7, 0x50
 
         ENABLE_INTS
@@ -291,10 +365,10 @@ test_33:
 
 
         #-------------------------------------------------------------
-        # Test 41: wfi in branch delay slot of branch => no trap
+        # Test 51: wfi in branch delay slot of branch => no trap
         #-------------------------------------------------------------
-test_41:
-        li      TESTNUM, 41
+test_51:
+        li      TESTNUM, 51
         li      x7, 0x50
 
         ENABLE_INTS
@@ -306,7 +380,7 @@ test_41:
         nop
         li      x4, 3
         li      x5, 3
-        beq     x4, x5, test_42
+        beq     x4, x5, test_52
         wfi
         wfi
         j       restore_fail
@@ -315,11 +389,11 @@ test_41:
 
 
         #-------------------------------------------------------------
-        # Test 42: wfi in branch delay slot of jal => no trap
+        # Test 52: wfi in branch delay slot of jal => no trap
         #-------------------------------------------------------------
-test_42:
-        li      TESTNUM, 42
-        j       test_43
+test_52:
+        li      TESTNUM, 52
+        j       test_53
         wfi
         wfi
         j       restore_fail
@@ -328,11 +402,11 @@ test_42:
 
 
         #-------------------------------------------------------------
-        # Test 43: wfi in branch delay slot of jalr => no trap
+        # Test 53: wfi in branch delay slot of jalr => no trap
         #-------------------------------------------------------------
-test_43:
-        li      TESTNUM, 43
-        la      x4, check_43
+test_53:
+        li      TESTNUM, 53
+        la      x4, check_53
         jr      x4
         wfi
         wfi
@@ -340,9 +414,10 @@ test_43:
         nop
         nop
 
-check_43:
+check_53:
         li      x4, 0x50
         bne     x7, x4, restore_fail
+
 
 
 
