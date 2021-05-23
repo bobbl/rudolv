@@ -85,9 +85,9 @@ do
                 $verilog_files $chip.v
             report_yosys
             ;;
-        gy-synth)
-            $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -top top -json tmp.json' \
-                -D ENABLE_GRUBBY $verilog_files $chip.v
+        synth2)
+            $YOSYS -ql tmp.yosys.log -p 'synth_ice40 -abc2 -top top -json tmp.json' \
+                $verilog_files $chip.v
             report_yosys
             ;;
         pnr)
