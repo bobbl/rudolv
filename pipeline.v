@@ -44,21 +44,16 @@ module Pipeline #(
     output mem_write,
     output [3:0] mem_wmask,
     output [31:0] mem_wdata,
-    output mem_wgrubby,
     output [31:0] mem_addr,
     input [31:0] mem_rdata,
-    input mem_rgrubby,
 
     output        regset_we,
     output  [5:0] regset_wa,
     output [31:0] regset_wd,
-    output        regset_wg,
     output  [5:0] regset_ra1,
     output  [5:0] regset_ra2,
     input  [31:0] regset_rd1,
-    input         regset_rg1,
-    input  [31:0] regset_rd2,
-    input         regset_rg2
+    input  [31:0] regset_rd2
 
 );
     localparam integer WORD_WIDTH = 32;
@@ -87,6 +82,7 @@ module Pipeline #(
 
     // fetch
     reg [WORD_WIDTH-1:0] FetchAddr_q;
+    reg MisalignedJump_q;
 
     // decode
     reg [31:0] Insn_q;
@@ -96,20 +92,18 @@ module Pipeline #(
 
     reg MC_q;
     reg [7:0] MCState_q;
-    reg MCUnalignedJump_q;
     reg [5:0] MCAux_q;
     reg [4:0] CsrTranslateE_q;
     reg [4:0] CsrTranslateM_q;
 
     reg [WORD_WIDTH-1:0] PC_q;
     reg [31:0] DelayedInsn_q;
-    reg BubbleM_q;
-    reg BubbleE_q;
+    reg MemAccessM_q;
+    reg MemAccessE_q;
 
     reg [31:0] PartialInsn_q;
     reg OddPC_q;
-    reg FetchAgainE_q;
-    reg FetchAgainM_q;
+    reg MemMisalignedW_q;
 
     // mul/div
     reg StartMulDiv_q;
@@ -172,7 +166,7 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] MemRData_q;
     reg [WORD_WIDTH-1:0] MemWData_q;
     //reg [WORD_WIDTH-1:0] MemRDataPrev_q;
-    reg MemMisaligned_q;
+    reg MemMisalignedM_q;
     reg [WORD_WIDTH-1:0] AddrSum_q;
 
     // write back
@@ -212,7 +206,6 @@ module Pipeline #(
     reg f_MModeIntEnable;        // mstatus.mie
     reg f_MModePriorIntEnable;   // mstatus.mpie
     reg IrqResponse_q;
-    reg NoIrq_q;
     reg SoftwareIrq_q;
     reg TimerIrq_q;      // external pin high
     reg ExternalIrq_q;
@@ -380,19 +373,21 @@ module Pipeline #(
 
 
     // MSB=0: end of microcode sequence
-    localparam [7:0] mcContinueFetching = 8'h01;
-    localparam [7:0] mcTrapWrPc         = 8'h02;
-    localparam [7:0] mcCsrReg4          = 8'h03;
-    localparam [7:0] mcCEBREAK          = 8'h04;
-    localparam [7:0] mcMem              = 8'h05;
-    localparam [7:0] mcFetchAgain       = 8'h80;
-    localparam [7:0] mcTrapWrMtval      = 8'h81;
-    localparam [7:0] mcMulDivFirst      = 8'h82;
-    localparam [7:0] mcMulDivLoop       = 8'h83;
-    localparam [7:0] mcCsr2             = 8'h84;
-    localparam [7:0] mcCsrReg3          = 8'h85;
-    localparam [7:0] mcNoCsr            = 8'h86;
-    localparam [7:0] mcWFI              = 8'h87;
+    localparam [7:0] mcJumpMis     = 8'h01;
+    localparam [7:0] mcMem         = 8'h02;
+    localparam [7:0] mcCEBREAK     = 8'h03;
+    localparam [7:0] mcTrapWrPc    = 8'h04;
+    localparam [7:0] mcMemMis      = 8'h81;
+    localparam [7:0] mcWFI         = 8'h82;
+    localparam [7:0] mcNoCsr       = 8'h83;
+    localparam [7:0] mcTrapWrMtval = 8'h84;
+    localparam [7:0] mcCsrReg4     = 8'h41;
+    localparam [7:0] mcLast        = 8'h42;
+    localparam [7:0] mcCsrReg3     = 8'hC1;
+    localparam [7:0] mcCsrExt3     = 8'hC2;
+    localparam [7:0] mcCsr2        = 8'hC3;
+    localparam [7:0] mcMulDivFirst = 8'hC4;
+    localparam [7:0] mcMulDivLoop  = 8'hC5;
 
 
 
@@ -406,9 +401,9 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] PC_d;
     reg [31:0] PartialInsn_d;
     reg OddPC_d;
-    reg RealignedPC_d;
-    reg RVCInsn_w;
-    reg FetchAgainD_d;
+    reg RealignedPC_w;
+    reg DelayFetch_v;
+    reg IncFetchAddr_v;
 
     // Decoding
     reg ExcIllegal_d;
@@ -418,7 +413,6 @@ module Pipeline #(
 
     reg InsnCSR;
     reg CsrFromExtD_d;
-    reg BubbleD_d;
 
     reg InsnBEQ;
     reg InsnBLTorBLTU;
@@ -439,11 +433,10 @@ module Pipeline #(
     reg AddrFromSum;
     reg MemStore_d;
     reg [1:0] MemWidthD_d;
-    reg MemAccess_v;
+    reg MemAccessD_d;
 
     reg MC_d;
     reg [7:0] MCState_d;
-    reg MCUnalignedJump_d;
 
     // MC exclusive
     reg [5:0] MCAux_d;
@@ -455,6 +448,7 @@ module Pipeline #(
     reg TrapEnterIllegal_d;
     reg CsrWdataRs1_d;
     reg CsrWdataImm_d;
+    reg MCHoldInsn_v;
 
     reg Overwrite_d;              // overwrite result in M-stage (used by exceptions)
     reg MCOverSelDiv_d;
@@ -481,18 +475,13 @@ module Pipeline #(
         WrEnD_d = 0;
         WrNoD_d = 0; // don't care
 
-        FetchAddr_d = FetchAddr_q;
         PC_d = PC_q;
-        OddPC_d = OddPC_q;
-        RealignedPC_d = 0;
         RdNo1 = 0;
         RdNo2 = 0;
-        RVCInsn_w = 0;
-        FetchAgainD_d = 0;
+        IncFetchAddr_v = 0;
 
         InsnCSR = 0;
         CsrFromExtD_d = 0;
-        BubbleD_d = 0;
 
         InsnBEQ         = 0;
         InsnBLTorBLTU   = 0;
@@ -515,11 +504,11 @@ module Pipeline #(
         AddrFromSum     = 0;
         MemStore_d      = 0;
         MemWidthD_d     = 2'b11; // no memory access
-        MemAccess_v     = 0;
+        MemAccessD_d     = 0;
 
         MC_d                = 0;
         MCState_d           = 0;
-        MCUnalignedJump_d   = 0;
+        MCHoldInsn_v        = 0;
         MCAux_d             = MCAux_q;
         MCOverSelDiv_d      = 0;
         MCOverEnPC_d        = 0;
@@ -542,124 +531,74 @@ module Pipeline #(
 
 
         if (m_Kill) begin
-            FetchAddr_d = FetchAddr_q + 4; // continue fetching
-            PC_d = FetchAddr_q;
-
-            OddPC_d = FetchAddr_q[1];
-            if (FetchAddr_q[1]) begin
-                FetchAddr_d[1] = 0;
+            IncFetchAddr_v = 1; // continue fetching
+            PC_d = {FetchAddr_q[WORD_WIDTH-1:2], MisalignedJump_q, 1'b0};
+            if (MisalignedJump_q) begin
                 MC_d = 1;
-                MCState_d = mcContinueFetching;
-                MCUnalignedJump_d = 1;
+                MCState_d = mcJumpMis;
             end
         end else if (ExcIllegal_q) begin
             TrapEnterIllegal_d = 1;
 
         // microcoded cycles of multi-cycle instructions
         end else if (MC_q) begin
-            MC_d = MCState_q[7];
+            MC_d         = MCState_q[7];
+            MCHoldInsn_v = MCState_q[6];
             case (MCState_q)
-                mcContinueFetching: begin
+                mcJumpMis: begin
                     // unaligned jump target: wait one cycle
-                    // div/mul: do nothing because result is not yet available
-                    FetchAddr_d = FetchAddr_q + 4;
+                    IncFetchAddr_v = 1;
+                    //MC_d         = 0; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 0; // encoded in MCState_q[6]
                 end
-                mcFetchAgain: begin 
-                    // 3rd cycle of external CSR access or misaligned memory access
-                    FetchAgainD_d = 1;
-                    BubbleD_d = 1;
-                    MCState_d = mcMem; // used as a Nop, because MemMisaligned_d=0
+                mcMem: begin
+                    // 2nd memory cycle, also used as nop
+                    if (MemMisalignedE_d) begin
+                        MemStore_d  = MemStore_q;
+                        MemWidthD_d = MemWidthE_q;
+                        WrEnD_d     = WrEnE_q;
+                        WrNoD_d     = WrNoE_q;
+                        MCState_d   = mcMemMis;
+                        MemAccessD_d = 1;
+                    end
+                    //MC_d         = 0; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 0; // encoded in MCState_q[6]
                 end
-                mcTrapWrMtval: begin 
-                    // Enter or return from trap
-                    // Difference: don't write CSRs when returning
-                    // jump to adddress in first register (MEPC) and write MTVAL
-                    // Imm12PlusReg_w is set to 0
-                    InsnJALR = 1;
-                    Overwrite_d = ~TrapReturnE_q; // don't write if returning
+                mcCEBREAK: begin
+                    // C.EBREAK: delay 1 cycle for same timing as EBREAK
 
-                    // EBREAK exception: MTVAL=PC
-                    // Illegal instruction exception: MTVAL=insn
-                    // otherwise: MTVAL=0
-                    MCOverEnPC_d = TrapEnterEBREAK_q;
-                    MCOverEnInsn_d = TrapEnterIllegal_q;
-
-                    WrNoD_d = REG_CSR_MTVAL;
-                    MCState_d = mcTrapWrPc;
+                    TrapEnterEBREAK_d = 1;
+                    //MC_d         = 0; // encoded in MCState_q[7]
+                    //MCHoldInsn_v doesn't care, anyway encoded in MCState_q[6]
                 end
                 mcTrapWrPc: begin
                     // write MEPC
                     Overwrite_d = 1;
                     MCOverEnPC_d = 1;
                     WrNoD_d = REG_CSR_MEPC;
-                end
-                mcMulDivFirst: begin
-                    WrNoD_d = WrNoE_q;
-                    MCAux_d = 31;
-                    MCState_d = mcMulDivLoop;
-                end
-                mcMulDivLoop: begin
-                    WrNoD_d = WrNoE_q;
-                    MCAux_d = MCAux_q - 1;
-                    if (MCAux_q != 0) begin
-                        MCState_d = mcMulDivLoop;
-                    end else begin
-                        WrEnD_d = (WrNoE_q != 0);
-                            // required for forwarding
-                        Overwrite_d = WrEnD_d;
-                        MCOverSelDiv_d = 1;
-                        MCState_d = mcContinueFetching;
-                    end
-                end
-                mcCsr2: begin // CSR access
-                    BubbleD_d = 1;
 
-                    if (CsrFromReg_w) begin
-                        RdNo1           = {1'b1, CsrTranslateD_d};
-                        RdNo2           = 0;
-                        MCState_d       = mcCsrReg3;
-                    end else if (CsrValid_w) begin
-                        CsrFromExtD_d   = WrEnE_q & CsrValid_w & (MCInsn_q[11:7]!=0);
-                        WrEnD_d         = (MCInsn_q[11:7]!=0);
-                        WrNoD_d         = {1'b0, MCInsn_q[11:7]}; // MCInsn_q also possible
-                        InsnCSR         = 1;
-                        MCState_d       = mcFetchAgain;
-                    end else begin
-                        TrapEnterIllegal_d = 1;
-                    end
+                    //MC_d = 0; // encoded in MCState_q[7]
+                    //MCHoldInsn_v doesn't care, anyway encoded in MCState_q[6]
+
+                    // This way, the next instruction will be decoded but killed
+                    // Other solution: MC_d=0 and MCState_d=mcMem for a nop cycle
                 end
-                mcCsrReg3: begin // 3rd cycle of CSR access
-                                 // or rd, csr, x0
-                    WrEnD_d = (MCInsn_q[11:7] != 0);
-                    WrNoD_d = {1'b0, MCInsn_q[11:7]};
-                    LogicOp_d = 2'b10; // or
-                    EnLogic_d = 1;
+                mcMemMis: begin
+                    // 3rd cycle of misaligned memory access
 
-                    RdNo1 = MCInsn_q[13]
-                        ? {1'b1, CsrTranslateE_q} // CSRS, CSRC
-                        : 0; // CSRW
-                    RdNo2 = REG_CSR_TMP;
-
-                    FetchAgainD_d = 1;
-                    BubbleD_d = 1;
-                    MCState_d = mcCsrReg4;
+                    MCState_d = mcMem; // used as a Nop, because MemMisalignedE_d=0
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 0; // encoded in MCState_q[6]
                 end
-                mcCsrReg4: begin // 4th cycle of CSR access
-                                 // CSRW: or csr, x0, tmp
-                                 // CSRS: or csr, csr, tmp
-                                 // CSRC: and csr, csr, not tmp
-                    WrEnD_d = 1;
-                    WrNoD_d = {1'b1, CsrTranslateM_q};
-
-                    LogicOp_d = {1'b1, CsrClearW_q};
-                        // and for CSRC, or for CSRS and CSRW
-                    EnLogic_d = 1;
-                    NegB = CsrClearW_q;
-                        // not for CSRC
+                mcWFI: begin 
+                    MCState_d = IrqResponse_q ? mcMem : mcWFI;
+                    //MC_d = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v doesn't care, anyway encoded in MCState_q[6]
                 end
                 mcNoCsr: begin
-                    BubbleD_d = 1;
                     MCState_d = mcTrapWrMtval;
+                    //MC_d  = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v doesn't care, anyway encoded in MCState_q[6]
                     case (MCInsn_q[31:20])
                         12'h000: begin // ECALL
                             TrapEnterECALL_d = 1;
@@ -669,17 +608,14 @@ module Pipeline #(
                         end
                         12'h002: begin // URET
                             RdNo1 = REG_CSR_MEPC;
-                            MCState_d = mcTrapWrMtval;
                             TrapReturn_d = 1;
                         end
                         12'h102: begin // SRET
                             RdNo1 = REG_CSR_MEPC;
-                            MCState_d = mcTrapWrMtval;
                             TrapReturn_d = 1;
                         end
                         12'h302: begin // MRET
                             RdNo1 = REG_CSR_MEPC;
-                            MCState_d = mcTrapWrMtval;
                             TrapReturn_d = 1;
                         end
                         12'h105: begin // WFI
@@ -690,27 +626,109 @@ module Pipeline #(
                         end
                     endcase
                 end
-                mcCEBREAK: begin // C.EBREAK
-                    // delay 1 cycle for same timing as EBREAK
-                    BubbleD_d = 1;
-                    TrapEnterEBREAK_d = 1;
+                mcTrapWrMtval: begin
+                    // enter or return from trap
+                    // enter: jump to MTVEC and write MTVAL
+                    // return: jump to MEPV and don't write CSR
+                    // Imm12PlusReg_w is implicitly set to 0
+                    InsnJALR = 1;
+                    Overwrite_d = ~TrapReturnE_q; // don't write if returning
+                    WrNoD_d = REG_CSR_MTVAL;
+
+                    // EBREAK exception: MTVAL=PC
+                    // Illegal instruction exception: MTVAL=insn
+                    // otherwise: MTVAL=0
+                    MCOverEnPC_d = TrapEnterEBREAK_q;
+                    MCOverEnInsn_d = TrapEnterIllegal_q;
+
+                    MCState_d = mcTrapWrPc;
+                    //MC_d = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v doesn't care, anyway encoded in MCState_q[6]
                 end
-                mcWFI: begin // WFI
-                    if (~IrqResponse_q) begin
-                        MC_d = 1;
-                        MCState_d = mcWFI;
+                mcCsrReg4: begin
+                    // 4th cycle of CSR access
+                    // CSRW: or csr, x0, tmp
+                    // CSRS: or csr, csr, tmp
+                    // CSRC: and csr, csr, not tmp
+                    WrEnD_d = 1;
+                    WrNoD_d = {1'b1, CsrTranslateM_q};
+
+                    LogicOp_d = {1'b1, CsrClearW_q};
+                        // and for CSRC, or for CSRS and CSRW
+                    EnLogic_d = 1;
+                    NegB = CsrClearW_q;
+                        // not for CSRC
+                    IncFetchAddr_v = 1;
+                    //MC_d         = 0; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
+                end
+                mcLast: begin // 01
+                    // div/mul, external CSR :
+                    // do nothing because result is not yet available
+                    IncFetchAddr_v = 1;
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
+                end
+                mcCsrReg3: begin 
+                    // 3rd cycle of CSR access
+                    // or rd, csr, x0
+                    WrEnD_d = (MCInsn_q[11:7] != 0);
+                    WrNoD_d = {1'b0, MCInsn_q[11:7]};
+                    LogicOp_d = 2'b10; // or
+                    EnLogic_d = 1;
+
+                    RdNo1 = MCInsn_q[13]
+                        ? {1'b1, CsrTranslateE_q} // CSRS, CSRC
+                        : 0; // CSRW
+                    RdNo2 = REG_CSR_TMP;
+                    MCState_d = mcCsrReg4;
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
+                end
+                mcCsrExt3: begin // 11
+                    MCState_d = mcLast;
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
+                end
+                mcCsr2: begin
+                    // CSR access: decide if from regset or external interface
+                    if (CsrFromReg_w) begin
+                        RdNo1         = {1'b1, CsrTranslateD_d};
+                        RdNo2         = 0;
+                        MCState_d     = mcCsrReg3;
+                    end else if (CsrValid_w) begin
+                        CsrFromExtD_d = WrEnE_q & CsrValid_w & (MCInsn_q[11:7]!=0);
+                        WrEnD_d       = (MCInsn_q[11:7]!=0);
+                        WrNoD_d       = {1'b0, MCInsn_q[11:7]};
+                        InsnCSR       = 1;
+                        MCState_d     = mcCsrExt3;
                     end else begin
-                        MC_d = 0;
+                        TrapEnterIllegal_d = 1;
                     end
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
                 end
-                mcMem: begin
-                    if (MemMisaligned_d) begin
-                        MemStore_d  = MemStore_q;
-                        MemWidthD_d = MemWidthE_q;
-                        WrEnD_d     = WrEnE_q;
-                        WrNoD_d     = WrNoE_q;
-                        MemAccess_v = 1;
+                mcMulDivFirst: begin
+                    WrNoD_d = WrNoE_q;
+                    MCAux_d = 31;
+                    MCState_d = mcMulDivLoop;
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
+                end
+                mcMulDivLoop: begin // 11
+                    WrNoD_d = WrNoE_q;
+                    MCAux_d = MCAux_q - 1;
+                    if (MCAux_q != 0) begin
+                        MCState_d = mcMulDivLoop;
+                    end else begin
+                        WrEnD_d = (WrNoE_q != 0);
+                            // required for forwarding
+                        Overwrite_d = WrEnD_d;
+                        MCOverSelDiv_d = 1;
+                        MCState_d = mcLast;
                     end
+                    //MC_d         = 1; // encoded in MCState_q[7]
+                    //MCHoldInsn_v = 1; // encoded in MCState_q[6]
                 end
                 default: begin
                 end
@@ -724,7 +742,7 @@ module Pipeline #(
         // 32 bit instruction
         end else if (Insn_q[1:0]==2'b11) begin
             ExcIllegal_d = 1;
-            FetchAddr_d = FetchAddr_q + 4;
+            IncFetchAddr_v = 1;
             PC_d = PC_q + 4;
 
             WrEnD_d = (Insn_q[11:7]!=0); // do not write to x0
@@ -761,7 +779,8 @@ module Pipeline #(
                     WrEnD_d        = WrEnD_d & ~Insn_q[5];
                     MemStore_d     = Insn_q[5];
                     MemWidthD_d    = Insn_q[13:12];
-                    MemAccess_v    = 1;
+                    MCState_d      = mcMem;
+                    MemAccessD_d    = 1;
                 end
                 4'b0100: begin // arithmetic
                     if (~Insn_q[5]) begin // immediate
@@ -774,7 +793,7 @@ module Pipeline #(
                     end else begin
                         if (Insn_q[25]) begin // RVM
                             ExcIllegal_d = (Insn_q[31:26]!=0);
-                            FetchAddr_d = FetchAddr_q;
+                            IncFetchAddr_v = 0;
                                 // increment not before last cycle
                             MC_d = 1;
                             MCState_d = mcMulDivFirst;
@@ -801,7 +820,8 @@ module Pipeline #(
                     InsnJAL = Insn_q[12];
                 end
                 4'b1100: begin // system
-                    ExcIllegal_d = 1;
+                    ExcIllegal_d    = 1;
+                    IncFetchAddr_v  = 0;
                     Overwrite_d     = 1;
                     WrEnD_d         = 1;
                     WrNoD_d         = REG_CSR_TMP;
@@ -814,14 +834,12 @@ module Pipeline #(
                                 // ro-CSR and CSRRS/C and rs1=0
                             begin
                                 ExcIllegal_d = 0;
-                                BubbleD_d = 1;
                                 MC_d = 1;
                                 MCState_d = mcCsr2;
                             end
                         end else begin
                             if (Insn_q[19:7]==0) begin
                                 ExcIllegal_d = 0;
-                                BubbleD_d = 1;
                                 MC_d = 1;
                                 MCState_d = mcNoCsr;
                             end
@@ -836,16 +854,8 @@ module Pipeline #(
         // compressed instruction
         end else begin
             ExcIllegal_d = 1;
-            if (OddPC_q) begin
-                OddPC_d = 0;
-                RealignedPC_d = 1;
-            end else begin
-                OddPC_d = 1;
-                RealignedPC_d = 0;
-                FetchAddr_d = FetchAddr_q + 4;
-            end
+            if (~OddPC_q) IncFetchAddr_v = 1;
             PC_d = PC_q + 2;
-            RVCInsn_w = 1;
 
             WrEnD_d = (Insn_q[11:7]!=0);
             WrNoD_d = {1'b0, Insn_q[11:7]};
@@ -919,7 +929,6 @@ module Pipeline #(
                             if (Insn_q[12]) begin
                                 if (Insn_q[11:7]==0) begin // C.EBREAK
                                     ExcIllegal_d = 0;
-                                    BubbleD_d = 1;
                                     MC_d = 1;
                                     MCState_d = mcCEBREAK;
                                 end else begin // C.JALR
@@ -945,7 +954,8 @@ module Pipeline #(
                     WrNoD_d        = {3'b001, Insn_q[4:2]};
                     MemStore_d     = Insn_q[15]; // 1 for C.SW
                     MemWidthD_d    = 2'b10;
-                    MemAccess_v    = 1;
+                    MCState_d      = mcMem;
+                    MemAccessD_d    = 1;
                 end
                 3'b101: begin
                     ExcIllegal_d = 0;
@@ -970,7 +980,8 @@ module Pipeline #(
                     WrEnD_d        = ~Insn_q[15]; // 1 for C.LWSP
                     MemStore_d     =  Insn_q[15]; // 1 for C.SWSP
                     MemWidthD_d    = 2'b10;
-                    MemAccess_v    = 1;
+                    MCState_d      = mcMem;
+                    MemAccessD_d    = 1;
                 end
                 default: begin
                     ExcIllegal_d = 1;
@@ -981,10 +992,8 @@ module Pipeline #(
 
 
 
-        if (MemAccess_v) begin
-            BubbleD_d = 1;
+        if (MemAccessD_d) begin
             MC_d = 1;
-            MCState_d = (MCState_q==mcMem) ? mcFetchAgain : mcMem;
         end
 
         TrapEnter_d = TrapEnterIrq_d
@@ -999,7 +1008,7 @@ module Pipeline #(
             MCState_d = mcTrapWrMtval;
         end
 
-        AddrFromSum = InsnJALR | MemAccess_v;
+        AddrFromSum = InsnJALR | MemAccessD_d;
         ReturnPC = InsnJALR | InsnJAL;
         NoIrq_d = InsnJALR | InsnJAL | InsnBEQ | InsnBLTorBLTU;
 
@@ -1010,50 +1019,62 @@ module Pipeline #(
         // fetch
         ////////////
 
-        if (e_InsnJALR & ~m_Kill) begin
-            FetchAddr_d = {AddrSum_w[WORD_WIDTH-1:1], 1'b0};
-        end
-        if (Branch_w) begin
-            FetchAddr_d = e_PCImm;
-        end
+        RealignedPC_w = ~m_Kill & ~MC_q & (Insn_q[1:0]!=2'b11) & OddPC_q;
+        OddPC_d = m_Kill
+            ? MisalignedJump_q
+            : (OddPC_q ^ (~MC_q & (Insn_q[1:0]!=2'b11)));
+        DelayFetch_v = ~m_Kill & (MemAccessM_q | MemAccessE_q);
 
+
+        // FetchAddr_d
+        if (Branch_w) begin
+            FetchAddr_d = {e_PCImm[WORD_WIDTH-1:2], 2'b00};
+        end else if (e_InsnJALR & ~m_Kill) begin
+            FetchAddr_d = {AddrSum_w[WORD_WIDTH-1:2], 2'b00};
+        end else if (IncFetchAddr_v) begin
+            FetchAddr_d = NextFetchAddr_w;
+        end else begin
+            FetchAddr_d = FetchAddr_q;
+        end
 
         // Insn_d
-        if (RealignedPC_d) begin
+        if (RealignedPC_w) begin
             Insn_d = PartialInsn_q;
         end else begin
-            if (m_Kill | FetchAgainM_q | StartMulDiv_d |
-                ~(BubbleM_q | (MC_q & ~MCUnalignedJump_q))
-            ) begin
-                Insn_d = mem_rdata;
-            end else begin
+            if (DelayFetch_v) begin
                 Insn_d = DelayedInsn_q;
+            end else begin
+                Insn_d = mem_rdata;
             end
             Insn_d = OddPC_d ? {Insn_d[15:0], PartialInsn_q[31:16]} : Insn_d;
         end
 
         // DelayedInsn_d
-        if (RealignedPC_d) begin
+        if (RealignedPC_w) begin
             DelayedInsn_d = PartialInsn_q;
-        end else if (m_Kill | FetchAgainM_q | StartMulDiv_d |
-            ( BubbleD_d & ~BubbleM_q & ~BubbleE_q) |
-            (~BubbleD_d &  BubbleE_q)
-        ) begin
-            DelayedInsn_d = mem_rdata;
-        end else begin
+        end else if (DelayFetch_v & (MemAccessD_d | MemMisalignedM_q)) begin
             DelayedInsn_d = DelayedInsn_q;
+        end else begin
+            DelayedInsn_d = mem_rdata;
         end
 
         // PartialInsn_d
-        if (RealignedPC_d | BubbleD_d | StartMulDiv_d) begin
+        if (RealignedPC_w | MemAccessD_d | MemMisalignedM_q) begin
             PartialInsn_d = PartialInsn_q;
-        end else if (m_Kill | FetchAgainM_q |
-             ~(BubbleM_q | (MC_q & ~MCUnalignedJump_q)
-        )) begin
-            PartialInsn_d = mem_rdata;
-        end else begin
+        end else if (DelayFetch_v) begin
             PartialInsn_d = DelayedInsn_q;
+        end else begin
+            PartialInsn_d = mem_rdata;
         end
+
+
+        if (MCHoldInsn_v) begin
+            Insn_d = Insn_q;
+            DelayedInsn_d = DelayedInsn_q;
+            PartialInsn_d = PartialInsn_q;
+        end
+
+
 
 
         // register numbers for next insn
@@ -1148,7 +1169,10 @@ module Pipeline #(
 
 
 
-    wire BubbleE_d = BubbleE_q & ~m_Kill;
+    wire MemAccessE_d = MemAccessE_q & ~m_Kill;
+
+    wire MisalignedJump_d = e_InsnJALR ? AddrSum_w[1] : e_PCImm[1];
+            // only valid when Kill is set
 
     wire IrqResponse_d = f_MModeIntEnable &
         (SoftwareIrq_q | TimerIrq_q | ExternalIrq_q) &
@@ -1257,7 +1281,7 @@ module Pipeline #(
     wire [WORD_WIDTH-1:0] AddrSum_w = e_A +
         {{(WORD_WIDTH-12){Imm12PlusReg_q[11]}}, Imm12PlusReg_q};
     wire [WORD_WIDTH-1:0] AddrSum2_w =
-        MemMisaligned_q ? (AddrSum_q + 4) : AddrSum_w;
+        MemMisalignedM_q ? (AddrSum_q + 4) : AddrSum_w;
 
 
     wire [WORD_WIDTH-1:0] NextFetchAddr_w = FetchAddr_q + 4;
@@ -1267,7 +1291,7 @@ module Pipeline #(
             ? {e_PCImm[WORD_WIDTH-1:2], 2'b00}
             : (e_AddrFromSum & ~m_Kill)
                 ? {AddrSum2_w[WORD_WIDTH-1:1], 1'b0}
-                : (RealignedPC_d | FetchAgainE_q)
+                : (RealignedPC_w | MemMisalignedW_q)
                     ? FetchAddr_q
                     : NextFetchAddr_w;
 
@@ -1507,21 +1531,21 @@ module Pipeline #(
     //    e_A[1] ^ Imm12PlusReg_q[1] ^ (e_A[0] & Imm12PlusReg_q[0]),
     //    e_A[0] ^ Imm12PlusReg_q[0]};
 
-    reg MemMisaligned_d;
+    reg MemMisalignedE_d;
     always @* case ({MemWidthE_q, AddrOfs})
-        4'b0000: MemMisaligned_d = 0;
-        4'b0001: MemMisaligned_d = 0;
-        4'b0010: MemMisaligned_d = 0;
-        4'b0011: MemMisaligned_d = 0;
-        4'b0100: MemMisaligned_d = 0;
-        4'b0101: MemMisaligned_d = 0;
-        4'b0110: MemMisaligned_d = 0;
-        4'b0111: MemMisaligned_d = 1; // lh +3
-        4'b1000: MemMisaligned_d = 0;
-        4'b1001: MemMisaligned_d = 1; // lw +1
-        4'b1010: MemMisaligned_d = 1; // lw +2
-        4'b1011: MemMisaligned_d = 1; // lw +3
-        default: MemMisaligned_d = 0;
+        4'b0000: MemMisalignedE_d = 0;
+        4'b0001: MemMisalignedE_d = 0;
+        4'b0010: MemMisalignedE_d = 0;
+        4'b0011: MemMisalignedE_d = 0;
+        4'b0100: MemMisalignedE_d = 0;
+        4'b0101: MemMisalignedE_d = 0;
+        4'b0110: MemMisalignedE_d = 0;
+        4'b0111: MemMisalignedE_d = 1; // lh +3
+        4'b1000: MemMisalignedE_d = 0;
+        4'b1001: MemMisalignedE_d = 1; // lw +1
+        4'b1010: MemMisalignedE_d = 1; // lw +2
+        4'b1011: MemMisalignedE_d = 1; // lw +3
+        default: MemMisalignedE_d = 0;
     endcase
 
     wire MemSigned2_w =         // LH                LB
@@ -1631,7 +1655,7 @@ module Pipeline #(
 
     reg [WORD_WIDTH-1:0] MemWData_d;
     always @* begin
-        if (MemMisaligned_q) begin
+        if (MemMisalignedM_q) begin
             MemWData_d = MemWData_q;
         end else begin
             case (AddrOfs)
@@ -1645,7 +1669,7 @@ module Pipeline #(
 
     reg [3:0] MemWMask_d;
     always @* begin
-        if (MemMisaligned_q) begin
+        if (MemMisalignedM_q) begin
 /*
             case ({MemWidthM_q[0], AddrOfsM_q})
                 3'b111: MemWMask_d = 4'b0001;
@@ -1684,7 +1708,6 @@ module Pipeline #(
     assign mem_write = MemStore_q & ~m_Kill;
     assign mem_wmask = MemWMask_d;
     assign mem_wdata = MemWData_d;
-    assign mem_wgrubby = 0;
     assign mem_addr  = MemAddr;
 
 
@@ -1694,7 +1717,6 @@ module Pipeline #(
     assign regset_we = WrEnM_d;
     assign regset_wa = WrNoM_q;
     assign regset_wd = WrDataM_d;
-    assign regset_wg = 0;
     assign regset_ra1 = RdNo1;
     assign regset_ra2 = RdNo2;
 
@@ -1724,7 +1746,6 @@ module Pipeline #(
         CsrTranslateM_q <= CsrTranslateE_q;
         MC_q <= MC_d;
         MCState_q <= MCState_d;
-        MCUnalignedJump_q <= MCUnalignedJump_d;
         MCAux_q <= MCAux_d;
 
         MCOverEnPC_q <= MCOverEnPC_d;
@@ -1739,12 +1760,11 @@ module Pipeline #(
         PartialInsn_q <= PartialInsn_d;
         OddPC_q <= OddPC_d;
         DelayedInsn_q <= DelayedInsn_d;
-        BubbleM_q <= BubbleE_d;
-        BubbleE_q <= BubbleD_d;
+        MemAccessM_q <= MemAccessE_d;
+        MemAccessE_q <= MemAccessD_d;
 
         FetchAddr_q <= FetchAddr_d;
-        FetchAgainE_q <= FetchAgainD_d;
-        FetchAgainM_q <= FetchAgainE_q;
+        MisalignedJump_q <= MisalignedJump_d;
 
         StartMulDiv_q <= StartMulDiv_d;
         DivSigned_q <= DivSigned_d;
@@ -1801,14 +1821,15 @@ module Pipeline #(
         WrDataM_q <= WrDataE_d;
         m_Kill <= Kill;
 
-        MemSignedLoadM_q    <= MemMisaligned_q ? MemSignedLoadM_q : ~MCInsn_q[14];
-        MemWidthM_q         <= MemMisaligned_q ? MemWidthM_q :
+        MemSignedLoadM_q    <= MemMisalignedM_q ? MemSignedLoadM_q : ~MCInsn_q[14];
+        MemWidthM_q         <= MemMisalignedM_q ? MemWidthM_q :
                                 (m_Kill ? 2'b11 : MemWidthE_q);
-        AddrOfsM_q          <= MemMisaligned_q ? AddrOfsM_q : AddrSum_w[1:0];
+        AddrOfsM_q          <= MemMisalignedM_q ? AddrOfsM_q : AddrSum_w[1:0];
         AddrSum_q           <= AddrSum_w;
         MemRData_q          <= mem_rdata;
         MemWData_q          <= MemWData_d;
-        MemMisaligned_q     <= MemMisaligned_d; // & ~m_Kill;
+        MemMisalignedM_q     <= MemMisalignedE_d & ~m_Kill;
+        MemMisalignedW_q <= MemMisalignedM_q;
         //MemRDataPrev_q      <= MemRShifted_w;
 
         // mem stage
@@ -1841,7 +1862,6 @@ module Pipeline #(
         f_MModeIntEnable    <= MModeIntEnable;
         f_MModePriorIntEnable <= MModePriorIntEnable;
         IrqResponse_q       <= IrqResponse_d;
-        NoIrq_q             <= NoIrq_d;
         SoftwareIrq_q       <= irq_software;
         TimerIrq_q          <= irq_timer;
         ExternalIrq_q       <= irq_external;
@@ -1880,8 +1900,10 @@ module Pipeline #(
 
         $display("D read x%d=%h x%d=%h SelImm=%b %h",
             d_RdNo1, regset_rd1, d_RdNo2, regset_rd2, SelImm_w, ImmALU_w);
-        $display("D Bubble=%b%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
-            BubbleD_d, BubbleE_q, BubbleM_q, FetchAddr_q, DelayedInsn_q, PartialInsn_q);
+        $display("D MemAccessDEM=%b%b%b FetchAddr_q=%h Delayed=%h Partial=%h",
+            MemAccessD_d, MemAccessE_q, MemAccessM_q, FetchAddr_q, DelayedInsn_q, PartialInsn_q);
+        $display("D MCHoldInsn_v=%b PC_d=%h",
+            MCHoldInsn_v, PC_d);
 
         $display("E a=%h b=%h -> %h -> x%d wrenDEM=%b%b%b",
             e_A, e_B, WrDataE_d, WrNoE_q, WrEnD_d, WrEnE_q, WrEnM_q);
@@ -1932,10 +1954,10 @@ module Pipeline #(
             csr_addr, csr_rdata, csr_valid);
 
 
-        $display("M MemWidthE_q=%b AddrOfs=%b RealignedPC_d=%b MemAddr=%h FetchAgainE_q=%b",
-            MemWidthE_q, AddrOfs, RealignedPC_d, MemAddr, FetchAgainE_q);
-        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemMisaligned_q=%b",
-            MemWidthM_q, AddrOfsM_q, MemMisaligned_q);
+        $display("M MemWidthE_q=%b AddrOfs=%b RealignedPC_d=%b MemAddr=%h MemMisalignedW_q=%b",
+            MemWidthE_q, AddrOfs, RealignedPC_d, MemAddr, MemMisalignedW_q);
+        $display("M MemWidthM_q=%b AddrOfsM_q=%b MemMisalignedM_q=%b",
+            MemWidthM_q, AddrOfsM_q, MemMisalignedM_q);
 
 /*
         $display("  DestReg0Part=%b DisableWrite=%b EnableWrite2=%b WrEnEMW=%b%b%b",
@@ -1974,8 +1996,8 @@ module Pipeline #(
             Insn_q <= 32'h13;
             OddPC_q <= 0;
             MC_q <= 0;
-            BubbleM_q <= 0;
-            BubbleE_q <= 0;
+            MemAccessM_q <= 0;
+            MemAccessE_q <= 0;
             DelayedInsn_q <= 'h13;
 
             StartMulDiv_q <= 0;
@@ -1988,7 +2010,6 @@ module Pipeline #(
             f_MModeIntEnable <= 0;
             f_MModePriorIntEnable <= 0;
             IrqResponse_q <= 0;
-            NoIrq_q <= 0;
         end
     end
 
@@ -2022,8 +2043,6 @@ module Pipeline #(
     reg [WORD_WIDTH-1:0] RvfiMemWDataM_q;
     reg                  RvfiAltResultM_q;
     reg [WORD_WIDTH-1:0] RvfiResultM_q;
-    reg                  RvfiRetireMisLoadM_q;
-    reg                  RvfiRetireMisLoadW_q;
     reg                  RvfiValidCsrD_q;
     reg                  RvfiValidCsrE_q;
 
@@ -2034,13 +2053,13 @@ module Pipeline #(
     wire RvfiRetire_w = Rvfi_Trap_w
                       | RetiredM_q
                       | RvfiValidCsrE_q
-                      | RvfiRetireMisLoadW_q;
+                      | MemMisalignedW_q;
 
     wire Rvfi_Trap_w = (MCState_q==mcTrapWrMtval) 
                      | (MCState_q==mcWFI);
 
     always @(posedge clk) begin
-        rvfi_valid      <= rstn & !rvfi_halt & RvfiRetire_w;
+        rvfi_valid      <= rstn & !rvfi_halt & (RvfiRetire_w | Rvfi_Trap_w);
         rvfi_order      <= rstn ? rvfi_order + rvfi_valid : 0;
         rvfi_trap       <= Rvfi_Trap_w;
         rvfi_halt       <= Rvfi_Trap_w | rvfi_halt;
@@ -2084,7 +2103,9 @@ module Pipeline #(
 
         RvfiPcM_q       <= RvfiPcE_q;
         RvfiPcE_q       <= PC_q;
-        RvfiNextPcM_q   <= Kill ? FetchAddr_d : PC_q;
+        RvfiNextPcM_q   <= Kill
+            ? {FetchAddr_d[WORD_WIDTH-1:2], MisalignedJump_d, 1'b0}
+            : PC_q;
         RvfiExcRetM_q   <= MC_q & (MCState_d==mcTrapWrMtval);
 
         RvfiMemStoreM_q <= MemStore_q;
@@ -2094,16 +2115,13 @@ module Pipeline #(
         RvfiMemWDataM_q <= e_B & {{8{RvfiMemMask[3]}}, {8{RvfiMemMask[2]}},
                                   {8{RvfiMemMask[1]}}, {8{RvfiMemMask[0]}}};
 
-        RvfiRetireMisLoadM_q <= (MCState_q==mcMem); // load
-        RvfiRetireMisLoadW_q <= RvfiRetireMisLoadM_q
-                                & (MCState_q==mcFetchAgain); // misaligned
-
         RvfiValidCsrD_q <= (MCState_q==mcCsr2) & ~m_Kill;
         RvfiValidCsrE_q <= RvfiValidCsrD_q;
 
         // hold values for next cycle
-        if ((MCState_q==mcFetchAgain) | (MCState_q==mcCsrReg3)) begin
-            rvfi_valid <= 0;
+        //if ((MCState_q==mcMemMis) | (MCState_q==mcCsrReg3)) begin
+        if ((MemMisalignedM_q) | (MCState_q==mcCsrReg3)) begin
+            rvfi_valid <= !rvfi_halt & Rvfi_Trap_w; // avoid loosing a trap
 
             RvfiInsnM_q <= RvfiInsnM_q;
             RvfiRdNo1M_q <= RvfiRdNo1M_q;

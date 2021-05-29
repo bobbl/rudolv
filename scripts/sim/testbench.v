@@ -33,16 +33,8 @@ module top
     wire        mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
-    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire        mem_rgrubby_from_mem;
-
-`ifdef ENABLE_GRUBBY
-    wire mem_rgrubby_to_pipe = mem_rgrubby_from_mem;
-`else
-    wire mem_rgrubby_to_pipe = 0;
-`endif
 
     wire        IDsValid;
     wire [31:0] IDsRData;
@@ -235,52 +227,41 @@ module top
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
-        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby_to_pipe),
 
         .regset_we      (regset_we),
         .regset_wa      (regset_wa),
         .regset_wd      (regset_wd),
-        .regset_wg      (regset_wg),
         .regset_ra1     (regset_ra1),
         .regset_ra2     (regset_ra2),
         .regset_rd1     (regset_rd1),
-        .regset_rg1     (regset_rg1),
-        .regset_rd2     (regset_rd2),
-        .regset_rg2     (regset_rg2)
+        .regset_rd2     (regset_rd2)
     );
 
 
 
-    Memory33 #(
+    Memory32 #(
         .ADDR_WIDTH(14), // 4 * (2**14) = 64 KiByte
         .CONTENT(`CODE)
     ) mem (
         .clk    (clk),
-        .valid  (mem_valid),
         .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
-        .wgrubby(mem_wgrubby),
         .addr   (mem_addr[15:2]),
-        .rdata  (mem_rdata),
-        .rgrubby(mem_rgrubby_from_mem)
+        .rdata  (mem_rdata)
     );
 
-    RegSet33 RegSet (
+    RegSet32 RegSet (
         .clk    (clk),
         .we     (regset_we),
         .wa     (regset_wa),
         .wd     (regset_wd),
-        .wg     (regset_wg),
         .ra1    (regset_ra1),
         .ra2    (regset_ra2),
         .rd1    (regset_rd1),
-        .rg1    (regset_rg1),
-        .rd2    (regset_rd2),
-        .rg2    (regset_rg2)
+        .rd2    (regset_rd2)
     );
 
 

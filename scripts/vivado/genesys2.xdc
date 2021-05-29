@@ -9,10 +9,6 @@ set_property -dict { PACKAGE_PIN AD12  IOSTANDARD LVDS     } [get_ports { clk_p 
 ## buttons
 set_property -dict { PACKAGE_PIN R19   IOSTANDARD LVCMOS33 } [get_ports { cpu_resetn }]; #IO_0_14 Sch=cpu_resetn
 
-## switches
-set_property -dict { PACKAGE_PIN P27   IOSTANDARD LVCMOS33 } [get_ports { sw[7] }]; #IO_L8P_T1_D11_14 Sch=sw[7]
-
-
 ## LEDs
 set_property -dict { PACKAGE_PIN T28   IOSTANDARD LVCMOS33 } [get_ports { leds[0] }]; #IO_L11N_T1_SRCC_14 Sch=led[0]
 set_property -dict { PACKAGE_PIN V19   IOSTANDARD LVCMOS33 } [get_ports { leds[1] }]; #IO_L19P_T3_A10_D26_14 Sch=led[1]

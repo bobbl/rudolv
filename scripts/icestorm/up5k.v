@@ -41,7 +41,6 @@ module top (
 //    wire  [3:0] mem_wmask_main = (mem_write & ~mem_addr[17]) ? mem_wmask : 0;
 //    wire  [3:0] mem_wmask_boot = (mem_write &  mem_addr[17]) ? mem_wmask : 0;
     wire [31:0] mem_wdata;
-    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
@@ -55,13 +54,10 @@ module top (
     wire        regset_we;
     wire  [5:0] regset_wa;
     wire [31:0] regset_wd;
-    wire        regset_wg;
     wire  [5:0] regset_ra1;
     wire  [5:0] regset_ra2;
     wire [31:0] regset_rd1;
-    wire        regset_rg1;
     wire [31:0] regset_rd2;
-    wire        regset_rg2;
 
     wire        irq_software = 0;
     wire        irq_timer;
@@ -123,21 +119,16 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
-        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby),
 
         .regset_we      (regset_we),
         .regset_wa      (regset_wa),
         .regset_wd      (regset_wd),
-        .regset_wg      (regset_wg),
         .regset_ra1     (regset_ra1),
         .regset_ra2     (regset_ra2),
         .regset_rd1     (regset_rd1),
-        .regset_rg1     (regset_rg1),
-        .regset_rd2     (regset_rd2),
-        .regset_rg2     (regset_rg2)
+        .regset_rd2     (regset_rd2)
     );
 
     SPRAMMemory mainmem (
@@ -161,50 +152,15 @@ module top (
         .rdata  (mem_rdata_boot)
     );
 
-`ifdef ENABLE_GRUBBY
-    wire mem_rgrubby_main;
-    wire mem_rgrubby_boot;
-    wire mem_rgrubby = q_SelBootMem ? mem_rgrubby_boot : mem_rgrubby_main;
-
-    Memory1 #(
-        .ADDR_WIDTH(14)
-    ) mainmem_grubby (
-        .clk    (clk),
-        .write  (mem_write_main),
-        .wdata  (mem_wgrubby),
-        .addr   (mem_addr[15:2]),
-        .rdata  (mem_rgrubby_main)
-    );
-    Memory1 #(
-        .ADDR_WIDTH(8)
-    ) bootmem_grubby (
-        .clk    (clk),
-        .write  (mem_write_boot),
-        .wdata  (mem_wgrubby),
-        .addr   (mem_addr[9:2]),
-        .rdata  (mem_rgrubby_boot)
-    );
-`else
-    wire mem_rgrubby = 0;
-`endif
-
-`ifdef ENABLE_GRUBBY
-    RegSet32g1
-`else
-    RegSet32
-`endif
-    regset (
+    RegSet32 regset (
         .clk    (clk),
         .we     (regset_we),
         .wa     (regset_wa),
         .wd     (regset_wd),
-        .wg     (regset_wg),
         .ra1    (regset_ra1),
         .ra2    (regset_ra2),
         .rd1    (regset_rd1),
-        .rg1    (regset_rg1),
-        .rd2    (regset_rd2),
-        .rg2    (regset_rg2)
+        .rd2    (regset_rd2)
     );
 endmodule
 

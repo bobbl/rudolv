@@ -10,7 +10,6 @@ BC1h    LEDs
 BC2h    Timer
 
 press button BTN1 to reset
-switch SW7 enables grubby security feature
 */
 
 
@@ -18,7 +17,6 @@ module top (
     input clk_p,
     input clk_n,
     input cpu_resetn,
-    input [7:7] sw,
     input uart_rx,
     output uart_tx,
     output [7:0] leds
@@ -45,31 +43,16 @@ module top (
     wire        mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
-    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire        mem_rgrubby_from_mem;
-
-    reg grubby_switch;
-    always @(posedge clk) begin
-        grubby_switch <= sw[7];
-    end
-`ifdef ENABLE_GRUBBY
-    wire mem_rgrubby_to_pipe = mem_rgrubby_from_mem & grubby_switch;
-`else
-    wire mem_rgrubby_to_pipe = 0;
-`endif
 
     wire        regset_we;
     wire  [5:0] regset_wa;
     wire [31:0] regset_wd;
-    wire        regset_wg;
     wire  [5:0] regset_ra1;
     wire  [5:0] regset_ra2;
     wire [31:0] regset_rd1;
-    wire        regset_rg1;
     wire [31:0] regset_rd2;
-    wire        regset_rg2;
 
     wire        irq_software = 0;
     wire        irq_timer;
@@ -130,52 +113,39 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
-        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby_to_pipe),
 
         .regset_we      (regset_we),
         .regset_wa      (regset_wa),
         .regset_wd      (regset_wd),
-        .regset_wg      (regset_wg),
         .regset_ra1     (regset_ra1),
         .regset_ra2     (regset_ra2),
         .regset_rd1     (regset_rd1),
-        .regset_rg1     (regset_rg1),
-        .regset_rd2     (regset_rd2),
-        .regset_rg2     (regset_rg2)
+        .regset_rd2     (regset_rd2)
     );
 
-    Memory4x9 #(
+    Memory32 #(
         .ADDR_WIDTH(14),
-        .CONTENT_BYTE0("bootloader.byte0.hex"),
-        .CONTENT_BYTE1("bootloader.byte1.hex"),
-        .CONTENT_BYTE2("bootloader.byte2.hex"),
-        .CONTENT_BYTE3("bootloader.byte3.hex")
+        .CONTENT("bootloader_3f80.hex")
     ) mem (
         .clk    (clk),
         .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
-        .wgrubby(mem_wgrubby),
         .addr   (mem_addr[15:2]),
-        .rdata  (mem_rdata),
-        .rgrubby(mem_rgrubby_from_mem)
+        .rdata  (mem_rdata)
     );
 
-    RegSet33 regset (
+    RegSet32 regset (
         .clk    (clk),
         .we     (regset_we),
         .wa     (regset_wa),
         .wd     (regset_wd),
-        .wg     (regset_wg),
         .ra1    (regset_ra1),
         .ra2    (regset_ra2),
         .rd1    (regset_rd1),
-        .rg1    (regset_rg1),
-        .rd2    (regset_rd2),
-        .rg2    (regset_rg2)
+        .rd2    (regset_rd2)
     );
 
 endmodule
