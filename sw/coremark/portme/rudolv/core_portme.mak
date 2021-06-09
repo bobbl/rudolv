@@ -3,7 +3,8 @@ include ../../../config_default.mk
 CC = $(RV32I_PREFIX)gcc
 LD = $(RV32I_PREFIX)ld
 AS = $(RV32I_PREFIX)as
-PORT_CFLAGS = -O2 -march=rv32im -mabi=ilp32
+#PORT_CFLAGS = -O2 -march=rv32im -mabi=ilp32
+PORT_CFLAGS = -O3 -march=rv32im -mabi=ilp32 -funroll-loops -fno-common -finline-functions --param max-inline-insns-auto=20
 LFLAGS_END = -nostartfiles -T$(PORT_DIR)/link.ld
 PORT_SRCS = $(PORT_DIR)/core_portme.c $(PORT_DIR)/ee_printf.c $(PORT_DIR)/crt.S
 
@@ -56,5 +57,5 @@ port_postbuild:
 	od -An -tx4 -w4 -v coremark.bin | cut -b2- >> coremark.hex
 	$(IVERILOG) -o tmp.vvp -DCODE=\"coremark.hex\" \
 	    $(PORT_DIR)/tb_coremark.v ../../../pipeline.v ../../../src/csr.v \
-	    ../../../src/regset33.v ../../../src/memory.v
+	    ../../../src/regset.v ../../../src/memory.v
 

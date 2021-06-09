@@ -9,7 +9,9 @@ then
     echo
     echo "<tool>"
     echo "  ubuntu              Install required packages with apt"
-    echo "  riscv32i"
+    echo "  rv32i"
+    echo "  rv32im"
+    echo "  rv32imc"
     echo "  icestorm            Always installed to /usr/local/"
     echo "  arachne-pnr"
     echo "  nextpnr"
@@ -19,6 +21,54 @@ fi
 
 # Read configuration for external tools
 #. ../config_default.sh ; [ ! -e ../config.sh ] || . ../config.sh
+
+
+
+# Build GNU toolchain for specific ISA
+# $1 ISA (rv32i, rv32im, ...
+riscv_gnu() {
+    isa=$1
+    destdir="$HOME/.local/share/riscv/$isa"
+
+    # dependencies
+    sudo apt-get install autoconf automake autotools-dev curl libmpc-dev \
+        libmpfr-dev libgmp-dev gawk build-essential bison flex texinfo \
+        gperf libtool patchutils bc zlib1g-dev git libexpat1-dev
+
+    mkdir -p "$destdir"
+
+    if [ ! -d riscv-gnu-toolchain/.git/ ]
+    then
+        git clone --recursive https://github.com/riscv/riscv-gnu-toolchain
+        cd riscv-gnu-toolchain
+    else
+        cd riscv-gnu-toolchain
+        git pull
+        git submodule update --init --recursive
+    fi
+
+    git checkout master
+    #git checkout 411d134
+
+    mkdir build
+    cd build
+    ../configure --with-arch=$isa --prefix="$destdir"
+    make -j$(nproc)
+
+    upper=$(echo $isa | tr [a-z] [A-Z])
+    echo "Finished."
+    echo
+    echo "Add the following lines to ../config.sh:"
+    echo
+    echo "    ${upper}_PREFIX=$destdir/bin/riscv32-unknown-elf-"
+    echo "    export ${upper}_PREFIX"
+    cd ../..
+}
+
+
+
+
+
 
 
 install=false
@@ -38,26 +88,8 @@ do
                 libboost-all-dev cmake libeigen3-dev
             ;;
 
-        riscv32i)
-            git clone --recursive https://github.com/riscv/riscv-gnu-toolchain
-            if [ $install = true ]
-            then
-                destdir=/opt/riscv32i
-                sudo mkdir $destdir
-                sudo chown $USER $destdir
-            else
-                destdir=$(pwd)/riscv32i
-            fi
-            cd riscv-gnu-toolchain
-            mkdir build
-            cd build
-            ../configure --prefix=$destdir --with-arch=rv32i
-            make -j$(nproc)
-            echo "Add the following lines to ../config.sh:"
-            echo
-            echo "    RV32I_PREFIX=$destdir/riscv32-unknown-elf-"
-            echo "    export RV32I_PREFIX"
-            cd ../..
+        rv32i|rv32im|rv32imc)
+            riscv_gnu $1
             ;;
 
         icestorm) # must be istalled to /usr/local

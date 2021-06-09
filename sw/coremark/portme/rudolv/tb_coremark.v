@@ -15,21 +15,17 @@ module tb_coremark;
     wire irq_timer;
     wire irq_external = 0;
 
-    wire mem_valid;
     wire mem_write;
     wire [3:0] mem_wmask;
     wire [31:0] mem_wdata;
-    wire mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire mem_rgrubby = 0;
 
     Memory32 #(
-        .WIDTH(13), // 4 * (2**13) = 32 KiByte
+        .ADDR_WIDTH(13), // 4 * (2**13) = 32 KiByte
         .CONTENT(`CODE)
     ) mem (
         .clk    (clk),
-        .valid  (mem_valid),
         .write  (mem_write),
         .wmask  (mem_wmask),
         .wdata  (mem_wdata),
@@ -101,14 +97,11 @@ module tb_coremark;
         .csr_rdata      (csr_rdata),
         .csr_valid      (CsrValid),
 
-        .mem_valid      (mem_valid),
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
-        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
-        .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby)
+        .mem_rdata      (mem_rdata)
     );
 
 

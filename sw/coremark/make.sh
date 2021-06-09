@@ -4,11 +4,11 @@ if [ $# -eq 0 ]
 then
     echo "Usage: $0 <target> ..."
     echo
-    echo "  clone      Clone coremark source code from github"
-    echo "  elf <MHz>  Build image to measure total CoreMark of an FPGA implementation"
-    echo "             CoreMark should run at least 10 seconds. Therefore <Iter>"
-    echo "             should be larger than 10 * CoreMark/MHz * MHz"
-    echo "  icarus     Simulate 1 iteration with Icarus verilog"
+    echo "  clone       Clone coremark source code from github"
+    echo "  elf <Iter>  Build image to measure total CoreMark"
+    echo "              CoreMark should run at least 10 seconds. Therefore <Iter>"
+    echo "              should be larger than 10 * CoreMark/MHz * MHz"
+    echo "  icarus      Simulate 1 iteration with Icarus verilog"
     exit 1
 fi
 

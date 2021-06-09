@@ -19,7 +19,9 @@ module Memory1 #(
     reg mem [0:SIZE-1];
 
     initial begin
+        /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
+        /* verilator lint_on WIDTH */
     end
 
     always @(posedge clk) begin
@@ -46,7 +48,9 @@ module Memory8 #(
     reg [7:0] mem [0:COMPUTED_SIZE-1];
 
     initial begin
+        /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
+        /* verilator lint_on WIDTH */
     end
 
     always @(posedge clk) begin
@@ -73,7 +77,9 @@ module Memory9 #(
     reg [8:0] mem [0:COMPUTED_SIZE-1];
 
     initial begin
+        /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
+        /* verilator lint_on WIDTH */
     end
 
     always @(posedge clk) begin
@@ -182,7 +188,9 @@ module Memory32 #(
     reg [31:0] mem [0:SIZE-1];
 
     initial begin
+        /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
+        /* verilator lint_on WIDTH */
     end
 
     always @(posedge clk) begin
@@ -221,6 +229,7 @@ module Memory33 #(
     initial begin
         /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
+        /* verilator lint_on WIDTH */
     end
 
     always @(posedge clk) begin
@@ -252,7 +261,9 @@ module ROM32 #(
     reg [31:0] mem [0:SIZE-1];
 
     initial begin
+        /* verilator lint_off WIDTH */
         if (CONTENT != "") $readmemh(CONTENT, mem);
+        /* verilator lint_on WIDTH */
     end
 
     always @(posedge clk) begin

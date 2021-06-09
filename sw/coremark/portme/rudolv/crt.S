@@ -12,7 +12,7 @@ _start2:
 
         # set stack pointer
         # write to a2 first, to guarantee an atomic write to sp
-        li      a2, 0x7ff0
+        li      a2, 0xbff0
         mv      sp, a2
 
         # clear bss
