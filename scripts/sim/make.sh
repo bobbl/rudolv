@@ -16,13 +16,14 @@ then
     echo "  irq-debug <file.elf> <cycle> Raise IRQ in <cycle>, log"
     echo "  gy-run <file.elf>            Enable grubby, no log"
     echo "  gy-debug <file.elf>          Enable grubby, log"
-    echo "  tests                        Run tests (riscv-tests, riscv-compliance, RudolV-specific)"
+    echo "  tests                        Run ISA tests"
     echo "  irqbomb                      Run IRQ tests"
     echo
     echo "<file.elf>"
-    echo "  ../../sw/dhrystone/build/riscv.elf      Benchmark from RISC-V repo"
-    echo "  ../../sw/zephyr/elf/philosophers.elf    Philosophers sample from Zephyr"
-    echo "  ../../sw/compliance/build/I-XOR-01.elf  Compliance test for XOR"
+    echo "  ../../sw/dhrystone/build/riscv.elf           Benchmark from RISC-V repo"
+    echo "  ../../sw/coremark/build/coremark_iter50.elf  CoreMark benchmark"
+    echo "  ../../sw/zephyr/elf/philosophers.elf         Philosophers sample from Zephyr"
+    echo "  ../../sw/tests/build/xor.elf                 riscv-test for XOR"
     exit 1
 fi
 

@@ -1,6 +1,9 @@
 # RudolV
 
-RISC-V processor for real-time systems. 32 bit in-order pipeline with 5 stages.
+RISC-V processor for real-time systems. Project goal is to preserve a
+predictable and tight timing model while increasing the performance. 
+Therefore speculative components like caches, branch prediction and out-of-order
+execution are avoided or replaced by predictable alternatives.
 
 Features
   * [Multiple target FPGAs](#supported-fpgas)
@@ -21,7 +24,15 @@ Compatibility
 Benchmarks
   * [Dhrystone](#Dhrystone-Benchmark): Dhrystone MIPS/MHz: 0.736 ... 1.815 
     (depending on Dhrystone implementation)
-  * [CoreMark](#EEMBC-CoreMark-Benchmark):  1.295 per MHz
+  * [CoreMark](#EEMBC-CoreMark-Benchmark):  1.354 per MHz
+
+| Roadmap          |                                                          |
+| ---------------- | -------------------------------------------------------- |
+| Current state    | Single issue in-order pipeline with 5 stages, scratchpad memory         |
+| Medium-term goal | Minimal hardware support for a software emulated MMU to run Linux          |
+| Long-term ideas  | Dual issue                                               |
+|                  | Instruction fusion                                       |
+|                  | Decoupled but predictable pre-fetching for 0-cycle jumps |
 
 
 
