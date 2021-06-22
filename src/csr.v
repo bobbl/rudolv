@@ -1,17 +1,45 @@
 /* CSR interface
  *
- * D stage: Set (async) `valid` if `addr` is one of the provided CSRs.
- *          Set (registered) internal enable signals by decoding `addr`.
- * E stage: Set `rdata` according to enable signals.
- *          Since `rdata` will be discarded by the pipeline if not reading,
- *              `read` can be ignored as long as there are no side effects.
- *          Write `wdata` to enabled CSR according to `modify`
- *              (001 write, 010 set, 011 clear)
+ * `addr` is valid one cycle earlier that the other signals and stable for 5
+ * cycles. Thus, address decoding is separated from the actual read or write
+ * action. If `addr` holds an CSR address that is supported by the extension,
+ * the `valid` must be set in the following cycle. The latter is used to detect
+ * illegal CSR numbers.
  *
- * This spreads the CSR logic over 3 stages and relaxes the critical path:
- *     D stage: decode tree
- *     E stage: actual read/write logic
- *     M stage: mux tree for read data
+ * In the second cycle, `read` is set if the CSR value should be read. If a
+ * valid register is selected by `addr` and `read` is high, `rdata` should be
+ * set to the value of the register in the following cycle. It is only asserted
+ * for one cycle, otherwise it must be cleared to 0.
+ *
+ * If the CSR should be modified, `write` is set in the sixth cycle and `wdata`
+ * holds the new value for the CSR. The bit set/clear operation is done inside
+ * the pipeline and integrated in `wdata`.
+ *
+ *
+ *                   /-------------------------------------\
+ *  addr   ~+~~~~~~~X                                       X~~~~~~~+~
+ *                   \-------------------------------------/
+ *
+ *                          +-------+
+ *  read                    |       |
+ *         -+-------+-------+       +-------+-------+-------+-------+-
+ *
+ *                                                  +-------+
+ *  write                                           |       |
+ *         -+-------+-------+-------+-------+-------+       +-------+-
+ *
+ *                                                   /-----\
+ *  wdata  ~+~~~~~~~+~~~~~~~+~~~~~~~+~~~~~~~+~~~~~~~X       X~~~~~~~+~
+ *                                                   \-----/
+ *
+ *                          +-------+-------+-------+-------+-------+
+ *  valid                   |                                       |
+ *         -+-------+-------+                                       +-
+ *
+ *                                   /-----\
+ *  rdata  -+-------+-------+-------X       X-------+-------+-------+-
+ *                                   \-----/
+ *
  */
 
 
@@ -32,7 +60,7 @@ module CsrIDs #(
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -40,9 +68,11 @@ module CsrIDs #(
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = rstn | read | |modify | |wdata;
+    assign AVOID_WARNING = rstn | read | write | |wdata;
 
+    reg Valid_q;
     reg [31:0] RData_q;
+    assign valid = Valid_q;
     assign rdata = RData_q;
 
     // asynchronous in D stage: decode CSR address
@@ -52,32 +82,20 @@ module CsrIDs #(
     wire SelImp_w    = (addr == 12'hF13);
     wire SelHart_w   = (addr == 12'hF14);
     wire SelKHz_w    = (addr == BASE_ADDR);
-    assign valid = SelISA_w | SelVendor_w | SelArch_w | SelImp_w | SelHart_w 
-                            | SelKHz_w;
-
-    reg SelISA_q;
-    reg SelVendor_q;
-    reg SelArch_q;
-    reg SelImp_q;
-    reg SelHart_q;
-    reg SelKHz_q;
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        RData_q <= (SelISA_q    ? ISA      : 32'b0)
-                 | (SelVendor_q ? VENDORID : 32'b0)
-                 | (SelArch_q   ? ARCHID   : 32'b0)
-                 | (SelImp_q    ? IMPID    : 32'b0)
-                 | (SelHart_q   ? HARTID   : 32'b0)
-                 | (SelKHz_q    ? KHZ      : 32'b0);
-
-        // D stage: select CSR for next cycle
-        SelISA_q    <= SelISA_w;
-        SelVendor_q <= SelVendor_w;
-        SelArch_q   <= SelArch_w;
-        SelImp_q    <= SelImp_w;
-        SelHart_q   <= SelHart_w;
-        SelKHz_q    <= SelKHz_w;
+        RData_q <= (SelISA_w    ? ISA      : 32'b0)
+                 | (SelVendor_w ? VENDORID : 32'b0)
+                 | (SelArch_w   ? ARCHID   : 32'b0)
+                 | (SelImp_w    ? IMPID    : 32'b0)
+                 | (SelHart_w   ? HARTID   : 32'b0)
+                 | (SelKHz_w    ? KHZ      : 32'b0);
+        Valid_q <= SelISA_w
+                 | SelVendor_w
+                 | SelArch_w
+                 | SelImp_w
+                 | SelHart_w
+                 | SelKHz_w;
     end
 endmodule
 
@@ -97,7 +115,7 @@ module CsrRDCYCLE32 (
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -105,24 +123,20 @@ module CsrRDCYCLE32 (
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = read | |modify | |wdata;
+    assign AVOID_WARNING = read | write | |wdata;
 
-    reg [31:0] q_RData;
-    assign rdata = q_RData;
+    reg Valid_q;
+    reg [31:0] RData_q;
+    assign valid = Valid_q;
+    assign rdata = RData_q;
 
-    // asynchronos in D stage: decode CSR address
     wire Valid_w = (addr[11:8]==4'hC) & (addr[6:2]==0);
-    assign valid = Valid_w;
 
-    reg Sel_q;
     reg [31:0] CounterCYCLE_q;
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        q_RData <= Sel_q ? CounterCYCLE_q : 32'b0;
-
-        // D stage: select CSR for next cycle
-        Sel_q <= Valid_w & ~addr[7];
+        RData_q <= (Valid_w & ~addr[7]) ? CounterCYCLE_q : 32'b0;
+        Valid_q <= Valid_w;
 
         // increment counters (spread over two cycles)
         CounterCYCLE_q    <= rstn ? (CounterCYCLE_q + 1) : 32'b0;
@@ -138,7 +152,7 @@ module CsrCounter (
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -148,10 +162,12 @@ module CsrCounter (
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = read | |modify | |wdata;
+    assign AVOID_WARNING = read | write | |wdata;
 
-    reg [31:0] q_RData;
-    assign rdata = q_RData;
+    reg Valid_q;
+    reg [31:0] RData_q;
+    assign valid = Valid_q;
+    assign rdata = RData_q;
 
     // asynchronos in D stage: decode CSR address
     wire SelCycleL_w   = (addr == 12'hB00) |     // MCYCLE
@@ -164,12 +180,6 @@ module CsrCounter (
                          (addr == 12'hC02);      // INSTRET
     wire SelInstRetH_w = (addr == 12'hB82) |     // MINSTRETH
                     (addr == 12'hC82);      // INSRETH
-    assign valid = SelCycleL_w | SelCycleH_w | SelInstRetL_w | SelInstRetH_w;
-
-    reg SelCycleL_q;
-    reg SelCycleH_q;
-    reg SelInstRetL_q;
-    reg SelInstRetH_q;
 
     reg [32:0] CounterCYCLE_q;
     reg [31:0] CounterCYCLEH_q;
@@ -177,17 +187,14 @@ module CsrCounter (
     reg [31:0] CounterINSTRETH_q;
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        q_RData <= (SelCycleL_q   ? CounterCYCLE_q[31:0]   : 32'b0)
-                 | (SelCycleH_q   ? CounterCYCLEH_q        : 32'b0)
-                 | (SelInstRetL_q ? CounterINSTRET_q[31:0] : 32'b0)
-                 | (SelInstRetH_q ? CounterINSTRETH_q      : 32'b0);
-
-        // D stage: select CSR for next cycle
-        SelCycleL_q   <= SelCycleL_w;
-        SelCycleH_q   <= SelCycleH_w;
-        SelInstRetL_q <= SelInstRetL_w;
-        SelInstRetH_q <= SelInstRetH_w;
+        Valid_q <= SelCycleL_w
+                 | SelCycleH_w
+                 | SelInstRetL_w
+                 | SelInstRetH_w;
+        RData_q <= (SelCycleL_w   ? CounterCYCLE_q[31:0]   : 32'b0)
+                 | (SelCycleH_w   ? CounterCYCLEH_q        : 32'b0)
+                 | (SelInstRetL_w ? CounterINSTRET_q[31:0] : 32'b0)
+                 | (SelInstRetH_w ? CounterINSTRETH_q      : 32'b0);
 
         // increment counters (spread over two cycles)
         CounterCYCLE_q    <= {1'b0, CounterCYCLE_q[31:0]} + 1;
@@ -213,7 +220,7 @@ module CsrMCYCLE (
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -223,12 +230,13 @@ module CsrMCYCLE (
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = read | |modify | |wdata;
+    assign AVOID_WARNING = read | write | |wdata;
 
-    reg [31:0] q_RData;
-    assign rdata = q_RData;
+    reg Valid_q;
+    reg [31:0] RData_q;
+    assign valid = Valid_q;
+    assign rdata = RData_q;
 
-    // asynchronos in D stage: decode CSR address
     wire SelCycleL_w   = (addr == 12'hB00) |     // MCYCLE
                          (addr == 12'hC00) |     // CYCLE
                          (addr == 12'hC01);      // TIME
@@ -239,12 +247,6 @@ module CsrMCYCLE (
                          (addr == 12'hC02);      // INSTRET
     wire SelInstRetH_w = (addr == 12'hB82) |     // MINSTRETH
                          (addr == 12'hC82);      // INSRETH
-    assign valid = SelCycleL_w | SelCycleH_w | SelInstRetL_w | SelInstRetH_w;
-
-    reg SelCycleL_q;
-    reg SelCycleH_q;
-    reg SelInstRetL_q;
-    reg SelInstRetH_q;
 
     reg [32:0] CounterCYCLE_q;
     reg [31:0] CounterCYCLEH_q;
@@ -252,40 +254,26 @@ module CsrMCYCLE (
     reg [31:0] CounterINSTRETH_q;
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        q_RData <= (SelCycleL_q   ? CounterCYCLE_q[31:0]   : 32'b0)
-                 | (SelCycleH_q   ? CounterCYCLEH_q        : 32'b0)
-                 | (SelInstRetL_q ? CounterINSTRET_q[31:0] : 32'b0)
-                 | (SelInstRetH_q ? CounterINSTRETH_q      : 32'b0);
+        Valid_q <= SelCycleL_w
+                 | SelCycleH_w
+                 | SelInstRetL_w
+                 | SelInstRetH_w;
+        RData_q <= (SelCycleL_w   ? CounterCYCLE_q[31:0]   : 32'b0)
+                 | (SelCycleH_w   ? CounterCYCLEH_q        : 32'b0)
+                 | (SelInstRetL_w ? CounterINSTRET_q[31:0] : 32'b0)
+                 | (SelInstRetH_w ? CounterINSTRETH_q      : 32'b0);
 
-        // E stage: write CSR
-        if (modify==3'b001) begin // set and clear not supported
-            if (SelCycleL_q) CounterCYCLE_q <= wdata;
-            if (SelCycleL_q) CounterCYCLEH_q <= wdata;
-            if (SelInstRetL_q) CounterINSTRET_q <= wdata;
-            if (SelInstRetH_q) CounterINSTRETH_q <= wdata;
+        if (write) begin // set and clear not supported
+            if (SelCycleL_w) CounterCYCLE_q <= wdata;
+            if (SelCycleL_w) CounterCYCLEH_q <= wdata;
+            if (SelInstRetL_w) CounterINSTRET_q <= wdata;
+            if (SelInstRetH_w) CounterINSTRETH_q <= wdata;
 
             // The select signals are also valid for the read-only CSRs.
             // Thats no problem, because the processor pipeline throws and
             // exception if these CSR should be written and we never reach
             // this point for a readonly CSR.
         end
-
-// Full implementation with set and clear for one CSR (unnecessary)
-//        if (SelCycleL_q) begin
-//            case (modify)
-//                3'b001: CounterCYCLE_q <= wdata[COUNT-1:0]; // write
-//                3'b010: CounterCYCLE_q <= CounterCYCLE_q | wdata; // set
-//                3'b011: CounterCYCLE_q <= CounterCYCLE_q &~ wdata; // clear
-//                default: ;
-//            endcase
-//        end
-
-        // D stage: select CSR for next cycle
-        SelCycleL_q   <= SelCycleL_w;
-        SelCycleH_q   <= SelCycleH_w;
-        SelInstRetL_q <= SelInstRetL_w;
-        SelInstRetH_q <= SelInstRetH_w;
 
         // increment counters (spread over two cycles)
         CounterCYCLE_q    <= {1'b0, CounterCYCLE_q[31:0]} + 1;
@@ -314,7 +302,7 @@ module CsrPinsIn #(
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -324,16 +312,17 @@ module CsrPinsIn #(
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = rstn | read | |modify | |wdata;
+    assign AVOID_WARNING = rstn | read | write | |wdata;
 
     wire SelPins_w = (addr == BASE_ADDR);
+
     reg [31:0] RData_q;
     reg SelPins_q;
     assign rdata = RData_q;
-    assign valid = SelPins_w;
+    assign valid = SelPins_q;
 
     always @(posedge clk) begin
-        RData_q <= (SelPins_q ? pins : 32'b0);
+        RData_q   <= SelPins_w ? pins : 32'b0;
         SelPins_q <= SelPins_w;
     end
 endmodule
@@ -352,7 +341,7 @@ module CsrPinsOut #(
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -364,36 +353,62 @@ module CsrPinsOut #(
 );
     assign AVOID_WARNING = rstn | read | |wdata;
 
-    wire SelPins_w = (addr == BASE_ADDR);
-    reg [31:0] RData_q;
-    reg SelPins_q;
     reg [COUNT-1:0] Pins_q;
 
+    reg [31:0] RData_q;
+    reg SelPins_q;
     assign rdata = RData_q;
-    assign valid = SelPins_w;
+    assign valid = SelPins_q;
     assign pins = Pins_q;
 
+    wire SelPins_w = (addr == BASE_ADDR);
+
     always @(posedge clk) begin
-        // E stage: read CSR
-        RData_q <= (SelPins_q ? {{(32-COUNT){1'b0}}, Pins_q} : 32'b0);
-
-        // E stage: write CSR
-        if (SelPins_q) begin
-            case (modify)
-                3'b001: Pins_q <= wdata[COUNT-1:0]; // write
-                3'b010: Pins_q <= Pins_q | wdata[COUNT-1:0]; // set
-                3'b011: Pins_q <= Pins_q &~ wdata[COUNT-1:0]; // clear
-                default: ;
-            endcase
-        end
-
-        // D stage: select CSR for next cycle
         SelPins_q <= SelPins_w;
+        RData_q <= (SelPins_w ? {{(32-COUNT){1'b0}}, Pins_q} : 32'b0);
 
-        if (~rstn) Pins_q <= RESET_VALUE;
+        if (write & SelPins_w) Pins_q <= wdata[COUNT-1:0];
+        if (~rstn)             Pins_q <= RESET_VALUE;
     end
 endmodule
 
+
+
+// Scratch register
+module CsrScratch #(
+    parameter [11:0]  BASE_ADDR  = 12'hBC3, // CSR address
+    parameter [31:0] RESET_VALUE = 0
+) (
+    input clk,
+    input rstn,
+
+    input read,
+    input write,
+    input [31:0] wdata,
+    input [11:0] addr,
+    output [31:0] rdata,
+    output valid,
+
+    output AVOID_WARNING
+);
+    assign AVOID_WARNING = rstn | read;
+
+    wire SelScratch_w = (addr == BASE_ADDR);
+    reg [31:0] RData_q;
+    reg SelScratch_q;
+    reg [31:0] Scratch_q;
+
+    assign rdata = RData_q;
+    assign valid = SelScratch_q;
+
+    always @(posedge clk) begin
+        SelScratch_q <= SelScratch_w;
+        RData_q <= (SelScratch_w ? Scratch_q : 32'b0);
+
+        if (write & SelScratch_w) Scratch_q <= wdata;
+        if (~rstn)                Scratch_q <= RESET_VALUE;
+    end
+endmodule
 
 
 
@@ -408,7 +423,7 @@ module CsrUartBitbang #(
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -429,27 +444,15 @@ module CsrUartBitbang #(
     reg TX_q;
 
     assign rdata = RData_q;
-    assign valid = SelUart_w;
+    assign valid = SelUart_q;
     assign tx = TX_q;
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        RData_q <= SelUart_q ? {PERIOD, rx} : 32'b0;
-
-        // E stage: write CSR
-        if (SelUart_q) begin
-            case ({modify, wdata[0]})
-                4'b0010: TX_q <= 0; // write 0
-                4'b0011: TX_q <= 1; // write 1
-                4'b0101: TX_q <= 1; // set
-                4'b0111: TX_q <= 0; // clear
-            endcase
-        end
-
-        // D stage: select CSR for next cycle
         SelUart_q <= SelUart_w;
+        RData_q <= SelUart_w ? {PERIOD, rx} : 32'b0;
 
-        if (~rstn) TX_q <= 1;
+        if (write & SelUart_w) TX_q <= wdata[0];
+        if (~rstn)             TX_q <= 1;
     end
 endmodule
 
@@ -467,7 +470,7 @@ module CsrUartChar #(
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -482,8 +485,9 @@ module CsrUartChar #(
 
     wire SelUart_w = (addr==BASE_ADDR);
 
+    reg SelUart_q;
     reg [31:0] RData_q;
-    assign valid = SelUart_w;
+    assign valid = SelUart_q;
     assign rdata = RData_q;
 
     localparam integer CLOCK_DIV32 = CLOCK_RATE / BAUD_RATE;
@@ -503,38 +507,44 @@ module CsrUartChar #(
     reg        q_TX;
     assign tx = q_TX;
 
-    reg SelUart_q;
 
     wire UartSendFull = (q_UartSendBitCounter!=0);
 
     always @(posedge clk) begin
-        // E stage: read CSR
-        RData_q <= (SelUart_q ? {22'b0, UartSendFull, q_UartRecvEmpty, q_UartRecvChar} : 32'b0);
+        SelUart_q <= SelUart_w;
+        RData_q <= (SelUart_w ? {22'b0, UartSendFull, q_UartRecvEmpty, q_UartRecvChar} : 32'b0);
 
-        // E stage: write CSR
-        if (SelUart_q) begin
-            case (modify)
-                3'b001: begin // write
-                    if (!UartSendFull) begin
-                        q_TX <= 0;
-                        q_UartSendClkCounter <= CLOCK_DIV;
-                        q_UartSendBitCounter <= 10;
-                        q_UartSendBits <= wdata[7:0];
-                    end
-                end
-                3'b010: begin // set
-                    q_UartRecvEmpty <= 1;
-                end
-                default: ;
-            endcase
+
+        if (write & SelUart_w) begin
+            if (wdata[9] & ~UartSendFull) begin
+//`ifdef DEBUG
+//    $display("UART send %h", wdata[7:0]);
+//`endif
+                q_TX <= 0;
+                q_UartSendClkCounter <= CLOCK_DIV;
+                q_UartSendBitCounter <= 10;
+                q_UartSendBits <= wdata[7:0];
+            end
+            if (wdata[8]) q_UartRecvEmpty <= 1;
         end
 
-        // D stage: decode CSR address
-        SelUart_q <= SelUart_w;
+/*
+        if (write) begin
+//`ifdef DEBUG
+//    $display("UART send 65 %h", wdata[7:0]);
+//`endif
+                q_TX <= 0;
+                q_UartSendClkCounter <= CLOCK_DIV;
+                q_UartSendBitCounter <= 10;
+                q_UartSendBits <= 'h65;
+            end
+*/
+
+
 
         // receive
-        if (q_UartRecvBitCounter) begin
-            if (q_UartRecvClkCounter) begin
+        if (q_UartRecvBitCounter != 0) begin
+            if (q_UartRecvClkCounter != 0) begin
                 q_UartRecvClkCounter <= q_UartRecvClkCounter - 16'b1;
             end else begin
                 q_UartRecvClkCounter <= CLOCK_DIV;
@@ -553,7 +563,7 @@ module CsrUartChar #(
 
         // send
         if (UartSendFull) begin
-            if (q_UartSendClkCounter) begin
+            if (q_UartSendClkCounter != 0) begin
                 q_UartSendClkCounter <= q_UartSendClkCounter - 16'b1;
             end else begin
                 q_UartSendClkCounter <= CLOCK_DIV;
@@ -585,7 +595,7 @@ module CsrTimerAdd #(
     input rstn,
 
     input read,
-    input [2:0] modify,
+    input write,
     input [31:0] wdata,
     input [11:0] addr,
     output [31:0] rdata,
@@ -600,30 +610,20 @@ module CsrTimerAdd #(
     reg [WIDTH-1:0] Counter_q;
     reg TimerOn_q;
     reg Request_q;
+    reg SelTimer_q;
     assign irq = Request_q;
-    assign valid = SelTimer_w;
+    assign valid = SelTimer_q;
     assign rdata = 0;
 
     wire SelTimer_w = (addr==BASE_ADDR);
-    reg SelTimer_q;
 
     always @(posedge clk) begin
-        // E stage: write CSR
-        if (SelTimer_q) begin
-            case (modify)
-                3'b001: begin // write: set relative timer
-                    TimerOn_q <= 1;
-                    Counter_q <= wdata[WIDTH-1:0];
-                end
-                3'b011: begin // clear with any value disables the timer
-                    TimerOn_q <= 0;
-                end
-                default: ;
-            endcase
-        end
-
-        // D stage: decode CSR address
         SelTimer_q <= SelTimer_w;
+
+        if (write & SelTimer_w) begin
+            TimerOn_q <= (wdata!=0); // disable by wrtiting 0
+            Counter_q <= wdata[WIDTH-1:0];
+        end
 
         // increment timer
         if (Counter_q==0) begin
@@ -659,13 +659,14 @@ module CsrDefault #(
     parameter integer CSR_UART  = 12'hBC0,
     parameter integer CSR_LEDS  = 12'hBC1,
     parameter integer CSR_TIMER = 12'hBC2,
+    parameter integer CSR_SCRATCH = 12'hBC3,
     parameter integer CSR_KHZ   = 12'hFC0
 ) (
     input         clk,
     input         rstn,
 
     input         read,
-    input   [2:0] modify,
+    input         write,
     input  [31:0] wdata,
     input  [11:0] addr,
     output [31:0] rdata,
@@ -679,7 +680,7 @@ module CsrDefault #(
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = rstn | read | |modify | |wdata;
+    assign AVOID_WARNING = rstn | read | write | |wdata;
 
 
     wire        IDsValid;
@@ -688,13 +689,15 @@ module CsrDefault #(
     wire [31:0] CounterRData;
     wire        PinsOutValid;
     wire [31:0] PinsOutRData;
+    wire        ScratchValid = 0;
+    wire [31:0] ScratchRData = 0;
     wire        UartValid;
     wire [31:0] UartRData;
     wire        TimerValid;
     wire [31:0] TimerRData;
 
-    assign rdata = IDsRData | CounterRData | UartRData | TimerRData;
-    assign valid = IDsValid | CounterValid | UartValid | TimerValid;
+    assign rdata = IDsRData | CounterRData | PinsOutRData | ScratchRData | UartRData | TimerRData;
+    assign valid = IDsValid | CounterValid | PinsOutValid | ScratchValid | UartValid | TimerValid;
 
     CsrIDs #(
         .ISA(ISA),
@@ -710,7 +713,7 @@ module CsrDefault #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (IDsRData),
@@ -724,7 +727,7 @@ module CsrDefault #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (CounterRData),
@@ -743,7 +746,7 @@ module CsrDefault #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (PinsOutRData),
@@ -754,6 +757,24 @@ module CsrDefault #(
         .AVOID_WARNING()
     );
 
+/*
+    CsrScratch #(
+        .BASE_ADDR(CSR_SCRATCH)
+    ) Scratch (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (read),
+        .write  (write),
+        .wdata  (wdata),
+        .addr   (addr),
+        .rdata  (ScratchRData),
+        .valid  (ScratchValid),
+
+        .AVOID_WARNING()
+    );
+*/
+
     CsrUartChar #(
         .BASE_ADDR(CSR_UART),
         .CLOCK_RATE(CLOCK_RATE),
@@ -763,7 +784,7 @@ module CsrDefault #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (UartRData),
@@ -783,7 +804,7 @@ module CsrDefault #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (TimerRData),
@@ -820,7 +841,7 @@ module CsrMinimal #(
     input         rstn,
 
     input         read,
-    input   [2:0] modify,
+    input         write,
     input  [31:0] wdata,
     input  [11:0] addr,
     output [31:0] rdata,
@@ -834,7 +855,7 @@ module CsrMinimal #(
 
     output AVOID_WARNING
 );
-    assign AVOID_WARNING = rstn | read | |modify | |wdata;
+    assign AVOID_WARNING = rstn | read | write | |wdata;
 
 
     wire        CounterValid;
@@ -853,7 +874,7 @@ module CsrMinimal #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (CounterRData),
@@ -871,7 +892,7 @@ module CsrMinimal #(
         .rstn   (rstn),
 
         .read   (read),
-        .modify (modify),
+        .write  (write),
         .wdata  (wdata),
         .addr   (addr),
         .rdata  (UartRData),

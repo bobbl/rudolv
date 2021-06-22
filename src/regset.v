@@ -30,6 +30,41 @@ module RegSet32(
 endmodule
 
 
+/* alternate implementation
+module RegSet32(
+    input clk, 
+    input we,
+    input [5:0] wa,
+    input [31:0] wd,
+    input [5:0] ra1,
+    input [5:0] ra2,
+    output [31:0] rd1,
+    output [31:0] rd2
+);
+    reg [31:0] regs [0:63];
+
+    reg [5:0] ff_ra1;
+    reg [5:0] ff_ra2;
+
+    initial begin
+        regs[0] <= 0;
+    end
+
+    assign rd1 = regs[ff_ra1];
+    assign rd2 = regs[ff_ra2];
+
+    always @(posedge clk) begin
+        if (we) regs[wa] <= wd;
+        ff_ra1 <= ra1;
+        ff_ra2 <= ra2;
+    end
+endmodule
+*/
+
+
+
+
+
 // BRAM with preinit for x0, parity bit for grubby
 // Xilinx, Icarus
 module RegSet33(

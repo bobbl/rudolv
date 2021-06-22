@@ -25,6 +25,8 @@ module top
     localparam CSR_LEDS    = 12'hBC1;
     localparam CSR_SWI     = 12'hBC1;
     localparam CSR_TIMER   = 12'hBC2;
+    localparam CSR_SCRATCH = 12'hBC3;
+    localparam CSR_ALT_UART = 12'hBC4; // real UART for testing
     localparam CSR_KHZ     = 12'hFC0;
 
     reg IRQBombEnable = 0;
@@ -42,8 +44,15 @@ module top
     wire [31:0] CounterRData;
     wire        PinsValid;
     wire [31:0] PinsRData;
+    wire        ScratchValid;
+    wire [31:0] ScratchRData;
     wire        TimerValid;
     wire [31:0] TimerRData;
+    wire        UartValid;
+    wire [31:0] UartRData;
+
+    wire        tx;
+    reg         rx;
 
     wire        regset_we;
     wire  [5:0] regset_wa;
@@ -89,11 +98,12 @@ module top
 `endif
 
     wire        csr_read;
-    wire  [2:0] csr_modify;
+    wire        csr_write;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
-    wire [31:0] csr_rdata = IDsRData | CounterRData | PinsRData | TimerRData;
-    wire        csr_valid = IDsValid | CounterValid | PinsValid | TimerValid
+
+    wire [31:0] csr_rdata = IDsRData | CounterRData | PinsRData | ScratchRData | TimerRData | UartRData;
+    wire        csr_valid = IDsValid | CounterValid | PinsValid | ScratchValid | TimerValid | UartValid
         | (csr_addr==CSR_IRQBOMB)
         | (csr_addr==CSR_IRQBOMB+1)
         | (csr_addr==CSR_SIM-2)
@@ -105,13 +115,13 @@ module top
     CsrIDs #(
         .ISA(32'h40001104), // RV32IMC
         .BASE_ADDR(CSR_KHZ),
-        .KHZ(1000) // assume 1 MHz
+        .KHZ(10) // assume 10 kHz
     ) csr_ids (
         .clk    (clk),
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (IDsRData),
@@ -125,7 +135,7 @@ module top
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (CounterRData),
@@ -145,13 +155,29 @@ module top
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (PinsRData),
         .valid  (PinsValid),
 
         .pins   (irq_software),
+
+        .AVOID_WARNING()
+    );
+
+    CsrScratch #(
+        .BASE_ADDR(CSR_SCRATCH)
+    ) Scratch (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .write  (csr_write),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (ScratchRData),
+        .valid  (ScratchValid),
 
         .AVOID_WARNING()
     );
@@ -164,13 +190,34 @@ module top
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (TimerRData),
         .valid  (TimerValid),
 
         .irq    (irq_timer),
+
+        .AVOID_WARNING()
+    );
+
+    CsrUartChar #(
+        .BASE_ADDR(CSR_ALT_UART),
+        .CLOCK_RATE(10000), // assume 10 kHz
+        .BAUD_RATE(2500) // 4 cycles per bit
+    ) UART (
+        .clk    (clk),
+        .rstn   (rstn),
+
+        .read   (csr_read),
+        .write  (csr_write),
+        .wdata  (csr_wdata),
+        .addr   (csr_addr),
+        .rdata  (UartRData),
+        .valid  (UartValid),
+
+        .rx     (rx),
+        .tx     (tx),
 
         .AVOID_WARNING()
     );
@@ -217,7 +264,7 @@ module top
 `endif
 
         .csr_read       (csr_read),
-        .csr_modify     (csr_modify),
+        .csr_write      (csr_write),
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),
@@ -267,11 +314,12 @@ module top
 
 
 
-    reg [11:0] q_CsrAddr = 0;
     integer i;
     integer sig_begin;
     integer sig_end;
     time irqbomb_marker = 2000000000;
+    reg uart_active = 0;
+
     always @(posedge clk) begin
 
 `ifdef DEBUG
@@ -316,12 +364,11 @@ module top
             $finish;
         end
 
-        q_ReadUART <= csr_read & (q_CsrAddr==CSR_UART);
-        q_CsrAddr  <= csr_addr;
+        q_ReadUART <= csr_read & (csr_addr==CSR_UART);
 
-        if (csr_modify==1) begin
+        if (csr_write) begin
 
-            case (q_CsrAddr)
+            case (csr_addr)
 
                 (CSR_IRQBOMB): begin
                     $display("IRQBOMB marker in cycle %0d for %0d cycles",
@@ -370,6 +417,28 @@ module top
             endcase
         end
 
+//`ifdef UART_TEST
+        uart_active = uart_active | ~tx;
+//        if (uart_active) begin
+//            $write("UART \033[1;37mTX %b RX %b\033[0m\n", tx, rx);
+/*
+            $display("U TX=%b SCC=%h SBits=%b SBC=%h SF=%b RX=%b RCC=%h RBits=%b RBC=%h RC=%h RE=%b",
+                tx,
+                UART.q_UartSendClkCounter,
+                UART.q_UartSendBits,
+                UART.q_UartSendBitCounter,
+                UART.UartSendFull,
+                rx,
+                UART.q_UartRecvClkCounter,
+                UART.q_UartRecvBits,
+                UART.q_UartRecvBitCounter,
+                UART.q_UartRecvChar,
+                UART.q_UartRecvEmpty
+                );
+*/
+//        end
+//`endif
+
         if (dut.Insn_d == 'h006F && dut.PC_q==dut.FetchAddr_q+8) begin
             $display("exit due to infinite loop");
             $finish;
@@ -378,6 +447,20 @@ module top
 
 `ifdef __ICARUS__
     initial begin
+        rx = 1;
+        #20000 rx = 0;
+        #50    rx = 1;
+        #50    rx = 0;
+        #50    rx = 0;
+        #50    rx = 0;
+        #50    rx = 0;
+        #50    rx = 1;
+        #50    rx = 1;
+        #50    rx = 0;
+        #50    rx = 1;
+        #50    rx = 1;
+        #50    rx = 1;
+
 `ifdef DEBUG
         #200_000 $write("*** TIMEOUT"); $stop;
 `else
@@ -385,6 +468,8 @@ module top
 `endif
     end
 `endif
+
+
 
 
 

@@ -229,13 +229,13 @@ do
             shift
             shift
             ;;
-        gy-run)
-            compile $2 "-DENABLE_GRUBBY"
+        uart-run)
+            compile $2 "-DTEST_UART"
             run
             shift
             ;;
-        gy-debug)
-            compile $2 "-DENABLE_GRUBBY -DDEBUG"
+        uart-debug)
+            compile $2 "-DTEST_UART -DDEBUG"
             run
             shift
             ;;

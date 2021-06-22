@@ -60,7 +60,7 @@ module top (
     wire        retired;
 
     wire        csr_read;
-    wire  [2:0] csr_modify;
+    wire        csr_write;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata;
@@ -76,7 +76,7 @@ module top (
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (csr_rdata),
@@ -103,7 +103,7 @@ module top (
         .retired        (retired),
 
         .csr_read       (csr_read),
-        .csr_modify     (csr_modify),
+        .csr_write      (csr_write),
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),

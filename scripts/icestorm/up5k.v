@@ -14,8 +14,8 @@ module top (
     input uart_rx,
     output uart_tx
 );
-    //localparam integer CLOCK_RATE = 24_000_000;
-    localparam integer CLOCK_RATE = 12_000_000;
+    localparam integer CLOCK_RATE = 24_000_000;
+    //localparam integer CLOCK_RATE = 12_000_000;
     localparam integer BAUD_RATE = 115200;
 
     wire clk;
@@ -24,8 +24,8 @@ module top (
         .CLKHFEN(1'b1),
         .CLKHFPU(1'b1),
         .CLKHF(clk)   );
-//    defparam OSCInst0.CLKHF_DIV = "0b01"; // 48 MHz / 2
-    defparam OSCInst0.CLKHF_DIV = "0b10"; // 48 MHz / 4
+    defparam OSCInst0.CLKHF_DIV = "0b01"; // 48 MHz / 2
+    //defparam OSCInst0.CLKHF_DIV = "0b10"; // 48 MHz / 4
 
     reg [5:0] reset_counter = 0;
     wire rstn = &reset_counter;
@@ -66,7 +66,7 @@ module top (
     wire        leds;
 
     wire        csr_read;
-    wire  [2:0] csr_modify;
+    wire        csr_write;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata;
@@ -82,7 +82,7 @@ module top (
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (csr_rdata),
@@ -109,7 +109,7 @@ module top (
         .retired        (retired),
 
         .csr_read       (csr_read),
-        .csr_modify     (csr_modify),
+        .csr_write      (csr_write),
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),
@@ -141,7 +141,7 @@ module top (
     );
 
     Memory32 #(
-        .ADDR_WIDTH(8), // 256 bytes
+        .ADDR_WIDTH(8), // 1024 bytes
         .CONTENT("../../sw/uart/build/bootloader_char.hex")
     ) bootmem (
         .clk    (clk),

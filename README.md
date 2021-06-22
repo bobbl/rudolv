@@ -166,39 +166,32 @@ Extra CSRs can be added with the follwing interface:
 
     input         clk
     input         read
-    input   [2:0] modify
+    input         write
     input  [31:0] wdata
     input  [11:0] addr
     output [31:0] rdata
     output        valid
 
-`addr` is valid one cycle earlier that the other signals. Thus, address decoding
-is separated from the actual read or write action. If `addr` holds an CSR
-address that is supported by the extension, the `valid` must be set
-asynchronously. The signal must be combinational to enable fast illegal CSR
-detection.
+`addr` is valid one cycle earlier that the other signals and stable for 5
+cycles. Thus, address decoding is separated from the actual read or write
+action. If `addr` holds an CSR address that is supported by the extension, the
+`valid` must be set in the following cycle. The latter is used to detect illegal
+CSR numbers.
 
-In the following cycle, `read` is set if the CSR value should be read. If a
-valid register was selected by `addr` in the previous cycle, `rdata` should be
-set to the value of the register. It is only asserted for one cycle, otherwise
-it is cleared to 0. Caution: `addr` is no longer valid in this cycle, therefore
-the extension is responsible for registered select signals from the previous
-cycle.
+In the second cycle, `read` is set if the CSR value should be read. If a valid
+register is selected by `addr` and `read` is high, `rdata` should be set to the
+value of the register in the following cycle. It is only asserted for one cycle,
+otherwise it must be cleared to 0.
 
-`modify` defines, how the current CSR value should be combined with `wdata` to
-form the new value.
-
-| `modify` | action | instruction | function             |
-| -------- | ------ | ----------- | -------------------- |
-| 001      | write  | CSRW        | `csr = wdata`        |
-| 010      | set    | CSRS        | `csr = csr or wdata` |
-| 011      | clear  | CSRC        | `csr = csr &~ wdata` |
+If the CSR should be modified, `write` is set in the sixth cycle and `wdata`
+holds the new value for the CSR. The bit set/clear operation is done inside the
+pipeline and integrated in `wdata`.
 
 This interface can also be used to connect external peripherals. Its advantage
 over a memory mapped interface is less impact on the critcal path and thus a
 potentially higher clock rate.
 
-Examples of CSR extensions can be found in [src/csr.v](src/csr.v):
+Examples of CSR extensions and waveforms can be found in [src/csr.v](src/csr.v):
 
 | verilog module | no   | CSRs / description                                  |
 | -------------- | ---- | --------------------------------------------------- |
@@ -209,7 +202,7 @@ Examples of CSR extensions can be found in [src/csr.v](src/csr.v):
 | CsrPinsIn      | 0FC1 | Read external pins (e.g. buttons or switches)       |
 | CsrPinsOut     | 0BC1 | Write external pins (e.g. LEDs)                     |
 | CsrTimerAdd    | 0BC2 | Simple timer that asserts the timer interupt        |
-
+| CsrScratch     | 0BC3 | Register that holds 32 bits (mainly for testing)    |
 
 
 

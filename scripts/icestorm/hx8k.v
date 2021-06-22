@@ -29,22 +29,17 @@ module top (
     wire        mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
-    wire        mem_wgrubby;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
-    wire        mem_rgrubby = 0;
 
 
     wire        regset_we;
     wire  [5:0] regset_wa;
     wire [31:0] regset_wd;
-    wire        regset_wg;
     wire  [5:0] regset_ra1;
     wire  [5:0] regset_ra2;
     wire [31:0] regset_rd1;
-    wire        regset_rg1;
     wire [31:0] regset_rd2;
-    wire        regset_rg2;
 
     wire        irq_software = 0;
     wire        irq_timer;
@@ -52,7 +47,7 @@ module top (
     wire        retired;
 
     wire        csr_read;
-    wire  [2:0] csr_modify;
+    wire        csr_write;
     wire [31:0] csr_wdata;
     wire [11:0] csr_addr;
     wire [31:0] csr_rdata;
@@ -68,7 +63,7 @@ module top (
         .rstn   (rstn),
 
         .read   (csr_read),
-        .modify (csr_modify),
+        .write  (csr_write),
         .wdata  (csr_wdata),
         .addr   (csr_addr),
         .rdata  (csr_rdata),
@@ -95,7 +90,7 @@ module top (
         .retired        (retired),
 
         .csr_read       (csr_read),
-        .csr_modify     (csr_modify),
+        .csr_write      (csr_write),
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),
@@ -105,21 +100,16 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
-        .mem_wgrubby    (mem_wgrubby),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
-        .mem_rgrubby    (mem_rgrubby),
 
         .regset_we      (regset_we),
         .regset_wa      (regset_wa),
         .regset_wd      (regset_wd),
-        .regset_wg      (regset_wg),
         .regset_ra1     (regset_ra1),
         .regset_ra2     (regset_ra2),
         .regset_rd1     (regset_rd1),
-        .regset_rg1     (regset_rg1),
-        .regset_rd2     (regset_rd2),
-        .regset_rg2     (regset_rg2)
+        .regset_rd2     (regset_rd2)
     );
 
     BRAMMemory mem (
@@ -136,13 +126,10 @@ module top (
         .we     (regset_we),
         .wa     (regset_wa),
         .wd     (regset_wd),
-        .wg     (regset_wg),
         .ra1    (regset_ra1),
         .ra2    (regset_ra2),
         .rd1    (regset_rd1),
-        .rg1    (regset_rg1),
-        .rd2    (regset_rd2),
-        .rg2    (regset_rg2)
+        .rd2    (regset_rd2)
     );
 endmodule
 

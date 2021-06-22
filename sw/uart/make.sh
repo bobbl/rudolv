@@ -4,13 +4,14 @@ if [ $# -eq 0 ]
 then
     echo "Usage: $0 all"
     echo
-    echo "Build 4 firmware images for 3 uart interfaces"
+    echo "Build 5 firmware images for 3 uart interfaces"
     echo
     echo "firmware"
     echo "  bootloader  large bootloader with prompt and LED output"
     echo "  bl          minimal bootloader"
     echo "  grubby      slightly larger bootloader with sw instead of sb"
     echo "  test        UART test program to be used instead of bootloader"
+    echo "  simtest     UART test program using alternative CSR 0BC4hex"
     echo
     echo "interface"
     echo "  bitbang     directly control TX and RX pins by software"
@@ -43,6 +44,9 @@ build() {
     ${RV32I_PREFIX}gcc -Os -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
         -Tbootloader.ld -D$1 crt.S \
         test.c -o build/test_$2.elf
+    ${RV32I_PREFIX}gcc -Os -fPIC -march=rv32i -mabi=ilp32 -I. -nostartfiles \
+        -Tbootloader.ld -D$1 -DUART_CSR=0xBC4 crt.S \
+        test.c -o build/simtest_$2.elf
 }
 
 
