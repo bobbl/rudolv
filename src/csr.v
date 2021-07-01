@@ -547,7 +547,7 @@ module CsrDefault #(
     wire [31:0] TimerRData;
 
     assign rdata = IDsRData | CounterRData | UartRData | TimerRData;
-    assign valid = IDsValid | CounterValid | UartValid | TimerValid;
+    assign valid = IDsValid | CounterValid | UartValid | TimerValid | PinsOutValid;
 
     CsrIDs #(
         .ISA(ISA),
