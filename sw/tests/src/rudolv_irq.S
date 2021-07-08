@@ -1,21 +1,22 @@
-#*****************************************************************************
-# rudolv_irq.S
-#-----------------------------------------------------------------------------
-#
-# Test interrupt handling.
-#   Tests 1-3: no trap
-#   Tests 11-14: IE permanently on, toggle SWI
-#   Tests 21-24: SWI permanently on, toggle IE
-#   Tests 31-32: timer interrupt and WFI
-#   Tests 41-43: WFI in branch delay slot
-#
-# Requires a special CSR configuration:
-#   rdcycle
-#   CSR BC1h: set software interrupt pin (CsrPinsOut)
-#   CSR BC2h: timer interrupt controler (CsrTimerAdd)
-#
-# Copyright Jörg Mische <bobbl@gmx.de>
-# SPDX-License-Identifier: ISC
+/* *********************************************************************
+ * rudolv_irq.S
+ * *********************************************************************
+ *
+ * Test interrupt handling.
+ *   Tests 1-3: no trap
+ *   Tests 11-14: IE permanently on, toggle SWI
+ *   Tests 21-24: SWI permanently on, toggle IE
+ *   Tests 31-32: timer interrupt and WFI
+ *   Tests 41-43: WFI in branch delay slot
+ *
+ * Requires a special CSR configuration:
+ *   rdcycle
+ *   CSR BC1h: set software interrupt pin (CsrPinsOut)
+ *   CSR BC2h: timer interrupt controler (CsrTimerAdd)
+ *
+ * Copyright Jörg Mische <bobbl@gmx.de>
+ * SPDX-License-Identifier: ISC
+ */
 
 
 #include "riscv_test.h"
@@ -276,7 +277,11 @@ test_34:
         li      x7, 0x70
         ENABLE_INTS
         wfi
-        li      x4, 0x80000074          # cause: software interrupt
+        j       1f                      # jump after wfi can be problematic
+        nop
+        nop
+        j       restore_fail
+1:      li      x4, 0x80000074          # cause: software interrupt
         bne     x7, x4, restore_fail
 
 
@@ -338,8 +343,11 @@ test_42:
         csrw    CSR_TIMER, x4
 
         wfi                             # does not work if wfi is just a nop
-
-        li      x4, 0x80000058          # cause: timer interrupt
+        j       1f                      # jump after wfi can be problematic
+        nop
+        nop
+        j       restore_fail
+1:      li      x4, 0x80000058          # cause: timer interrupt
         bne     x7, x4, restore_fail
 
 

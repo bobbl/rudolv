@@ -37,11 +37,11 @@ test_1:
         li      x15, 4
         li      x16, 8
 
-        ENABLE_INTS
-
-        li      x4, 80                  # IRQ bombing: duration 80 cycles
+        li      x4, 130                 # IRQ bombing: duration 80 cycles
         csrw    0x3f8, x4               # IRQ bombing: set marker
         nop
+
+        ENABLE_INTS
 
 # unconditional jumps
 
@@ -55,7 +55,16 @@ test_1:
 3:      j       1b
 4:
 
+#
 
+        DISABLE_INTS
+        nop
+        nop
+        nop
+        ENABLE_INTS
+
+
+# from here is identical to irq_1.S
 
 
 # conditional branches

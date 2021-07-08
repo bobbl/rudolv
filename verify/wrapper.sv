@@ -41,7 +41,7 @@ module rvfi_wrapper (
     (* keep *) wire retired;
 
     (* keep *) wire        csr_read;
-    (* keep *) wire  [2:0] csr_modify;
+    (* keep *) wire        csr_write;
     (* keep *) wire [31:0] csr_wdata;
     (* keep *) wire [11:0] csr_addr;
     wire [31:0] csr_rdata = 0;
@@ -77,7 +77,7 @@ module rvfi_wrapper (
         .retired        (retired),
 
         .csr_read       (csr_read),
-        .csr_modify     (csr_modify),
+        .csr_write      (csr_write),
         .csr_wdata      (csr_wdata),
         .csr_addr       (csr_addr),
         .csr_rdata      (csr_rdata),
