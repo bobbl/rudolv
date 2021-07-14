@@ -35,12 +35,13 @@ module top (
 
     wire        mem_valid;
     wire        mem_write;
-    wire        mem_write_main = mem_write & ~mem_addr[17];
-    wire        mem_write_boot = mem_write & mem_addr[17];
+    wire        mem_write_main = mem_write & ~mem_waddr[17];
+    wire        mem_write_boot = mem_write & mem_waddr[17];
     wire  [3:0] mem_wmask;
 //    wire  [3:0] mem_wmask_main = (mem_write & ~mem_addr[17]) ? mem_wmask : 0;
 //    wire  [3:0] mem_wmask_boot = (mem_write &  mem_addr[17]) ? mem_wmask : 0;
     wire [31:0] mem_wdata;
+    wire [31:0] mem_waddr;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata_main;
     wire [31:0] mem_rdata_boot;
@@ -119,6 +120,7 @@ module top (
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_waddr      (mem_waddr),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
 

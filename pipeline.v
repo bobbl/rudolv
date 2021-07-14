@@ -44,6 +44,7 @@ module Pipeline #(
     output mem_write,
     output [3:0] mem_wmask,
     output [31:0] mem_wdata,
+    output [31:0] mem_waddr,    // early write address to select RAM block
     output [31:0] mem_addr,
     input [31:0] mem_rdata,
 
@@ -1318,7 +1319,25 @@ module Pipeline #(
     wire vCondResultBit = e_SetCond & vLess;
 
     wire Branch_w = vBEQ | vNotBEQ;
-/*
+
+/* Sum[31] critical:
+
+    wire vEqual = (LogicResult_w == ~0);
+    wire vLessXor = InvertBranch_q ^ ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
+
+    wire vLess = (Sum[31] & (e_A[31] ^ e_B[31])) ^ vLessXor;
+    wire vCondResultBit = e_SetCond & vLess;
+
+    wire BranchSel0_w = ~m_Kill & (~e_InsnBLTorBLTU | vLessXor);
+    wire BranchSel1_w = ~m_Kill & e_InsnBLTorBLTU & (e_A[31] ^ e_B[31]);
+    wire BranchC_w    = e_InsnJAL | e_InsnBLTorBLTU;
+    wire BranchB_w    = e_InsnBEQ & (InvertBranch_q ^ vEqual) | BranchC_w;
+    wire Branch_w     = BranchSel1_w ? (BranchSel0_w ^ Sum[31])
+                                     : (BranchSel0_w & BranchB_w);
+*/
+
+/* clean code:
+
     wire Equal_w = (vLogicResult == ~0);
     wire Less_w = (Sum[31] & (e_A[31] ^ e_B[31])) ^
                  ((e_A[31] ^ e_LTU) & (e_B[31] ^ e_LTU));
@@ -1817,6 +1836,7 @@ wire [31:0] MemRShifted_w = 0;
     assign mem_write = MemStore_q & ~m_Kill;
     assign mem_wmask = MemWMask_d;
     assign mem_wdata = MemWData_d;
+    assign mem_waddr = AddrSum2_w;
     assign mem_addr  = MemAddr;
 
 
