@@ -560,6 +560,7 @@ module Pipeline #(
                     endcase
                     WrNoD_d = REG_CSR_MCAUSE;
                     MCModRdNo_d = 1; // for WFI
+                    NextInsnHold_d = 1; // for WFI
                     MC_d  = 1;
                 end
 
@@ -689,10 +690,27 @@ module Pipeline #(
 
                 MCState_q[mcWaitForInt]: begin
                     MC_d = 1;
-                    MCModRdNo_d = 1;
-                    MCState_d = IrqResponse_q
-                        ? (1<<mcTrap0)
+                    MCModRdNo_d = f_MModeIntEnable; // for mcTrap0
+                    NextInsnHold_d = 1; // for mcLast
+                    MCState_d = AnyIrq_w
+                        ? (f_MModeIntEnable ? (1<<mcTrap0)
+                                            : (1<<mcLast))
+                        :                     (1<<mcWaitForInt);
+
+/* simpler, but longer response time:
+                    MC_d = 1;
+                    NextInsnHold_d = 1;
+                    MCState_d = AnyIrq_w
+                        ? (1<<mcLast)
                         : (1<<mcWaitForInt);
+*/
+
+
+/* wfi as nop:
+                    MC_d = 1;
+                    NextInsnHold_d = 1;
+                    MCState_d = (1<<mcLast);
+*/
                 end
 
                 MCState_q[mcMem1]: begin
@@ -1221,13 +1239,15 @@ module Pipeline #(
     wire AddrFromSum_d = InsnJALR | MemAccessD_d;
     wire ReturnPC_d    = InsnJALR | InsnJAL;
 
+    wire AnyIrq_w = SoftwareIrq_q | TimerIrq_q | ExternalIrq_q;
     wire IrqResponse_d = 
         f_MModeIntEnable &
         ~CsrWrite_q & 
             // don't allow interrupt in the cycle after a CSR modification,
             // because the flags (MSTATUES.MIE, ...)  need an additional
             // cycle until their modified values are visible
-        (SoftwareIrq_q | TimerIrq_q | ExternalIrq_q);
+        AnyIrq_w;
+//        (SoftwareIrq_q | TimerIrq_q | ExternalIrq_q);
 
     wire CsrWrite_d = MCState_q[mcCsr4] & (~MCInsn_q[13] | (MCInsn_q[19:15]!=0));
 
@@ -2070,8 +2090,8 @@ wire [31:0] MemRShifted_w = 0;
 
         $display("C CsrTranslateD_d=%h",
             CsrTranslateD_d);
-        $display("C CsrWrite_q=%b CsrAddr_q=%h CsrWData_q=%h TrapEnter_d=%b",
-            CsrWrite_q, CsrAddr_q, CsrWData_q, TrapEnter_d);
+        $display("C CsrWrite_q=%b CsrAddr_q=%h CsrWData_q=%h",
+            CsrWrite_q, CsrAddr_q, CsrWData_q);
 /*
         $display("C CsrResult_w=%h OverwrittenResult_w=%h",
             CsrResult_w, OverwrittenResult_w);

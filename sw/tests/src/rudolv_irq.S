@@ -309,6 +309,8 @@ target_35:
 
 
 
+
+
         # alternative trap handler: clear timer int after trap
         DISABLE_SOFTINT
         la      x4, trap_disable_timer
@@ -337,17 +339,28 @@ test_41:
 test_42:
         li      TESTNUM, 42
         li      x7, 0x50
+        li      x8, 0x50
+        rdcycle x5
+        add     x5, x5, 100
 
         ENABLE_INTS
         li      x4, 50
         csrw    CSR_TIMER, x4
 
-        wfi                             # does not work if wfi is just a nop
-        j       1f                      # jump after wfi can be problematic
+1:      wfi
+        j       2f                      # jump after wfi can be problematic
         nop
         nop
         j       restore_fail
-1:      li      x4, 0x80000058          # cause: timer interrupt
+
+2:      # If wfi is implemented as nop, wfi must be called multiple times to
+        # wait long enough. Therefore repeat while there is no trap (x7
+        # unchanged) and no timeout (rdcycle < start+100)
+        bne     x7, x8, 3f
+        rdcycle x6
+        blt     x6, x5, 1b
+
+3:      li      x4, 0x80000058          # cause: timer interrupt
         bne     x7, x4, restore_fail
 
 
@@ -357,15 +370,62 @@ test_42:
 test_43:
         li      TESTNUM, 43
         li      x7, 0x50
+        li      x8, 0x50
+        rdcycle x5
+        add     x5, x5, 100
 
         ENABLE_INTS
         li      x4, 50
         csrw    CSR_TIMER, x4
 
-        jal     sub_wfi                 # does not work if wfi is just a nop
+4:      jal     sub_wfi
 
-        li      x4, 0x80000058          # cause: timer interrupt
+        # If wfi is implemented as nop, wfi must be called multiple times to
+        # wait long enough. Therefore repeat while there is no trap (x7
+        # unchanged) and no timeout (rdcycle < start+100)
+        bne     x7, x8, 5f
+        rdcycle x6
+        blt     x6, x5, 4b
+
+5:      li      x4, 0x80000058          # cause: timer interrupt
         bne     x7, x4, restore_fail
+
+
+        #-------------------------------------------------------------
+        # Test 44: IE=0 then timer int => exit wfi but do not trap
+        #-------------------------------------------------------------
+test_44:
+        li      TESTNUM, 44
+        li      x7, 0x50
+        li      x8, 0x50
+        rdcycle x5
+        add     x5, x5, 100
+
+        DISABLE_INTS
+        li      x4, 50
+        csrw    CSR_TIMER, x4
+
+6:      wfi
+
+        bne     x7, x8, fail            # trap not allowed during wfi
+
+        # TODO: check MIP.MTIP (not yet supported by RudolV)
+        # alternative: enable ints briefly to service a pending int
+        ENABLE_INTS
+        nop
+        DISABLE_INTS
+        bne     x7, x8, 7f              # trap was pending => exit loop
+
+        rdcycle x6                      # wait 100 cycles if wfi is a nop
+        blt     x6, x5, 6b
+
+7:      li      x4, 0x80000058          # cause: timer interrupt
+        bne     x7, x4, restore_fail
+
+
+
+
+
 
 
 

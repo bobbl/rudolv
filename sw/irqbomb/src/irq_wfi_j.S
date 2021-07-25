@@ -47,9 +47,11 @@ test_1:
 
         wfi
 
-#        nop
-
-1:      j       1b
+        # If wfi has a timeout, the interrupt will arrive in this infinite loop.
+        # The nop is necessary because interrupts are not serviced during a
+        # branch.
+1:      nop
+        j       1b
 
 
 
