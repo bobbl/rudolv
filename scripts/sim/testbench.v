@@ -1,3 +1,44 @@
+module Memory32 #(
+    parameter ADDR_WIDTH = 8,
+    parameter CONTENT = ""
+) (
+    input clk, 
+    input write,
+    input [3:0] wmask,
+    input [31:0] wdata,
+    input [ADDR_WIDTH-1:0] addr,
+    output reg [31:0] rdata
+);
+    localparam integer SIZE = 1 << ADDR_WIDTH;
+
+    reg [31:0] mem [0:SIZE-1];
+
+    /* verilator lint_off WIDTH */
+    reg [2047:0] memfile = CONTENT;
+    initial begin
+        if (CONTENT != "") begin
+            if ($value$plusargs("memfile=%s", memfile)) begin
+                //$display("Loading memory from %0s", memfile);
+            end
+            $readmemh(memfile, mem);
+        end
+    end
+    /* verilator lint_on WIDTH */
+
+    always @(posedge clk) begin
+        rdata <= mem[addr];
+        if (write) begin
+            if (wmask[0]) mem[addr][7:0] <= wdata[7:0];
+            if (wmask[1]) mem[addr][15:8] <= wdata[15:8];
+            if (wmask[2]) mem[addr][23:16] <= wdata[23:16];
+            if (wmask[3]) mem[addr][31:24] <= wdata[31:24];
+        end
+    end
+endmodule
+
+
+
+
 module top
 
 `ifdef VERILATOR
@@ -35,6 +76,7 @@ module top
     wire        mem_write;
     wire  [3:0] mem_wmask;
     wire [31:0] mem_wdata;
+    wire [31:0] mem_waddr;
     wire [31:0] mem_addr;
     wire [31:0] mem_rdata;
 
@@ -274,6 +316,7 @@ module top
         .mem_write      (mem_write),
         .mem_wmask      (mem_wmask),
         .mem_wdata      (mem_wdata),
+        .mem_waddr      (mem_waddr),
         .mem_addr       (mem_addr),
         .mem_rdata      (mem_rdata),
 

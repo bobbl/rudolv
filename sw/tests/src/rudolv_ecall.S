@@ -224,7 +224,7 @@ init:
 
         j       pass
         .option pop
-        .align  2
+        .align  4
 
 
 

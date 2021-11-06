@@ -30,7 +30,7 @@ fi
 . ../../config_default.sh
 [ ! -e ../../config.sh ] || . ../../config.sh
 
-verilog_files="../../src/memory.v ../../src/regset.v ../../src/csr.v ../../pipeline.v"
+verilog_files="../../src/regset.v ../../src/csr.v ../../pipeline.v"
 path_tests="../../sw/tests"
 path_compliance="../../sw/compliance"
 path_irqbomb="../../sw/irqbomb"
@@ -41,32 +41,37 @@ esc="\033[0m"
 
 
 
-
-
-# compile Icarus Verilog simulation
+# generate a hex file `tmp.hex` with the memory content
 #   $1 ELF filename
-#   $2 arguments for iverilog
-compile() {
-    # build memory content
+elf() {
     ${RV_PREFIX}objcopy -O binary $1 tmp.bin
     printf "@0 " > tmp.hex
     od -An -tx4 -w4 -v tmp.bin | cut -b2- >> tmp.hex
+}
 
+
+# compile simulation (works for Icarus Verilog and Verilator)
+#   $1 arguments to compiler
+compile() {
     case $simulator in
         icarus)
-            $IVERILOG -o tmp.vvp -DCODE=\"tmp.hex\" $2 testbench.v $verilog_files || exit 1
+            $IVERILOG -o tmp.vvp -DCODE=\"dontcare.hex\" $1 testbench.v $verilog_files || exit 1
+            # The memory file name will be overwritten by the plusarg when
+            # running the simulation. Therefore -DCODE= doesn't care. 
+            # But -DCODE= is still supported, because the plusarhs don't work
+            # yet with Verlilator
             ;;
 
         verilator)
             $VERILATOR --cc --exe --top-module top \
-                -DCODE=\"tmp.hex\" $2 $verilog_files \
+                -DCODE=\"tmp.hex\" $1 $verilog_files \
                 testbench.v verilator.cpp --Mdir tmp.verilator
             make -C tmp.verilator -f Vtop.mk
             ;;
 
         verilator-vcd)
             $VERILATOR --cc --exe -trace --top-module top \
-                -DCODE=\"tmp.hex\" $2 $verilog_files \
+                -DCODE=\"tmp.hex\" $1 $verilog_files \
                 testbench.v verilator-vcd.cpp --Mdir tmp.verilator
             make -C tmp.verilator -f Vtop.mk
             ;;
@@ -74,11 +79,11 @@ compile() {
 }
 
 
-# run Icarus Verilog simulation
+# run simulation (works for Icarus Verilog and Verilator)
 run() {
     case $simulator in
         icarus)
-            $VVP -N tmp.vvp
+            $VVP -N tmp.vvp +memfile=tmp.hex
             ;;
 
         verilator)
@@ -99,7 +104,7 @@ run() {
 #   $2 filename of expected signature
 check_sig() {
     name=$(basename $1 .elf)
-    compile $1 "" > /dev/null
+    elf $1 > /dev/null
     run | sed -e '/^-/d' > tmp.sig
 
     diff --strip-trailing-cr $2 tmp.sig > tmp.diff
@@ -120,6 +125,9 @@ target_tests() {
     # build binaries
     make -s -C ${path_tests} || exit 1
     make -s -C ${path_compliance} || exit 1
+
+    # build simulator
+    compile "" || exit
 
     # count tests
     echo "TAP version 13"
@@ -152,7 +160,8 @@ target_tests() {
 # run binary image several times and raise IRQ in different cycles
 #   $1 filename of ELF image
 check_irqs() {
-    compile $1 "" > /dev/null
+    elf $1 > /dev/null
+    compile "" > /dev/null
 
     run > tmp.log
 
@@ -166,7 +175,8 @@ check_irqs() {
     lasti=$(($marker + $count))
     while [ $i -lt $lasti ]
     do
-        compile $1 "-DIRQBOMB=$i"
+        elf $1 > /dev/null
+        compile "-DIRQBOMB=$i"
         run > tmp.log
 
         ok=$(cat tmp.log | grep IRQBOMB -v)
@@ -209,33 +219,39 @@ do
             simulator=$1
             ;;
         run)
-            compile $2 ""
+            elf $2
+            compile ""
             run
             shift
             ;;
         debug)
-            compile $2 "-DDEBUG"
+            elf $2
+            compile "-DDEBUG"
             run
             shift
             ;;
         rvfi)
-            compile $2 "-DRISCV_FORMAL"
+            elf $2
+            compile "-DRISCV_FORMAL"
             run
             shift
             ;;
         irq-debug)
-            compile $2 "-DDEBUG -DIRQBOMB=$3"
+            elf $2
+            compile "-DDEBUG -DIRQBOMB=$3"
             run
             shift
             shift
             ;;
         uart-run)
-            compile $2 "-DTEST_UART"
+            elf $2
+            compile "-DTEST_UART"
             run
             shift
             ;;
         uart-debug)
-            compile $2 "-DTEST_UART -DDEBUG"
+            elf $2
+            compile "-DTEST_UART -DDEBUG"
             run
             shift
             ;;
