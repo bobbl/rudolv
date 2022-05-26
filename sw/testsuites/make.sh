@@ -16,8 +16,8 @@ fi
 
 
 clone() {
-#    git clone https://github.com/riscv/riscv-arch-test.git
-    git clone https://github.com/bobbl/riscv-arch-test.git
+#    git clone https://github.com/riscv-non-isa/riscv-arch-test.git
+    git clone https://github.com/bobbl/riscv-arch-test-2.x.git
         # my modified version that fits in 64K of memory
 
 #    git clone https://github.com/riscv-ovpsim/imperas-riscv-tests.git
@@ -34,7 +34,7 @@ do
 
         riscv-arch-test|A)
             if [ ! -d riscv-arch-test/.git/ ] ; then clone ; fi
-            cd riscv-arch-test
+            cd riscv-arch-test-2.x
 
             # write configuration
             echo "export XLEN ?= 32" > Makefile.include

@@ -1,2 +1,3 @@
 imperas-risc-tests/
-riscv-arch-test/
+riscv-arch-test-2.x/
+Makefile.include

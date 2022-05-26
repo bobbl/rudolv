@@ -15,7 +15,7 @@ rootdir=$(dirname "$0")/../..
 . $rootdir/config_default.sh
 [ ! -e $rootdir/config.sh ] || . $rootdir/config.sh
 
-verilog_files="$rootdir/src/memory.v $rootdir/src/regset.v $rootdir/src/csr.v $rootdir/pipeline.v"
+verilog_files="$rootdir/src/regset.v $rootdir/src/csr.v $rootdir/pipeline.v"
 
 
 
